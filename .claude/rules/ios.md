@@ -12,6 +12,7 @@ Details: docs/conventions/ios.md § HealthKit
 - A workout's day is `HealthKitManager.localDay(for:)` everywhere; never "correct" an HKWorkout's clock or use `end - duration`; bump `WorkoutIndex.load()`'s version for persisted fixes.
 - Builders use `HealthKitManager.healthStore`, never inline `HKHealthStore()`; route points strictly ascending (`WorkoutRouteCleanup`) with speed/course; phone energy (`WorkoutEnergyEstimate`) rides the distance batch, never a second `add`.
 - A HealthKit query ERROR (locked device) is never 0 miles; only a successful empty result is.
+- `performRecalibration` sizes its re-push from max(local, `currentUser.streak`, `freshBackendStreak`)+14, full history at `fullHistoryRecalibrateStreak`; orphan deletes stay on the streak window. Streak-walk guards (36_500) are runaway guards, never caps.
 - In-app workouts `finishRoute` after `finishWorkout` (`workoutRoute()` in the SHARE set), then call `WorkoutSyncService.uploadWorkout(withId:)`.
 - Project lines on an `MKMapSnapshotter` image via `snapshot.point(for:)` at the view's size (`RouteMapSnapshot`); per-line timing via `.animation(_:value:)`; crew colours via `companionColors(count:avoiding:)`.
 - Widgets render statically (no `.onAppear` animations; bake `Timeline` entries); `WidgetDataStore` is day-stamped and skips no-op writes; mirror app prefs to the App Group; new widget files go in `app/MileADayWidgets/`.

@@ -129,9 +129,9 @@ class WorkoutProcessor {
                 break
             }
             
-            // Safety limit
-            if currentStreak > 1000 {
-                print("[WorkoutProcessor] ⚠️ Streak exceeded 1000 days, stopping calculation")
+            // Runaway guard only (~100 years) — never a cap on real streaks.
+            if currentStreak > 36_500 {
+                print("[WorkoutProcessor] ⚠️ Streak exceeded 36,500 days, stopping calculation")
                 break
             }
         }

@@ -237,7 +237,7 @@ final class WorkoutProcessor {
             guard let previousDay = calendar.date(byAdding: .day, value: -1, to: checkDate) else { break }
             checkDate = previousDay
             
-            if currentStreak > 1000 { break }
+            if currentStreak > 36_500 { break } // runaway guard, not a cap
         }
         
         return currentStreak
@@ -1650,7 +1650,7 @@ class HealthKitManager: ObservableObject {
                 streak += 1
                 guard let prev = calendar.date(byAdding: .day, value: -1, to: probe) else { break }
                 probe = prev
-                if streak > 1000 { break }
+                if streak > 36_500 { break } // runaway guard, not a cap
             }
 
             DispatchQueue.main.async {

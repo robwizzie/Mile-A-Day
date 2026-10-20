@@ -1765,8 +1765,9 @@ class WorkoutSyncService: ObservableObject {
     /// server streak. Fixes the case where a manual/backdated workout never
     /// reached the server (its upload failed and incremental sync can't re-pick
     /// up backdated workouts), leaving the server streak shorter than reality.
-    /// `localStreakDays` scopes how far back to re-push — we cover the streak
-    /// plus a buffer, with a sensible floor.
+    /// `localStreakDays` (with the server's streak) scopes how far back to
+    /// re-push — the streak plus a buffer, with a floor; very long streaks
+    /// re-push the whole history.
     func recalibrateStreak(localStreakDays: Int) async throws -> RecalibrateOutcome {
         guard let userId = currentUserId else { throw SyncError.notAuthenticated }
         guard !isRecalibrating else { throw SyncError.alreadyRunning }
@@ -1782,6 +1783,10 @@ class WorkoutSyncService: ObservableObject {
             throw error
         }
     }
+
+    /// From this streak length on, Recalibrate re-pushes the whole HealthKit
+    /// history rather than the streak window.
+    private static let fullHistoryRecalibrateStreak = 1000
 
     private func performRecalibration(userId: String, localStreakDays: Int) async throws -> RecalibrateOutcome {
         // 0. Steps: 10,000 steps completes a day, so the server should hold
@@ -1801,11 +1806,26 @@ class WorkoutSyncService: ObservableObject {
         //    are idempotent on the backend (ON CONFLICT (workout_id) DO UPDATE),
         //    so re-sending already-synced workouts is harmless and just backfills
         //    any that are missing. fullSync=true keeps this bulk re-push silent.
-        let streakDays = max(localStreakDays, HealthKitManager.shared.retroactiveStreak)
+        //    The window is sized from the LONGEST streak anyone reports: the
+        //    local walks used to stop at 1001 days, so a 1,029-day streak got a
+        //    window ending inside it and a day backfilled before it never
+        //    uploaded. The server's own walk (`currentUser.streak`, raised by
+        //    every backend answer) has no such cap.
+        let streakDays = max(
+            localStreakDays,
+            HealthKitManager.shared.retroactiveStreak,
+            UserManager.shared.currentUser.streak,
+            UserManager.shared.freshBackendStreak ?? 0
+        )
         let lookbackDays = max(streakDays + 14, 60)
         let startOfToday = Calendar.current.startOfDay(for: Date())
         let since = Calendar.current.date(byAdding: .day, value: -lookbackDays, to: startOfToday) ?? startOfToday
-        let workouts = try await fetchWorkouts(since: since)
+        //    A streak this long is years of history the user is likely to be
+        //    fixing well before the streak began (a short day that, once
+        //    filled, joins it to the run before), so re-push everything Health
+        //    has. It's the same idempotent upload, just more of it.
+        let pushSince = streakDays >= Self.fullHistoryRecalibrateStreak ? Date.distantPast : since
+        let workouts = try await fetchWorkouts(since: pushSince)
 
         recalibration = RecalibrationProgress(stage: .uploading, checked: 0, total: workouts.count)
         var sent = 0
@@ -1824,7 +1844,9 @@ class WorkoutSyncService: ObservableObject {
 
         // 3. Remove backend workouts that were deleted from Apple Health.
         //    Build the HK UUID set from what we just fetched, then compare
-        //    against the backend's list for the same window.
+        //    against the backend's list for the STREAK window, even when the
+        //    upload went back further: a full-history push must never widen
+        //    what gets deleted (old phones' workouts may be absent from Health).
         let hkUUIDs = Set(workouts.map { $0.uuid.uuidString })
         await removeOrphanedBackendWorkouts(since: since, hkUUIDs: hkUUIDs, userId: userId)
 
