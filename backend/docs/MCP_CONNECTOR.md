@@ -58,7 +58,7 @@ hashes, plant a token, or erase the audit log; only the app's role (the owner) t
 - owning a table, or being able to CREATE in `public`
 - the read role being able to UPDATE
 - being able to `setval()` a sequence
-- an `mcp_*` table without RLS
+- an `mcp_*` or `coach_mcp_*` table without RLS
 - `track_counts` being off
 
 Any of these refuses every statement. A pass is trusted for 5 minutes. This catches the app's

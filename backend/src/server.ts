@@ -43,6 +43,7 @@ import {
 import adminRoutes, { adminAuthRouter } from "./routes/adminRoutes.js";
 import displayRoutes from "./routes/displayRoutes.js";
 import { mountMcpConnector } from "./mcp/index.js";
+import { mountCoachMcp } from "./coachMcp/index.js";
 import { startCompetitionCron } from "./cron/competitionCron.js";
 import { startNotificationCron } from "./cron/notificationCron.js";
 import { startSilentSyncCron } from "./cron/silentSyncCron.js";
@@ -346,6 +347,10 @@ app.use("/display", displayRoutes);
 // MCP database connector (src/mcp): its own OAuth sign-in, never an app JWT.
 // Mounts nothing unless MCP_ALLOWED_USERS is set.
 mountMcpConnector(app);
+// Coach MCP (src/coachMcp): Run Plans for Claude, any Mile A Day+ member,
+// public at mileaday.run/mcp via the website's proxy to /coach/*. Its own
+// OAuth, tables and token audience. Mounts nothing unless COACH_MCP_ENABLED=1.
+mountCoachMcp(app);
 
 app.use(authenticateToken);
 // Per-user backstop, far above any real client (see RATE_LIMIT_SPECS.global).

@@ -389,6 +389,15 @@ jobs:
       # a too-powerful role refused outright.
       - name: MCP connector check
         run: node scripts/mcp-check.mjs
+      # Coach MCP (Run Plans for Claude): the full sign-in through the MCP SDK
+      # client and a stand-in for the website's proxy built from
+      # website/next.config.mjs's rewrites (public mileaday.run URLs in the
+      # metadata), non-Plus refused, a Plus lapse refusing refresh and every
+      # request, coach and DB-connector tokens refused at each other's /mcp,
+      # tools returning only the signed-in runner's data, propose_change
+      # pending vs auto-applied, and revoke from the app. Sets its own env.
+      - name: Coach MCP check
+        run: node scripts/coach-mcp-check.mjs
 
   website:
     name: Website (lint + build)

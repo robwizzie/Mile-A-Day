@@ -3889,6 +3889,121 @@ export const mcpAuditLog = pgTable(
   (table) => [index("idx_mcp_audit_log_created").on(table.createdAt.desc())],
 ).enableRLS();
 
+// ─── Coach MCP (Run Plans for Claude, src/coachMcp) ─────────────────────
+// Same shape as the mcp_* tables above, but a separate authorization server:
+// its own issuer (https://mileaday.run), resource (…/mcp) and rows, so a
+// coach token can never open the DB connector and vice versa. RLS on with no
+// policies, so the DB connector's roles read these as empty too.
+
+/// Loopback OAuth clients (Claude Code) that registered with the coach.
+export const coachMcpOauthClients = pgTable("coach_mcp_oauth_clients", {
+  clientId: text("client_id").primaryKey().notNull(),
+  metadata: jsonb().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+    .defaultNow()
+    .notNull(),
+}).enableRLS();
+
+/// One coach /authorize in flight (10 minutes), bound to its browser.
+export const coachMcpOauthRequests = pgTable("coach_mcp_oauth_requests", {
+  id: text().primaryKey().notNull(),
+  browserKeyHash: text("browser_key_hash").notNull(),
+  clientId: text("client_id").notNull(),
+  redirectUri: text("redirect_uri").notNull(),
+  codeChallenge: text("code_challenge").notNull(),
+  state: text(),
+  scope: text().notNull(),
+  resource: text().notNull(),
+  nonce: text().notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true, mode: "string" }).notNull(),
+}).enableRLS();
+
+/// Coach authorization codes: hashed, single use, two minutes.
+export const coachMcpOauthCodes = pgTable("coach_mcp_oauth_codes", {
+  codeHash: text("code_hash").primaryKey().notNull(),
+  clientId: text("client_id").notNull(),
+  userId: text("user_id").notNull(),
+  redirectUri: text("redirect_uri").notNull(),
+  codeChallenge: text("code_challenge").notNull(),
+  scope: text().notNull(),
+  resource: text().notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true, mode: "string" }).notNull(),
+}).enableRLS();
+
+/// One coach sign-in (30 days max). `last_used_at` = the last MCP request,
+/// which the app shows as "Claude last used your plan".
+export const coachMcpOauthGrants = pgTable(
+  "coach_mcp_oauth_grants",
+  {
+    grantId: uuid("grant_id").defaultRandom().primaryKey().notNull(),
+    userId: text("user_id").notNull(),
+    clientId: text("client_id").notNull(),
+    scope: text().notNull(),
+    resource: text().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true, mode: "string" }).notNull(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true, mode: "string" }),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true, mode: "string" }),
+  },
+  (table) => [
+    index("idx_coach_mcp_oauth_grants_user").on(table.userId),
+    foreignKey({
+      columns: [table.userId],
+      foreignColumns: [users.userId],
+      name: "coach_mcp_oauth_grants_user_id_fkey",
+    }).onDelete("cascade"),
+  ],
+).enableRLS();
+
+/// Coach access (1 hour) and rotating refresh tokens, SHA-256 only.
+export const coachMcpOauthTokens = pgTable(
+  "coach_mcp_oauth_tokens",
+  {
+    tokenHash: text("token_hash").primaryKey().notNull(),
+    grantId: uuid("grant_id").notNull(),
+    kind: text().notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true, mode: "string" }).notNull(),
+    usedAt: timestamp("used_at", { withTimezone: true, mode: "string" }),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("idx_coach_mcp_oauth_tokens_grant").on(table.grantId),
+    foreignKey({
+      columns: [table.grantId],
+      foreignColumns: [coachMcpOauthGrants.grantId],
+      name: "coach_mcp_oauth_tokens_grant_id_fkey",
+    }).onDelete("cascade"),
+    check("coach_mcp_oauth_tokens_kind_check", sql`kind IN ('access', 'refresh')`),
+  ],
+).enableRLS();
+
+/// Every coach tool call (tool, arguments, outcome) plus sign-ins, refusals
+/// and token alarms (`outcome` = 'event').
+export const coachMcpAuditLog = pgTable(
+  "coach_mcp_audit_log",
+  {
+    id: uuid().defaultRandom().primaryKey().notNull(),
+    // No foreign key: the record outlives the account.
+    userId: text("user_id"),
+    grantId: uuid("grant_id"),
+    tool: text().notNull(),
+    args: jsonb(),
+    outcome: text().notNull(),
+    detail: text(),
+    durationMs: integer("duration_ms"),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("idx_coach_mcp_audit_log_user_created").on(table.userId, table.createdAt.desc()),
+  ],
+).enableRLS();
+
 // ─── Mile A Day+ ─────────────────────────────────────────────────────────
 // The purchase ledger. One row per (Apple original transaction, MAD account):
 // a subscription or the lifetime unlock, as last VERIFIED from a StoreKit 2

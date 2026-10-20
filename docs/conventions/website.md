@@ -1,0 +1,9 @@
+# Website conventions — long form
+
+The one-line rules live in `.claude/rules/website.md`; this file holds the why, under the same headings.
+
+## Coach MCP proxy
+
+The coach MCP's public URL is `https://mileaday.run/mcp`, but it runs on the backend under `/coach/*` (`backend/src/coachMcp`, design in `backend/docs/COACH_MCP.md`). `next.config.mjs` exports `coachMcpRewrites()`, exact-path rewrites (query strings pass through) for `/mcp`, the OAuth endpoints (`/authorize`, `/token`, `/register`, `/revoke`), the discovery documents (`/.well-known/oauth-authorization-server`, `/.well-known/oauth-protected-resource[/mcp]`) and the Apple hand-back (`/coach/oauth/apple/callback`). The backend writes those mileaday.run URLs into its OAuth metadata, so Claude's discovery depends on every one of them resolving here: a page or route added at one of those paths would silently shadow the connector, and a path dropped from the table breaks sign-in. `backend/scripts/coach-mcp-check.mjs` imports `coachMcpRewrites` and drives the whole sign-in through a proxy built from it, failing if any metadata endpoint lacks a rewrite. The destination is `COACH_MCP_BACKEND_URL`, else `NEXT_PUBLIC_API_URL`, else `https://mad.mindgoblin.tech`, fixed at build time.
+
+`/connect/coach` (the sign-in page) posts Apple's id_token to the RELATIVE `/coach/oauth/apple/callback`, never the backend host: the backend's browser-binding cookie was set through the proxy on mileaday.run with `Path=/coach/oauth/` and `SameSite=Lax`, so only a same-origin post carries it. `/connect/*` gets `frame-ancestors 'none'` + `X-Frame-Options: DENY` (a framed sign-in button is a clickjacking target) and `Cache-Control: no-store` (the URL carries a one-time request id and nonce). The page reuses the admin login's Apple Services ID and return URL (`CLIENT_ID`/`REDIRECT_URI` from `app/admin/login.tsx`) in popup mode, so no Apple Developer change was needed.

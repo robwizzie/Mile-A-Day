@@ -85,6 +85,7 @@ Details: docs/conventions/backend.md § Auth Pattern
 - Protected routes mount AFTER; `req.userId` comes from the middleware.
 - Use `requireSelfAccess('paramName')` for own-resource routes.
 - MCP connector (`src/mcp`): who gets in AND which Apple ID is whom come only from env `MCP_ALLOWED_USERS` (+ `role = 'admin'`); `mcp_*` tables `.enableRLS()`; commits need the dry run's `confirm_token`; write role never `pg_write_all_data`; never `query_timeout`, a plain `Cursor` (use `SafeCursor`), or a checked-out client without an `error` listener. Check: `mcp-check`.
+- Coach MCP (`src/coachMcp`, `/coach/*`, public `mileaday.run/mcp`): separate `coach_mcp_*` tables (`.enableRLS()`), issuer and resource from `src/mcp` — never share a table, client id or secret; `isUserAllowed` = `isPlusActive` at sign-in, refresh and every request; tools take no user arg and change days only via `createProposal(…, 'claude')`; a public path needs a `coachMcpRewrites` entry. Check: `coach-mcp-check`.
 
 ## Adding a New Endpoint
 Details: docs/conventions/backend.md § Adding a New Endpoint
@@ -160,7 +161,7 @@ Details: docs/conventions/backend.md § Run Plans
 - Plan routes are Plus-gated in the router (`requirePlus` → 403 `plus_required`) except `DELETE /run-plans/claude`; the service never checks Plus, so the coach MCP must.
 - Day status, completion, adaptation and checkpoints are DERIVED on read; only the horizon (this + next week), missed-day moves (`moved_from`) and applied changes are written. Never store a status.
 - `run_plan_days.original` = the engine's version before the first change (`COALESCE`); PATCH regenerates only `source = 'engine'` days without `moved_from`.
-- Coach connection state lives behind `coachConnectionStatus`/`revokeCoachTokens` (`runPlans/coachConnection.ts`); the coach MCP fills those in, not the plan service.
+- Coach connection state lives behind `coachConnectionStatus`/`revokeCoachTokens` (`runPlans/coachConnection.ts`, reads `coach_mcp_oauth_*` directly); never from the plan service. Check: `coach-mcp-check`.
 
 ## ESM Reminder
 Details: docs/conventions/backend.md § ESM Reminder
