@@ -86,6 +86,10 @@ struct ContentView: View {
     @State private var locationType: HKWorkoutSessionLocationType = .outdoor
     @State private var ringPulse: Bool = false
     @State private var isRefreshing: Bool = false
+    /// Run Plans: today's session pushed by the iPhone (Mile A Day+).
+    @ObservedObject private var planStore = WatchRunPlanStore.shared
+    /// The plan the next run coaches; nil = an ordinary run or walk.
+    @State private var selectedPlan: WatchRunPlan?
 
     private var goalDistance: Double {
         userManager.currentUser.goalMiles > 0 ? userManager.currentUser.goalMiles : 1.0
@@ -144,7 +148,8 @@ struct ContentView: View {
                 goalDistance: goalDistance,
                 startingDistance: currentDistance,
                 activityType: selectedActivityType,
-                locationType: locationType
+                locationType: locationType,
+                plan: selectedPlan
             )
         }
         .onAppear {
@@ -355,6 +360,10 @@ struct ContentView: View {
 
     private var activityButtons: some View {
         VStack(spacing: 8) {
+            if let plan = planStore.today {
+                planButton(plan)
+            }
+
             Button {
                 start(activity: .running)
             } label: {
@@ -377,6 +386,45 @@ struct ContentView: View {
             }
             .buttonStyle(WatchPressStyle())
         }
+    }
+
+    /// "Today's plan" — a run coached through the iPhone's plan segments.
+    private func planButton(_ plan: WatchRunPlan) -> some View {
+        Button {
+            start(activity: .running, plan: plan)
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "calendar")
+                    .font(.system(size: 15, weight: .bold))
+                VStack(alignment: .leading, spacing: 0) {
+                    Text("Today's plan")
+                        .font(.system(size: 14, weight: .bold, design: .rounded))
+                    Text(plan.title)
+                        .font(.system(size: 10, weight: .semibold, design: .rounded))
+                        .foregroundColor(WatchTheme.textSecondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .heavy))
+                    .opacity(0.7)
+            }
+            .foregroundColor(.white)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity)
+            .background(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(WatchTheme.warning.opacity(0.22))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .strokeBorder(WatchTheme.warning.opacity(0.8), lineWidth: 1)
+                    )
+            )
+        }
+        .buttonStyle(WatchPressStyle())
+        .accessibilityLabel("Start today's plan, \(plan.title)")
     }
 
     private enum ActionButtonStyle { case primary, secondary }
@@ -461,8 +509,9 @@ struct ContentView: View {
 
     // MARK: - Actions
 
-    private func start(activity: HKWorkoutActivityType) {
+    private func start(activity: HKWorkoutActivityType, plan: WatchRunPlan? = nil) {
         selectedActivityType = activity
+        selectedPlan = plan
         WKInterfaceDevice.current().play(.start)
         showWorkoutView = true
     }

@@ -542,6 +542,10 @@ struct WorkoutTrackingView: View {
             }
 
         case .mode:
+            // Run Plans (Mile A Day+): today's session, when there is one.
+            // Renders nothing otherwise, so the two cards below are untouched.
+            RunPlanPreRunCard { day in choosePlanRun(day) }
+
             workoutOptionButton(
                 icon: selectedActivityType == .running ? "figure.run" : "figure.walk",
                 title: "Just Track It",
@@ -838,6 +842,9 @@ struct WorkoutTrackingView: View {
                             }
                             .padding(.horizontal, 20)
                         }
+
+                        // Run Plans interval card; nothing unless a plan run is live.
+                        RunPlanLiveCard()
 
                         distanceDisplay
 
@@ -2395,6 +2402,8 @@ struct WorkoutTrackingView: View {
         // One-shot: consumed by this walk, never carried into the next.
         armedGhostSessionId = ""
         UserDefaults.standard.removeObject(forKey: BuddyGhostArming.legacyArmedKey)
+        // A buddy walk skips the wizard, so a plan armed there earlier is stale.
+        PlanRunCoach.shared.disarm()
         isTracking = true
         startWorkout()
         return true
@@ -2474,6 +2483,9 @@ struct WorkoutTrackingView: View {
     /// anything — nothing is armed until a target is actually picked. Also the
     /// "Skip the race" exit from step 4, hence both flags being cleared.
     private func chooseRaceMode(ghost: Bool) {
+        // Plan mode and the ghost race are exclusive; either of these
+        // answers replaces a plan picked earlier in this wizard.
+        PlanRunCoach.shared.disarm()
         guard ghost else {
             raceArmed = false
             advance {
@@ -2486,6 +2498,18 @@ struct WorkoutTrackingView: View {
         advance {
             showRaceModeSelection = false
             showGhostOptions = true
+        }
+    }
+
+    /// Step 3's plan answer (Run Plans): arm today's session for
+    /// `startWorkout` and go. Exclusive with the ghost race.
+    private func choosePlanRun(_ day: RunPlanDay) {
+        PlanRunCoach.shared.arm(day: day)
+        raceArmed = false
+        advance {
+            showRaceModeSelection = false
+            showGhostOptions = false
+            proceedPastRaceChoice()
         }
     }
 
@@ -2639,6 +2663,7 @@ struct WorkoutTrackingView: View {
     private func cancelCountdown() {
         countdownTimer?.invalidate()
         countdownTimer = nil
+        PlanRunCoach.shared.disarm()
         MADHaptics.tap()
         wizardGoingBack = true
         withAnimation(.easeInOut(duration: 0.28)) {
@@ -2689,6 +2714,9 @@ struct WorkoutTrackingView: View {
                 targetDistance: max(goalDistance, 0.1)
             )
         }
+        // Run Plans: coach today's session if it was picked on the mode step.
+        // Never alongside a ghost race; consumes the arm either way.
+        PlanRunCoach.shared.begin(allowed: raceGhost == nil)
 
         // Live presence session (fire-and-forget; the share pref only gates
         // being SEEN — server-side — so this always starts).
@@ -2808,6 +2836,13 @@ struct WorkoutTrackingView: View {
                     // intervals, pace and the race stay on this workout.
                     goalProgress: totalDailyDistance
                 )
+            )
+            // Plan coach (Run Plans): same tick, same figures, speaks through
+            // GhostCoach. No-op unless a plan run is live.
+            PlanRunCoach.shared.update(
+                distance: locationManager.liveDistance,
+                clock: locationManager.raceClockSeconds,
+                recentPace: locationManager.recentPaceSecondsPerMile
             )
             // Foreground heartbeat driver (self-throttled to ~45s). The
             // background driver is the location/pedometer callback path.
@@ -3286,6 +3321,7 @@ struct WorkoutTrackingView: View {
         locationManager.stopTracking()
         endLiveActivity()
         InProgressWorkoutStore.clear()
+        PlanRunCoach.shared.stop()
         workoutSession = nil
         workoutBuilder = nil
         isStopping = false
@@ -3325,6 +3361,7 @@ struct WorkoutTrackingView: View {
         raceFinalDelta = nil
         pendingRaceStamp = nil
         GhostCoach.shared.stop()
+        PlanRunCoach.shared.stop()
 
         endFinishBackgroundTask()
 

@@ -146,6 +146,8 @@ Details: docs/conventions/ios.md § Run Plans
 - Every plan number comes from the server engine via `RunPlanStore.shared` (`current?.today` for pre-run/live/Watch); Flamey only picks a `RunPlanAction` → `propose`; never compute or override distances/paces client-side.
 - Show `RunPlanDoctorLine` whenever pain is flagged or the feeling is Sore; keep the Apple Intelligence line by the composer and the Anthropic disclosure on `RunPlanClaudeView`.
 - Run plan dates are `RunPlanDate.todayKey()` (Gregorian `yyyy-MM-dd`), never `DayKeyFormatter`; run-plan DTO numbers use `@RunPlanNumber` (accepts numeric strings).
+- Plan runs: `PlanRunCoach` (arm → `begin(allowed: raceGhost == nil)` → `update` on the tracker tick → `stop`) speaks only via `GhostCoach.sayPlanLine`, never its own synthesizer; plan mode and Ghost Race are exclusive; new run-time UI goes in `RunPlanRunViews.swift`, not `WorkoutTrackingView`.
+- Segment walking/payload types shared with the Watch (`RunPlanLiveSegment`, `RunPlanTracker`, `WatchRunPlan`, `WatchRunPlanStore`) live in HealthKitManager.swift, Foundation-only; the iPhone pushes `WatchRunPlan.json()` under app-context key `runPlan` via `RunPlanWatchSync` (from `RunPlanStore.current`'s `didSet`); a missing key clears the Watch.
 
 ## Auth / Session
 Details: docs/conventions/ios.md § Auth / Session

@@ -125,6 +125,9 @@ final class GhostCoach: NSObject, ObservableObject, AVSpeechSynthesizerDelegate 
     }
 
     private var ghostName = "your ghost"
+    /// A Run Plans session is live (`PlanRunCoach`): it owns the pace talk,
+    /// so the distance/pace metronome stands down. Splits and milestones stay.
+    private var planModeActive = false
     /// The GHOST is live — lead changes, chase lines, the verdict.
     private var isRacing = false
     /// The WORKOUT is live — splits, intervals, pace state. Outlives the race.
@@ -445,7 +448,7 @@ final class GhostCoach: NSObject, ObservableObject, AVSpeechSynthesizerDelegate 
         // normal floor would have silently eaten every other one. Not held:
         // "you're at 1.25 miles" stops being true almost immediately, and the
         // next one is never far away.
-        if let intervalLine = intervalLine(sample) {
+        if !planModeActive, let intervalLine = intervalLine(sample) {
             say(intervalLine, urgency: .high)
             return
         }
@@ -619,9 +622,26 @@ final class GhostCoach: NSObject, ObservableObject, AVSpeechSynthesizerDelegate 
         say("You beat \(ghostName) by \(seconds(marginSeconds)). Nice.", force: true)
     }
 
+    // MARK: - Run plan mode
+
+    /// `PlanRunCoach` turns this on for a plan run; `stop()` turns it off.
+    func setPlanMode(_ on: Bool) {
+        planModeActive = on
+    }
+
+    /// A plan line, through the same voice, call-buzz, floor and on-screen
+    /// echo as every other line. `force` is for segment changes, which have
+    /// to land on time; pace nudges respect the floor. Returns false when the
+    /// floor (or the mute switch) held it back.
+    @discardableResult
+    func sayPlanLine(_ line: String, force: Bool) -> Bool {
+        say(line, urgency: .high, force: force)
+    }
+
     func stop() {
         isRacing = false
         isActive = false
+        planModeActive = false
         firedMilestones = []
         wasAhead = nil
         hasSeededProgress = false

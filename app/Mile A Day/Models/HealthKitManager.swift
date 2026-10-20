@@ -1688,6 +1688,13 @@ final class MADWatchBridge: NSObject {
     private var isActivated = false
     private var lastPushedHash: Int = 0
 
+    #if os(iOS)
+    /// Today's run plan for the Watch (`WatchRunPlan.json()`), written only by
+    /// the iPhone-only `RunPlanWatchSync` on the main thread. nil = no plan
+    /// today (or not Plus): the key is left out and the Watch drops its copy.
+    var runPlanJSON: String?
+    #endif
+
     private override init() { super.init() }
 
     func activate() {
@@ -1748,10 +1755,15 @@ final class MADWatchBridge: NSObject {
         } ?? 0
         payload["tokensReady"] = tokensReady
 
+        // Run Plans (Mile A Day+): today's segments so the Watch can coach the
+        // session. Omitted when there is none — the context REPLACES the last
+        // one, so a missing key is how the Watch learns the plan is gone.
+        if let runPlanJSON { payload[WatchRunPlan.contextKey] = runPlanJSON }
+
         // Hash on the value-bearing fields only (not the timestamp) so we don't
         // re-send identical state. Token + id are included so a token change
         // forces a re-push.
-        let stableHash = "\(payload["streak"] ?? 0)|\(payload["todayMiles"] ?? 0)|\(payload["goalMiles"] ?? 0)|\(payload["firstName"] ?? "")|\(payload["name"] ?? "")|\(authToken ?? "")|\(backendUserId ?? "")|\(tokensReady)".hashValue
+        let stableHash = "\(payload["streak"] ?? 0)|\(payload["todayMiles"] ?? 0)|\(payload["goalMiles"] ?? 0)|\(payload["firstName"] ?? "")|\(payload["name"] ?? "")|\(authToken ?? "")|\(backendUserId ?? "")|\(tokensReady)|\(runPlanJSON ?? "")".hashValue
         if stableHash == lastPushedHash { return }
         lastPushedHash = stableHash
 
@@ -1810,6 +1822,9 @@ final class MADWatchBridge: NSObject {
             if let tokens = context["tokensReady"] as? Int {
                 hk.heldStreakTokens = tokens
             }
+            // Absent = no plan today (the iPhone omits the key), so this
+            // also clears a plan that was ended or changed to nothing.
+            WatchRunPlanStore.shared.apply(json: context[WatchRunPlan.contextKey] as? String)
             userManager.saveUserData()
         }
     }
@@ -2539,3 +2554,284 @@ enum WorkoutDedup {
             .map(\.element)
     }
 }
+
+// MARK: - Run plan live coaching (iPhone + Watch)
+//
+// Run Plans (Mile A Day+): the server's rules engine plans every session as a
+// list of segments (warm up, reps, recoveries, cool down). Both the iPhone's
+// `PlanRunCoach` and the Watch's `WatchWorkoutManager` walk those segments
+// during a run, so the shapes and the walking logic live HERE: this file is
+// compiled into both targets and the Watch target can't see new iPhone files.
+// Same rule as `WorkoutDedup`: Foundation only, no SwiftUI, no app types.
+// Nothing here invents a plan number — distances, durations and target paces
+// all arrive from the server; this only measures progress against them.
+
+/// One block of a planned session. Paces are seconds per MILE.
+struct RunPlanLiveSegment: Codable, Equatable {
+    /// warmup | work | recover | cooldown | steady
+    let kind: String
+    let distanceMiles: Double?
+    let durationSeconds: Double?
+    let targetPace: Double?
+    let rep: Int?
+    let reps: Int?
+
+    var isWork: Bool { kind == "work" }
+    var isRecover: Bool { kind == "recover" }
+    var isWarmup: Bool { kind == "warmup" }
+    var isCooldown: Bool { kind == "cooldown" }
+
+    /// Measured by distance (else by time, else open-ended).
+    var isDistanceBased: Bool { (distanceMiles ?? 0) > 0 }
+    var isDurationBased: Bool { !isDistanceBased && (durationSeconds ?? 0) > 0 }
+}
+
+/// Today's plan as the iPhone pushes it to the Watch (app context, as JSON).
+struct WatchRunPlan: Codable, Equatable {
+    static let contextKey = "runPlan"
+
+    /// The plan's local day, Gregorian `yyyy-MM-dd` (same as `RunPlanDate`).
+    let date: String
+    let title: String
+    let segments: [RunPlanLiveSegment]
+
+    var isForToday: Bool { date == Self.dayKey(for: Date()) }
+
+    static func dayKey(for date: Date) -> String {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = .current
+        let c = cal.dateComponents([.year, .month, .day], from: date)
+        return String(format: "%04d-%02d-%02d", c.year ?? 0, c.month ?? 0, c.day ?? 0)
+    }
+
+    func json() -> String? {
+        guard let data = try? JSONEncoder().encode(self) else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    static func decode(_ json: String?) -> WatchRunPlan? {
+        guard let json, let data = json.data(using: .utf8) else { return nil }
+        return try? JSONDecoder().decode(WatchRunPlan.self, from: data)
+    }
+}
+
+/// Where the runner is in the plan, for one tick.
+struct RunPlanLiveStatus: Equatable {
+    let index: Int
+    let segment: RunPlanLiveSegment
+    let next: RunPlanLiveSegment?
+    /// Time left in a duration segment.
+    let remainingSeconds: Double?
+    /// Distance left in a distance segment.
+    let remainingMiles: Double?
+    /// 0...1 through this segment (0 for an open-ended one).
+    let progress: Double
+    /// Seconds into this segment.
+    let segmentSeconds: Double
+    /// 1-based number of the current work segment, or of the one just run
+    /// during its recovery. nil before the first.
+    let workNumber: Int?
+    let workCount: Int
+    /// Work segments finished.
+    let workDone: Int
+    let finished: Bool
+
+    var isLastWork: Bool { segment.isWork && workNumber == workCount }
+    /// The number the NEXT work segment carries ("Interval 4 in 1:12").
+    var upcomingWorkNumber: Int { segment.isWork ? (workNumber ?? 0) + 1 : workDone + 1 }
+}
+
+/// Walks a plan's segments against the run's distance and moving clock.
+/// Value type, no timers: callers feed it from the tick they already have.
+struct RunPlanTracker {
+    enum Change: Equatable {
+        /// First sample: the plan starts here.
+        case began
+        /// Moved into the segment at this index.
+        case advanced(Int)
+        case finished
+    }
+
+    let segments: [RunPlanLiveSegment]
+    private(set) var index = 0
+    private(set) var finished = false
+    private var seeded = false
+    private var startMiles: Double = 0
+    private var startClock: Double = 0
+    /// 1-based work ordinal per index (nil for non-work segments).
+    private let workOrdinals: [Int?]
+    let workCount: Int
+
+    init(segments: [RunPlanLiveSegment]) {
+        self.segments = segments
+        var ordinals: [Int?] = []
+        var count = 0
+        for segment in segments {
+            if segment.isWork {
+                count += 1
+                ordinals.append(count)
+            } else {
+                ordinals.append(nil)
+            }
+        }
+        workOrdinals = ordinals
+        workCount = count
+    }
+
+    var isEmpty: Bool { segments.isEmpty }
+
+    /// Advance on a new sample. Returns what changed, if anything. A segment
+    /// that overshoots hands the extra to the next one (GPS lands in steps).
+    mutating func step(miles: Double, clock: Double) -> Change? {
+        guard !segments.isEmpty, !finished else { return nil }
+        guard seeded else {
+            seeded = true
+            startMiles = miles
+            startClock = clock
+            return .began
+        }
+        var moved = false
+        while index < segments.count, isComplete(segments[index], miles: miles, clock: clock) {
+            let segment = segments[index]
+            if segment.isDistanceBased {
+                startMiles += segment.distanceMiles ?? 0
+                startClock = clock
+            } else {
+                startClock += segment.durationSeconds ?? 0
+                startMiles = miles
+            }
+            if index == segments.count - 1 {
+                finished = true
+                return .finished
+            }
+            index += 1
+            moved = true
+        }
+        return moved ? .advanced(index) : nil
+    }
+
+    private func isComplete(_ segment: RunPlanLiveSegment, miles: Double, clock: Double) -> Bool {
+        if segment.isDistanceBased {
+            // ~5 m of slack so a rep never hangs one GPS step short.
+            return miles - startMiles >= (segment.distanceMiles ?? 0) - 0.003
+        }
+        if segment.isDurationBased {
+            return clock - startClock >= (segment.durationSeconds ?? 0) - 0.5
+        }
+        return false
+    }
+
+    /// 1-based work number at an index: the work itself, or the last one
+    /// before it (a recovery belongs to the rep it follows).
+    func workNumber(at i: Int) -> Int? {
+        guard !workOrdinals.isEmpty else { return nil }
+        var probe = min(i, workOrdinals.count - 1)
+        while probe >= 0 {
+            if let n = workOrdinals[probe] { return n }
+            probe -= 1
+        }
+        return nil
+    }
+
+    func status(miles: Double, clock: Double) -> RunPlanLiveStatus? {
+        guard !segments.isEmpty else { return nil }
+        let i = min(index, segments.count - 1)
+        let segment = segments[i]
+        let next: RunPlanLiveSegment? = (!finished && i + 1 < segments.count) ? segments[i + 1] : nil
+        let seconds = seeded ? max(0, clock - startClock) : 0
+        let covered = seeded ? max(0, miles - startMiles) : 0
+
+        var remainingSeconds: Double?
+        var remainingMiles: Double?
+        var progress: Double = 0
+        if segment.isDistanceBased, let d = segment.distanceMiles {
+            remainingMiles = finished ? 0 : max(0, d - covered)
+            progress = finished ? 1 : min(1, covered / d)
+        } else if segment.isDurationBased, let t = segment.durationSeconds {
+            remainingSeconds = finished ? 0 : max(0, t - seconds)
+            progress = finished ? 1 : min(1, seconds / t)
+        }
+
+        let current = workOrdinals[i]
+        var done = 0
+        if let n = workNumber(at: i) { done = (current != nil && !finished) ? n - 1 : n }
+
+        return RunPlanLiveStatus(
+            index: i, segment: segment, next: next,
+            remainingSeconds: remainingSeconds, remainingMiles: remainingMiles,
+            progress: progress, segmentSeconds: seconds,
+            workNumber: workNumber(at: i), workCount: workCount, workDone: done,
+            finished: finished)
+    }
+}
+
+/// Pace vs the plan's target, with a dead band so a stride's drift is silence.
+enum RunPlanPaceCall: Equatable {
+    case onPace
+    /// Seconds per mile faster than target.
+    case fast(Double)
+    /// Seconds per mile slower than target.
+    case slow(Double)
+
+    static let deadBand: Double = 10
+
+    static func judge(recent: Double?, target: Double?) -> RunPlanPaceCall? {
+        guard let recent, let target, recent > 0, target > 0 else { return nil }
+        let drift = recent - target
+        if drift <= -deadBand { return .fast(-drift) }
+        if drift >= deadBand { return .slow(drift) }
+        return .onPace
+    }
+}
+
+/// Pace over the last ~45 s from (clock, miles) samples — for the Watch,
+/// which has no `recentPaceSecondsPerMile` of its own.
+struct RunPlanPaceWindow {
+    private struct Point {
+        let clock: Double
+        let miles: Double
+    }
+
+    private var points: [Point] = []
+
+    mutating func reset() { points = [] }
+
+    mutating func add(clock: Double, miles: Double) {
+        if let last = points.last, last.clock >= clock { return }
+        points.append(Point(clock: clock, miles: miles))
+        while let first = points.first, clock - first.clock > 60 { points.removeFirst() }
+    }
+
+    /// Seconds per mile, nil while there's too little to say.
+    var pace: Double? {
+        guard let newest = points.last else { return nil }
+        guard let anchor = points.first(where: { newest.clock - $0.clock <= 45 }) else { return nil }
+        let seconds = newest.clock - anchor.clock
+        let miles = newest.miles - anchor.miles
+        guard seconds >= 15, miles > 0.01 else { return nil }
+        let value = seconds / miles
+        guard value > 180, value < 3600 else { return nil }
+        return value
+    }
+}
+
+#if os(watchOS)
+/// The plan the iPhone last pushed. Watch-only; fed by `MADWatchBridge.apply`.
+final class WatchRunPlanStore: ObservableObject {
+    static let shared = WatchRunPlanStore()
+
+    @Published private(set) var plan: WatchRunPlan?
+
+    /// Today's plan, when there is one with segments.
+    var today: WatchRunPlan? {
+        guard let plan, plan.isForToday, !plan.segments.isEmpty else { return nil }
+        return plan
+    }
+
+    /// Called on the main thread from `MADWatchBridge.apply`.
+    func apply(json: String?) {
+        let fresh = WatchRunPlan.decode(json)
+        if fresh != plan { plan = fresh }
+    }
+}
+#endif

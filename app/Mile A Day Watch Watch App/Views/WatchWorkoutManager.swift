@@ -1,5 +1,6 @@
 import Foundation
 import HealthKit
+import WatchKit
 
 final class WatchWorkoutManager: NSObject, ObservableObject {
     // Published UI state
@@ -31,6 +32,15 @@ final class WatchWorkoutManager: NSObject, ObservableObject {
     /// instead of sitting on a screen whose numbers have stopped moving.
     @Published var endedWithoutRequest: Bool = false
 
+    /// Run Plans (Mile A Day+): where the run is in today's plan. nil = not
+    /// a plan run. Walked on this manager's 1 Hz tick (not a view's), so the
+    /// segment-change haptic still lands with the wrist down.
+    @Published var planStatus: RunPlanLiveStatus?
+    /// Pace over the last ~45 s, seconds per mile (plan runs only).
+    @Published var planPace: Double?
+    private var planTracker: RunPlanTracker?
+    private var planPaceWindow = RunPlanPaceWindow()
+
     // HealthKit. The store must outlive every operation started on it — a
     // released store answers nothing, silently.
     private let healthStore = HKHealthStore()
@@ -52,6 +62,47 @@ final class WatchWorkoutManager: NSObject, ObservableObject {
     /// hard deadline after which the UI moves on regardless.
     private let forceFinalizeAfter: TimeInterval = 8
     private let endDeadlineAfter: TimeInterval = 20
+
+    // MARK: - Run plan
+
+    /// Coach this run through `plan`'s segments. Call before `startWorkout`.
+    func armPlan(_ plan: WatchRunPlan) {
+        guard !plan.segments.isEmpty else { return }
+        let tracker = RunPlanTracker(segments: plan.segments)
+        planTracker = tracker
+        planPaceWindow.reset()
+        planPace = nil
+        planStatus = tracker.status(miles: 0, clock: 0)
+    }
+
+    /// Main-thread only; from the timer tick.
+    private func tickPlan() {
+        guard var tracker = planTracker else { return }
+        let clock = elapsedTime
+        let miles = distance
+        planPaceWindow.add(clock: clock, miles: miles)
+        let pace = planPaceWindow.pace
+        if planPace != pace { planPace = pace }
+        let change = tracker.step(miles: miles, clock: clock)
+        planTracker = tracker
+        let fresh = tracker.status(miles: miles, clock: clock)
+        if planStatus != fresh { planStatus = fresh }
+        if let change, let fresh { buzz(change, status: fresh) }
+    }
+
+    /// One tap per segment change: a start tap into work, a down tap into
+    /// anything easy, success at the end. None at `.began` (the countdown
+    /// just buzzed).
+    private func buzz(_ change: RunPlanTracker.Change, status: RunPlanLiveStatus) {
+        switch change {
+        case .began:
+            return
+        case .finished:
+            WKInterfaceDevice.current().play(.success)
+        case .advanced:
+            WKInterfaceDevice.current().play(status.segment.isWork ? .start : .directionDown)
+        }
+    }
 
     // MARK: - Lifecycle
 
@@ -153,6 +204,7 @@ final class WatchWorkoutManager: NSObject, ObservableObject {
                 } else if let start = self.startDate {
                     self.elapsedTime = Date().timeIntervalSince(start)
                 }
+                self.tickPlan()
             }
         }
     }

@@ -224,7 +224,10 @@ private enum JSONAnyValue: Decodable {
 final class RunPlanStore: ObservableObject {
     static let shared = RunPlanStore()
 
-    @Published private(set) var current: RunPlanCurrent?
+    /// Every change re-sends today's segments to the Watch (`RunPlanWatchSync`).
+    @Published private(set) var current: RunPlanCurrent? {
+        didSet { RunPlanWatchSync.update(today: current?.today) }
+    }
     /// A server answer (or this account's cache) is in hand.
     @Published private(set) var loaded = false
     @Published private(set) var isRefreshing = false
@@ -242,6 +245,8 @@ final class RunPlanStore: ObservableObject {
             current = cached
             loaded = true
         }
+        // `didSet` doesn't run inside init.
+        RunPlanWatchSync.update(today: current?.today)
     }
 
     var plan: RunPlan? { current?.plan }
