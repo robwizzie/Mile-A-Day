@@ -584,6 +584,46 @@ struct BuddyCandidatesResponse: Codable {
     let candidates: [BuddyCandidate]
 }
 
+/// A friend whose buddy setup is open right now (`POST /buddy/looking`), the
+/// Spotify-Jam signal: two friends who both open it see each other first.
+/// Friends only and symmetric server-side; no location involved.
+struct BuddyLookingFriend: Codable, Identifiable, Equatable {
+    let userId: String
+    let username: String?
+    let firstName: String?
+    let lastName: String?
+    let profileImageUrl: String?
+    let currentStreak: Int?
+    /// "running" / "walking" / "any", or nil.
+    let activityType: String?
+    let lookingAtRaw: String?
+
+    var id: String { userId }
+
+    var displayName: String {
+        if let firstName, !firstName.isEmpty { return firstName }
+        if let username, !username.isEmpty { return username }
+        return "Friend"
+    }
+
+    var isRunning: Bool { activityType == "running" }
+
+    enum CodingKeys: String, CodingKey {
+        case userId = "user_id"
+        case username
+        case firstName = "first_name"
+        case lastName = "last_name"
+        case profileImageUrl = "profile_image_url"
+        case currentStreak = "current_streak"
+        case activityType = "activity_type"
+        case lookingAtRaw = "looking_at"
+    }
+}
+
+struct BuddyLookingResponse: Codable {
+    let looking: [BuddyLookingFriend]
+}
+
 struct BuddyRecapEvent: Codable, Identifiable {
     let kind: String
     let userId: String?

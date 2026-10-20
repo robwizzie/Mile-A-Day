@@ -2414,6 +2414,33 @@ export const liveTrackingSessions = pgTable(
   ],
 );
 
+// "Looking for a buddy right now": one row per user, stamped while their buddy
+// setup screen is open (a heartbeat). Read only inside a short window, so a
+// row left behind by a closed app simply stops counting. Friends who are BOTH
+// looking see each other, the Spotify-Jam moment. Coarse on purpose: no
+// location, nothing but "now" and walk vs run.
+export const buddyLooking = pgTable(
+  "buddy_looking",
+  {
+    userId: text("user_id").primaryKey().notNull(),
+    activityType: varchar("activity_type", { length: 16 }),
+    lookingAt: timestamp("looking_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.userId],
+      foreignColumns: [users.userId],
+      name: "buddy_looking_user_id_fkey",
+    }).onDelete("cascade"),
+    index("idx_buddy_looking_looking_at").using(
+      "btree",
+      table.lookingAt.desc().nullsFirst(),
+    ),
+  ],
+);
+
 export const androidWaitlist = pgTable(
   "android_waitlist",
   {
