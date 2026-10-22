@@ -198,7 +198,8 @@ final class PostComposerViewModel: ObservableObject {
     /// what differs per view is whether it's there and where.
     @Published var config: StickerConfig
     /// The last post's stickers (`StickerMemory`), read once at open: they
-    /// seed this post and give a re-added kind its remembered spot.
+    /// give a re-added kind its remembered spot. Never put back on by
+    /// themselves — a new photo starts with the stats sticker only.
     private let memory: StickerMemory?
     /// The sticker last tapped on the photo. A second tap on it cycles its
     /// style; the tray follows it to its tab.
@@ -387,11 +388,13 @@ final class PostComposerViewModel: ObservableObject {
         cfg.enabled = cfg.enabled.filter { available.contains($0) }
         if cfg.enabled.isEmpty { cfg.enabled = Array(available.prefix(1)) }
         self.config = cfg
-        // Start where the last post left off: the stats sticker (on unless
-        // it was turned off last time) back at its size and spot
-        // (StickerConfig sanitizes on decode; ranges live there too), then
-        // whatever else was on it that today's walk can still draw. A route
-        // waits for its trace (`loadRoutePreview`).
+        // A new photo starts clean: only the stats sticker — THIS walk's
+        // numbers, on unless it was turned off last time — back at its size
+        // and spot (StickerConfig sanitizes on decode; ranges live there
+        // too). The last post's other stickers are NOT put back on: a Flamey,
+        // a badge or a number left over from yesterday's photo reads as a
+        // mistake on today's. The memory only decides where a kind lands
+        // when the poster adds it again (`addSticker`).
         let memory = StickerMemory.load()
         self.memory = memory
         var seeded: [PlacedSticker] = []
@@ -400,19 +403,6 @@ final class PostComposerViewModel: ObservableObject {
                                         pos: CGPoint(x: cfg.posX, y: cfg.posY),
                                         scale: cfg.scale,
                                         rotation: Angle(degrees: cfg.rotation)))
-        }
-        let numbers = Set(NumberPostSticker.available(for: stats))
-        for remembered in memory?.stickers() ?? [] {
-            switch remembered.kind {
-            case .flamey, .basicFlamey, .pack: seeded.append(remembered)
-            case .number(let k) where numbers.contains(k):
-                if !seeded.contains(where: { $0.kind == remembered.kind }) { seeded.append(remembered) }
-            // Words that were true of THAT walk (its time, its crew, its day
-            // number) are never carried over to this one; the rest are.
-            case .badge(let b) where b != .clock && b != .buddies && b != .dayCount:
-                seeded.append(remembered)
-            default: break
-            }
         }
         self.stickers = seeded
         // Seed a pre-chosen photo (mid-run snap) AFTER all stored properties
@@ -878,14 +868,6 @@ final class PostComposerViewModel: ObservableObject {
             // nothing to trim. (Map slides keep the server's trim.)
             routeSticker = RouteStickerTrace.make(full: coordinates, kept: 0...(coordinates.count - 1),
                                                   key: workoutId)
-            // A remembered route sticker could only come back once there was
-            // a route to draw — this is that moment.
-            if routeSticker != nil, sticker(in: .route) == nil,
-               let remembered = memory?.stickers().first(where: {
-                   if case .route = $0.kind { return true } else { return false }
-               }) {
-                stickers.append(remembered)
-            }
         }
         hasLoadedRoutePreview = true
         isLoadingRoutePreview = false
@@ -1172,8 +1154,9 @@ final class PostComposerViewModel: ObservableObject {
                 toSave.rotation = statsSticker.rotation.degrees
                 toSave.save()
             }
-            // And the rest of what was on it, so tomorrow starts here too.
-            // The main set only: per-view extras are a one-off arrangement.
+            // And where the rest went, so a kind added again lands in the
+            // poster's spot. The main set only: per-view extras are a one-off
+            // arrangement.
             StickerMemory(stickers: stickers).save()
             return true
         } catch let APIError.buddyWalkAlreadyPosted(postId, mine) {
@@ -1514,6 +1497,12 @@ struct PostComposerView: View {
     /// time a fullScreenCover dismisses, and re-opening on each pass would
     /// trap the user in the camera with no way back.
     @State private var didAutoOpenCamera = false
+    /// A buddy walk this user closed without posting, minutes ago
+    /// (`BuddyPostOffer`). Asked about once, on open: post this WITH the
+    /// crew, or just me. nil when the caller already settled the crew, or
+    /// there's nothing to ask.
+    @State private var crewOffer: BuddyPostOffer?
+    @State private var askingCrewOffer = false
     /// "Saved to Photos" confirmation for the canvas Save button.
     @State private var showSavedToPhotos = false
     /// Guards against silently destroying a composed draft on Cancel.
@@ -1580,6 +1569,21 @@ struct PostComposerView: View {
             model.buddyCrewNames = crew.map(\.displayName)
         }
         _vm = StateObject(wrappedValue: model)
+        // Backed out of a buddy walk's post a few minutes ago? Then this post
+        // is probably that walk, and the poster gets to say so rather than
+        // have it go out solo (or, via the resolution above, silently with
+        // a crew they didn't pick). Never when the caller already settled it
+        // (the walk's own post step, a crew photo), for a different walk, or
+        // once the walk is posted.
+        var offer: BuddyPostOffer?
+        if crewPhotoPostId == nil, buddySessionId == nil,
+           let live = BuddyPostOffer.current(for: BuddySessionService.shared.currentUserId),
+           live.applies(toWorkout: stats.workoutId),
+           !(live.workoutId.map(PostedWorkoutRegistry.hasPost(for:)) ?? false),
+           model.buddySessionId == nil || model.buddySessionId == live.sessionId {
+            offer = live
+        }
+        _crewOffer = State(initialValue: offer)
         self.autoOpenCamera = autoOpenCamera
         self.backNavigation = backNavigation
         self.onFinished = onFinished
@@ -1589,6 +1593,19 @@ struct PostComposerView: View {
         NavigationStack(path: $path) {
             ZStack {
                 Color.black.ignoresSafeArea()
+                    // Its own node: the GeometryReader, ZStack and stack all
+                    // present something else already.
+                    .alert(
+                        crewOffer.map { "Post this with \($0.crewText)?" } ?? "",
+                        isPresented: $askingCrewOffer,
+                        presenting: crewOffer
+                    ) { offer in
+                        Button("Post with the crew") { answerCrewOffer(offer, withCrew: true) }
+                        Button("Just me", role: .cancel) { answerCrewOffer(offer, withCrew: false) }
+                    } message: { _ in
+                        Text("You just walked together. Put it on the buddy walk's post — "
+                             + "everyone's routes on one card, everyone credited.")
+                    }
 
                 GeometryReader { outer in
                     editContent(container: outer.size)
@@ -1726,9 +1743,12 @@ struct PostComposerView: View {
                 }
             }
             .onAppear {
-                if autoOpenCamera, !didAutoOpenCamera, vm.pickedImage == nil {
-                    didAutoOpenCamera = true
-                    requestCamera()
+                if crewOffer != nil {
+                    // The question first; the camera (if this door opens
+                    // one) once it's answered.
+                    askingCrewOffer = true
+                } else {
+                    autoOpenCameraIfNeeded()
                 }
                 // Resolved HERE, not in the button's own lifecycle: the button
                 // renders nothing when the answer is false, and a view whose
@@ -1916,6 +1936,8 @@ struct PostComposerView: View {
             Task {
                 let ok = await vm.publish()
                 guard ok else { return }
+                // The day's post is made; nothing left to offer the crew for.
+                BuddyPostOffer.clear()
                 // A crew photo has no destination to read — it goes on the
                 // walk's existing feed card, which is a feed outcome. Without
                 // this the `let dest` below failed silently and the composer
@@ -1949,6 +1971,39 @@ struct PostComposerView: View {
             dismiss()
         } else {
             showDiscardConfirm = true
+        }
+    }
+
+    // MARK: - Crew offer
+
+    /// The auto camera fires exactly once (see `didAutoOpenCamera`).
+    private func autoOpenCameraIfNeeded() {
+        guard autoOpenCamera, !didAutoOpenCamera, vm.pickedImage == nil else { return }
+        didAutoOpenCamera = true
+        requestCamera()
+    }
+
+    /// "Post with the crew" makes this post exactly what the walk's own post
+    /// step would have: the session and the crew it credits. "Just me" drops
+    /// any crew the composer resolved by itself. Either way the question is
+    /// spent.
+    private func answerCrewOffer(_ offer: BuddyPostOffer, withCrew: Bool) {
+        BuddyPostOffer.clear()
+        crewOffer = nil
+        if withCrew {
+            vm.buddySessionId = offer.sessionId
+            vm.buddyCoauthorIds = offer.crewIds
+            vm.buddyCrewNames = offer.crewNames
+        } else {
+            vm.buddySessionId = nil
+            vm.buddyCoauthorIds = []
+            vm.buddyCrewNames = []
+        }
+        // After the alert is down: the camera (if this door opens one), and
+        // a guidelines gate that waited for the question.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            autoOpenCameraIfNeeded()
+            presentGateIfNeeded()
         }
     }
 
@@ -1986,9 +2041,11 @@ struct PostComposerView: View {
     }
 
     /// Present the gate once no other cover is up — presenting while the
-    /// camera cover is active would drop the presentation entirely.
+    /// camera cover (or the crew question) is up would drop the presentation
+    /// entirely; both re-try this once they're down.
     private func presentGateIfNeeded() {
-        guard termsState == .needsAcceptance, !showCamera, !showTermsGate else { return }
+        guard termsState == .needsAcceptance, !showCamera, !showTermsGate,
+              !askingCrewOffer else { return }
         showTermsGate = true
     }
 

@@ -28,6 +28,9 @@ struct BuddyRecapView: View {
     @State private var openPostId: String?
     /// Every walk you've taken with these people, from the link below.
     @State private var showHistory = false
+    /// The walk was posted from THIS screen's wizard. Read on the way out:
+    /// the re-read that would show it can still be in flight.
+    @State private var postedHere = false
 
     /// The walk's post, once one exists — fetched so this screen can SHOW what
     /// was made rather than describing it in a sentence.
@@ -67,15 +70,6 @@ struct BuddyRecapView: View {
                         }
                         .padding(MADTheme.Spacing.md)
                     }
-                    .fullScreenCover(item: $wizardSession) { session in
-                        BuddyPostWizardView(session: session) {
-                            // Published — re-read so the CTA becomes the
-                            // confirmation and "See the post" gets its id,
-                            // rather than the screen looking unchanged after
-                            // the thing it exists for has happened.
-                            Task { await load(showSpinner: false) }
-                        }
-                    }
                 } else {
                     Text("Couldn't load the recap.")
                         .font(MADTheme.Typography.body)
@@ -94,12 +88,33 @@ struct BuddyRecapView: View {
                 }
             }
         }
-        // On the NavigationStack, NOT the ScrollView that already carries the
-        // wizard's fullScreenCover — two presentations on one node and SwiftUI
-        // silently drops one (ios.md).
+        // On the NavigationStack, NOT a node that carries another
+        // presentation — two on one node and SwiftUI silently drops one
+        // (ios.md).
         .sheet(isPresented: $showHistory) {
             BuddyWalksHistoryView()
         }
+        // The post wizard hangs off a node that is ALWAYS mounted. It used to
+        // sit on the ScrollView inside the `isLoading` / `recap` branch, so
+        // anything that swapped that branch — the spinner of a reload —
+        // took the cover down and SwiftUI put it straight back up (the item
+        // was still set) as a brand-new wizard: whatever was open on top of it
+        // (the composer, mid-edit) was gone and the poster was back on "Snap
+        // the crew". Opening the composer's sticker sheet re-appears this
+        // screen, which re-ran the reload; that was the reported bounce.
+        .background(
+            Color.clear
+                .fullScreenCover(item: $wizardSession) { session in
+                    BuddyPostWizardView(session: session) {
+                        postedHere = true
+                        // Published — re-read so the CTA becomes the
+                        // confirmation and "See the post" gets its id,
+                        // rather than the screen looking unchanged after
+                        // the thing it exists for has happened.
+                        Task { await load(showSpinner: false) }
+                    }
+                }
+        )
         // Its OWN node again, for the same reason: the NavigationStack above
         // already owns the history sheet.
         .background(
@@ -123,6 +138,10 @@ struct BuddyRecapView: View {
                     }
                 }
         )
+        // Leaving without posting (Done, a swipe down, "walk again") keeps
+        // the walk offerable for a few minutes: the next post asks whether
+        // it's this one, with the crew (`BuddyPostOffer`).
+        .onDisappear(perform: rememberUnpostedWalk)
         .task {
             // This sheet opens the instant the walk ends — before HealthKit
             // has published the workout to `todaysWorkouts` — and the Post
@@ -132,7 +151,11 @@ struct BuddyRecapView: View {
             // composer re-resolves at publish as the second net.
             HealthKitManager.shared.invalidateWorkoutCacheFreshness()
             HealthKitManager.shared.fetchTodaysDistance()
-            await load()
+            // The spinner is for the FIRST load only. `.task` re-runs every
+            // time this screen re-appears (a cover or sheet above it coming
+            // and going), and blanking a loaded recap to a spinner there
+            // swaps out the content under whatever is open on top of it.
+            await load(showSpinner: recap == nil)
             // A friend can still be out when YOUR recap opens (it opens on
             // your own Finish). Keep re-reading while the session is active
             // so the standings settle on this screen instead of freezing at
@@ -932,10 +955,51 @@ struct BuddyRecapView: View {
         session.activeParticipants.sorted { $0.bestDistance > $1.bestDistance }
     }
 
-    /// `showSpinner: false` for RE-loads after posting: swapping the whole
-    /// screen for a ProgressView would tear down the ScrollView that hosts the
-    /// wizard's cover mid-dismissal, and the user would watch the recap they
-    /// just came back to blink away for no reason.
+    /// Closing the recap without posting is easy to do by accident — Done is
+    /// the screen's most obvious button. Remember the walk and its crew so
+    /// that a post made in the next ten minutes, from any door, asks "Post
+    /// this with Alex & Sam?" (`PostComposerView`). Only when there was
+    /// something to post: a live day, nobody's card yet, a crew to credit.
+    private func rememberUnpostedWalk() {
+        // A cover of OUR OWN going up hides this screen too (UIKit removes a
+        // full-screen presenter's view), and that is not leaving it.
+        guard wizardSession == nil, crewPhotoTarget == nil, openPostId == nil,
+              !postedHere,
+              let session = recap?.session,
+              session.status != .cancelled,
+              let userId = buddy.currentUserId,
+              let me = session.me(userId),
+              me.status == .active || me.status == .finished,
+              let started = session.startedAtDate,
+              Calendar.current.isDateInToday(started),
+              freshWindow.canPostToday,
+              recap?.post == nil,
+              !alreadyPosted(session)
+        else { return }
+        // The wizard's crew, in the wizard's order — what "Post this walk"
+        // would have credited.
+        let crew = session.activeParticipants
+            .filter { $0.userId != userId }
+            .sorted { $0.bestDistance > $1.bestDistance }
+        guard !crew.isEmpty else { return }
+        BuddyPostOffer(
+            userId: userId,
+            sessionId: session.id,
+            workoutId: RunPostService.buddyWorkoutId(
+                reconciled: me.workoutId,
+                startedAt: session.startedAtDate,
+                endedAt: session.endedAtDate
+            ),
+            crewIds: crew.map(\.userId),
+            crewNames: crew.map(\.displayName),
+            recordedAt: Date()
+        ).save()
+    }
+
+    /// `showSpinner` only for the first load: swapping a loaded recap for a
+    /// ProgressView makes the screen blink away under the user for no reason.
+    /// (The wizard's cover no longer lives inside the swapped content, so a
+    /// spinner can't take it down any more — see the `.background` above.)
     private func load(showSpinner: Bool = true) async {
         if showSpinner { isLoading = true }
         defer { if showSpinner { isLoading = false } }
