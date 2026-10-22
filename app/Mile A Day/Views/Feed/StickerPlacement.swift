@@ -200,10 +200,12 @@ struct RemovedSticker: Equatable {
 
 // MARK: - Memory
 
-/// What the poster put on their last post, so the next one starts there:
-/// which stickers (beyond the stats sticker, whose style and spot live in
-/// `StickerConfig`) and exactly where. Saved at publish only — browsing the
-/// tray and backing out never rewrites it.
+/// Where the poster put each sticker on their last post (beyond the stats
+/// sticker, whose style and spot live in `StickerConfig`), and whether the
+/// stats sticker was on. A kind added again goes back to its spot; nothing
+/// here is ever put on a new photo by itself — a new post starts with the
+/// stats sticker only. Saved at publish only — browsing the tray and backing
+/// out never rewrites it.
 struct StickerMemory: Codable {
     struct Item: Codable {
         var kind: String
@@ -244,12 +246,6 @@ struct StickerMemory: Codable {
                         accent: s.accent?.rawValue, variant: s.variant, text: s.text)
         }
         statsOn = stickers.contains { $0.kind == .stats }
-    }
-
-    /// Every remembered sticker, rebuilt in the order they were on the photo
-    /// and clamped to today's limits. Unknown kinds (a newer build's) drop.
-    func stickers() -> [PlacedSticker] {
-        items.compactMap(Self.rebuild)
     }
 
     /// The last spot a sticker of exactly this kind was left in.
