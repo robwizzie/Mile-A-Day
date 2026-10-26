@@ -389,6 +389,9 @@ struct SocialFeedView: View {
                         }
                     }
                 }
+                .onReceive(NotificationCenter.default.publisher(for: PostDraftStore.didPublish)) { _ in
+                    Task { await refresh() }
+                }
 
             ScrollViewReader { proxy in
             ScrollView {
@@ -426,6 +429,10 @@ struct SocialFeedView: View {
                     // One-time, dismissible: hide start & end now exists and
                     // is on. Renders nothing once seen.
                     RoutePrivacyIntroCard()
+
+                    // Posts made with no signal, waiting to go out. Renders
+                    // nothing when there are none.
+                    PostDraftsCard()
 
                     Divider()
                         .overlay(Color.white.opacity(0.08))

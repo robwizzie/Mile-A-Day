@@ -25,11 +25,32 @@ enum WorkoutPhotoImportResult {
 /// no post-selection EXIF re-check is needed. Screenshots are excluded — they
 /// have no real capture moment and the old EXIF path rejected them too.
 struct WorkoutPhotoImportPicker: View {
-    /// Accepted capture-time window (absolute time). Callers add grace.
-    let window: ClosedRange<Date>
+    /// Accepted capture-time windows (absolute time), any of which admits a
+    /// photo. Usually one; a mile walked in several goes passes one per leg
+    /// (`RunPostService.photoWindows`), so a picture from the first walk can
+    /// go on the post the last one completed. Callers add grace.
+    let windows: [ClosedRange<Date>]
     /// "run" / "walk" for copy; defaults to a neutral noun.
     var activityNoun: String = "workout"
     let onResult: (WorkoutPhotoImportResult) -> Void
+
+    init(
+        windows: [ClosedRange<Date>],
+        activityNoun: String = "workout",
+        onResult: @escaping (WorkoutPhotoImportResult) -> Void
+    ) {
+        self.windows = windows
+        self.activityNoun = activityNoun
+        self.onResult = onResult
+    }
+
+    init(
+        window: ClosedRange<Date>,
+        activityNoun: String = "workout",
+        onResult: @escaping (WorkoutPhotoImportResult) -> Void
+    ) {
+        self.init(windows: [window], activityNoun: activityNoun, onResult: onResult)
+    }
 
     @State private var status: PHAuthorizationStatus = .notDetermined
     @State private var assets: [PHAsset] = []
@@ -249,11 +270,15 @@ struct WorkoutPhotoImportPicker: View {
 
     private func fetchAssets() async {
         let options = PHFetchOptions()
-        options.predicate = NSPredicate(
-            format: "creationDate >= %@ AND creationDate <= %@",
-            window.lowerBound as NSDate,
-            window.upperBound as NSDate
-        )
+        // Gaps BETWEEN the windows stay out: a photo from the lunch between
+        // two walks is not a photo of either.
+        options.predicate = NSCompoundPredicate(orPredicateWithSubpredicates: windows.map { window in
+            NSPredicate(
+                format: "creationDate >= %@ AND creationDate <= %@",
+                window.lowerBound as NSDate,
+                window.upperBound as NSDate
+            )
+        })
         options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
         let fetched = PHAsset.fetchAssets(with: .image, options: options)
 
