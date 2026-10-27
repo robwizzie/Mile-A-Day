@@ -80,6 +80,32 @@ enum RunPostService {
         )
     }
 
+    /// The capture-time windows a library photo may come from for a post
+    /// linked to `workoutId`, each leg with grace on both ends (a shot at the
+    /// trailhead just before starting, or right after finishing, counts).
+    ///
+    /// One window for an ordinary workout. For the day's daily-mile anchor it
+    /// is one per leg that went into the mile — the same membership as
+    /// `dayRollupStats` — because that post IS all of them: a mile walked in
+    /// two goes has its photo from either. Nil when the workout isn't in
+    /// today's HealthKit list yet, so callers keep their own bounded fallback.
+    @MainActor
+    static func photoWindows(forWorkoutId workoutId: String) -> [ClosedRange<Date>]? {
+        let hk = HealthKitManager.shared
+        guard let workout = hk.todaysWorkouts.first(where: { $0.uuid.uuidString == workoutId })
+        else { return nil }
+        let legs = dailyMileWorkoutId() == workoutId
+            ? hk.todaysWorkouts.filter { $0.endDate <= workout.endDate }
+            : [workout]
+        return legs
+            .sorted { $0.startDate < $1.startDate }
+            .map { leg in
+                let start = leg.startDate.addingTimeInterval(-5 * 60)
+                let end = leg.endDate.addingTimeInterval(30 * 60)
+                return start...max(start, end)
+            }
+    }
+
     /// Every competition a post made TODAY could wear, soonest-ending first:
     /// the ones the user is an accepted member of whose window covers today,
     /// each with their standing and podium. Read off `CompetitionService`'s

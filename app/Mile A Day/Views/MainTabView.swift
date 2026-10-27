@@ -162,6 +162,9 @@ struct MainTabView: View {
             // Resume the initial workout sync if it never completed in a
             // previous session (e.g. user force-quit the app mid-upload).
             WorkoutSyncService.shared.startInitialSyncIfNeeded()
+            // Sends any post kept as a draft, now and whenever the
+            // connection comes back.
+            PostDraftStore.shared.start()
         }
         .task {
             // Cold launch from a profile universal link: the onOpenURL
@@ -372,6 +375,8 @@ struct MainTabView: View {
                 // A phone backgrounded through an outage comes back to a banner
                 // about a service that may already be up again.
                 ServiceHealthMonitor.shared.recheck()
+                // Posts kept as drafts on a walk with no signal.
+                PostDraftStore.shared.sendPending()
                 Task {
                     await competitionService.refreshAllData()
                     await friendService.refreshAllData()

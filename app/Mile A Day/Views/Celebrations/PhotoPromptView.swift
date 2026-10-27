@@ -186,7 +186,7 @@ struct PhotoPromptView: View {
                 }
             }) {
                 WorkoutPhotoImportPicker(
-                    window: importWindow,
+                    windows: importWindows,
                     activityNoun: noun
                 ) { result in
                     handleImportResult(result)
@@ -271,7 +271,10 @@ struct PhotoPromptView: View {
                     // there were no snaps, so a camera opened by mistake and
                     // closed again had already published the walk.)
                     return
-                case .published(let toFeed, _):
+                case .published(let toFeed, _), .savedDraft(let toFeed, _):
+                    // A draft is a post that hasn't left the phone yet — it
+                    // goes out on its own, so the prompt is answered exactly
+                    // as if it had (no auto card racing it to the feed).
                     guard !didAct else { return }
                     didAct = true
                     onFinish(.published(toFeed: toFeed))
@@ -1065,16 +1068,16 @@ struct PhotoPromptView: View {
     /// would let an unrelated earlier photo pass. Instead we bound to a
     /// generous recent window (a daily mile is minutes; even a long hike fits
     /// 3h), so authenticity holds even without the exact workout.
-    private var importWindow: ClosedRange<Date> {
+    ///
+    /// A mile walked in several goes accepts a photo from ANY of its legs
+    /// (`RunPostService.photoWindows`) — the post is all of them.
+    private var importWindows: [ClosedRange<Date>] {
         let now = Date()
         guard let workoutId,
-              let workout = HealthKitManager.shared.todaysWorkouts
-            .first(where: { $0.uuid.uuidString == workoutId }) else {
-            return now.addingTimeInterval(-3 * 60 * 60)...now.addingTimeInterval(2 * 60)
+              let windows = RunPostService.photoWindows(forWorkoutId: workoutId) else {
+            return [now.addingTimeInterval(-3 * 60 * 60)...now.addingTimeInterval(2 * 60)]
         }
-        let start = workout.startDate.addingTimeInterval(-5 * 60)
-        let end = workout.endDate.addingTimeInterval(30 * 60)
-        return start...max(start, end)
+        return windows
     }
 
     private func handleImportResult(_ result: WorkoutPhotoImportResult) {

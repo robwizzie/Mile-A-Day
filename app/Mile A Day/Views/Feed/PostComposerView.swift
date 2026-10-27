@@ -139,6 +139,9 @@ enum PostDestination: String, CaseIterable, Identifiable {
 enum PostComposeOutcome {
     case cancelled
     case published(toFeed: Bool, toStory: Bool)
+    /// No connection: the finished post is waiting in `PostDraftStore` and
+    /// posts itself when the signal is back.
+    case savedDraft(toFeed: Bool, toStory: Bool)
 }
 
 /// Where the photo on the canvas came from. Declared to the server, which holds
@@ -211,6 +214,10 @@ final class PostComposerViewModel: ObservableObject {
     /// match a stale entry).
     @Published private(set) var photoAnalyses: [ObjectIdentifier: PhotoAnalysis] = [:]
     @Published var isPublishing = false
+    /// `publish()` couldn't reach the server and kept the post in
+    /// `PostDraftStore` instead. It returned true — the post is made, just
+    /// not delivered — and the view reports `.savedDraft`.
+    @Published var savedAsDraft = false
     @Published var errorMessage: String?
     /// Whether the linked workout has a GPS route to offer alongside the photo.
     @Published var hasRoute = false
@@ -427,7 +434,7 @@ final class PostComposerViewModel: ObservableObject {
     var isCrewPhoto: Bool { crewPhotoPostId != nil }
 
     var canPublish: Bool {
-        pickedImage != nil && (isCrewPhoto || destination != nil) && !isPublishing
+        pickedImage != nil && (isCrewPhoto || destination != nil) && !isPublishing && !savedAsDraft
     }
 
     /// A photo on the canvas IS the draft — the caption and sticker ride with it.
@@ -989,8 +996,8 @@ final class PostComposerViewModel: ObservableObject {
     }
 
     /// FRONT & BACK's swapped frame, with up to three attempts (0.5s, then
-    /// 1.5s apart). nil after the last one fails — the caller then publishes
-    /// an ordinary photo, which is still complete.
+    /// 1.5s apart). nil after the last one fails — the caller then keeps the
+    /// whole post as a draft rather than publishing half of the pair.
     private static func uploadDualFrame(_ image: UIImage) async -> String? {
         let backoff: [UInt64] = [500_000_000, 1_500_000_000]
         for attempt in 0...backoff.count {
@@ -1006,7 +1013,7 @@ final class PostComposerViewModel: ObservableObject {
     }
 
     func publish() async -> Bool {
-        guard !isPublishing else { return false }
+        guard !isPublishing, !savedAsDraft else { return false }
         guard let flat = flatten() else {
             errorMessage = "Add a photo first."
             return false
@@ -1049,19 +1056,16 @@ final class PostComposerViewModel: ObservableObject {
         do {
             let mediaUrl = try await PostService.uploadMedia(flat)
             // The swapped arrangement, uploaded second and only for a FRONT &
-            // BACK. If THIS upload fails the post still goes out as an
-            // ordinary photo rather than failing outright: the primary is
-            // already a complete picture with the inset baked in, and losing
-            // the tap-to-swap is a far smaller loss than losing the post.
-            //
-            // But it IS retried: one dropped request on a walker's cellular
-            // signal used to publish the post with no `dual_media_url`, so the
-            // card showed a baked inset that could never be tapped — and
-            // nothing anywhere said so. The primary just went up, so the
-            // network is usually only blipping.
+            // BACK. Retried a few times, and if it STILL fails the post is
+            // not published at all — it becomes a draft (the catch below)
+            // and goes out whole once the signal is back. Publishing without
+            // it is what put a baked inset on the feed that could never be
+            // tapped: the primary made it up on a fading signal, this one
+            // didn't, and nothing anywhere said so.
             var dualMediaUrl: String?
             if isDualPhoto, let swapped = flatten(swapped: true) {
                 dualMediaUrl = await Self.uploadDualFrame(swapped)
+                if dualMediaUrl == nil { throw DualFrameUploadError() }
             }
             if let crewPhotoPostId {
                 // Everything above this line is the ordinary composer — same
@@ -1136,28 +1140,7 @@ final class PostComposerViewModel: ObservableObject {
                 PostedWorkoutRegistry.markPosted(workoutId)
                 CelebrationManager.shared.resolvePhotoPrompt(forWorkout: workoutId)
             }
-            if let statsSticker = renderedStickers.first(where: { $0.kind == .stats }) {
-                // Remember the user's overlay style — but merge back any stats
-                // that were remembered and merely had no data TODAY (init
-                // filters those out of the session config); otherwise one
-                // treadmill day permanently erases a saved choice like pace.
-                var toSave = config
-                let available = Set(stats.availableStats())
-                let rememberedUnavailable = StickerConfig.load().enabled
-                    .filter { !available.contains($0) }
-                toSave.enabled = config.enabled + rememberedUnavailable
-                // Remember the transform too, so the next post's sticker shows
-                // up at this exact size and position.
-                toSave.scale = statsSticker.scale
-                toSave.posX = statsSticker.pos.x
-                toSave.posY = statsSticker.pos.y
-                toSave.rotation = statsSticker.rotation.degrees
-                toSave.save()
-            }
-            // And where the rest went, so a kind added again lands in the
-            // poster's spot. The main set only: per-view extras are a one-off
-            // arrangement.
-            StickerMemory(stickers: stickers).save()
+            rememberStickerChoices()
             return true
         } catch let APIError.buddyWalkAlreadyPosted(postId, mine) {
             // This walk is already on the feed. Whose card it is decides
@@ -1246,10 +1229,88 @@ final class PostComposerViewModel: ObservableObject {
             // One deliberate post per workout — a reward, not a redo.
             errorMessage = "You've already shared a post for this workout. Delete it first if you want to post a new one."
             return false
+        } catch let error where PostDraftStore.isTransient(error) {
+            // No signal, or the upload died part way. The post is finished —
+            // the poster arranged it and tapped Share — so it is kept whole
+            // and sent when the connection is back, instead of asking them to
+            // stand in a field re-tapping a button that cannot work.
+            guard saveAsDraft(flat: flat, destination: destination) else {
+                errorMessage = "No connection — couldn't share your post. Try again."
+                return false
+            }
+            return true
         } catch {
             errorMessage = (error as? LocalizedError)?.errorDescription ?? "Couldn't share your post. Try again."
             return false
         }
+    }
+
+    /// Hand the finished post to `PostDraftStore`. Everything `publish()`
+    /// would have sent goes with it, the pictures already baked.
+    private func saveAsDraft(flat: UIImage, destination: PostDestination) -> Bool {
+        let swapped = isDualPhoto ? flatten(swapped: true) : nil
+        let trimmed = caption.trimmingCharacters(in: .whitespacesAndNewlines)
+        let draft = PostDraft(
+            id: UUID(),
+            createdAt: Date(),
+            localDay: DayKeyFormatter.string(from: Date()),
+            caption: trimmed.isEmpty ? nil : caption,
+            workoutId: stats.workoutId,
+            shareToFeed: destination.toFeed,
+            shareToStory: destination.toStory,
+            stats: stats.snapshot,
+            includeRoute: includeRoute,
+            coauthorUserIds: resolvedCoauthorIds,
+            buddySessionId: buddySessionId,
+            crewPhotoPostId: crewPhotoPostId,
+            competitionId: stickeredCompetitionId,
+            photoSource: photoSource.rawValue,
+            // Only with the second frame actually in hand — the corner
+            // describes an inset the swapped picture has to exist for.
+            dualInsetCorner: swapped == nil ? nil : dualInsetCorner.rawValue
+        )
+        guard PostDraftStore.shared.save(draft, primary: flat, swapped: swapped) else { return false }
+        // The photo moment is answered: the post exists, it just hasn't
+        // left the phone. NOT `markPosted` — if the draft is deleted the
+        // walk must still be postable; the store marks it once it lands.
+        if let workoutId = stats.workoutId, !workoutId.isEmpty {
+            CelebrationManager.shared.resolvePhotoPrompt(forWorkout: workoutId)
+        }
+        rememberStickerChoices()
+        savedAsDraft = true
+        errorMessage = nil
+        // Said in the composer, before it closes: the poster is looking
+        // here, and wherever they land next may not show the draft.
+        crewHandoffNotice = "No signal — your post is saved as a draft and will "
+            + "post on its own when you're back online. It's at the top of your Feed."
+        return true
+    }
+
+    /// Remember the user's sticker choices once a post is made (or kept as a
+    /// draft), so the next one starts from them.
+    private func rememberStickerChoices() {
+        if let statsSticker = renderedStickers.first(where: { $0.kind == .stats }) {
+            // Remember the user's overlay style — but merge back any stats
+            // that were remembered and merely had no data TODAY (init
+            // filters those out of the session config); otherwise one
+            // treadmill day permanently erases a saved choice like pace.
+            var toSave = config
+            let available = Set(stats.availableStats())
+            let rememberedUnavailable = StickerConfig.load().enabled
+                .filter { !available.contains($0) }
+            toSave.enabled = config.enabled + rememberedUnavailable
+            // Remember the transform too, so the next post's sticker shows
+            // up at this exact size and position.
+            toSave.scale = statsSticker.scale
+            toSave.posX = statsSticker.pos.x
+            toSave.posY = statsSticker.pos.y
+            toSave.rotation = statsSticker.rotation.degrees
+            toSave.save()
+        }
+        // And where the rest went, so a kind added again lands in the
+        // poster's spot. The main set only: per-view extras are a one-off
+        // arrangement.
+        StickerMemory(stickers: stickers).save()
     }
 }
 
@@ -1616,7 +1677,7 @@ struct PostComposerView: View {
                         // silently drop one. On the VStack, not the canvas, so the
                         // node survives the empty → pinned switch a pick causes.
                         .fullScreenCover(isPresented: $showLibraryImport) {
-                            WorkoutPhotoImportPicker(window: importWindow) { result in
+                            WorkoutPhotoImportPicker(windows: importWindows) { result in
                                 showLibraryImport = false
                                 switch result {
                                 case .accepted(let image):
@@ -1936,8 +1997,6 @@ struct PostComposerView: View {
             Task {
                 let ok = await vm.publish()
                 guard ok else { return }
-                // The day's post is made; nothing left to offer the crew for.
-                BuddyPostOffer.clear()
                 // A crew photo has no destination to read — it goes on the
                 // walk's existing feed card, which is a feed outcome. Without
                 // this the `let dest` below failed silently and the composer
@@ -1945,6 +2004,16 @@ struct PostComposerView: View {
                 let resolved: PostDestination? =
                     vm.destination ?? (vm.isCrewPhoto ? PostDestination.feed : nil)
                 guard let dest = resolved else { return }
+                if vm.savedAsDraft {
+                    // Long enough to read the notice `publish()` just put up.
+                    MADHaptics.tap()
+                    try? await Task.sleep(nanoseconds: 2_200_000_000)
+                    onFinished(.savedDraft(toFeed: dest.toFeed, toStory: dest.toStory))
+                    dismiss()
+                    return
+                }
+                // The day's post is made; nothing left to offer the crew for.
+                BuddyPostOffer.clear()
                 onFinished(.published(toFeed: dest.toFeed, toStory: dest.toStory))
                 dismiss()
             }
@@ -2667,16 +2736,16 @@ struct PostComposerView: View {
     /// post-run prompt: when the workout hasn't synced into `todaysWorkouts` yet
     /// we bound to a generous recent window rather than the whole day, so an
     /// unrelated earlier photo still can't slip in.
-    private var importWindow: ClosedRange<Date> {
+    ///
+    /// A mile walked in several goes accepts a photo from ANY of its legs
+    /// (`RunPostService.photoWindows`) — the post is all of them.
+    private var importWindows: [ClosedRange<Date>] {
         let now = Date()
         guard let wid = vm.stats.workoutId,
-              let workout = HealthKitManager.shared.todaysWorkouts
-                .first(where: { $0.uuid.uuidString == wid }) else {
-            return now.addingTimeInterval(-3 * 60 * 60)...now.addingTimeInterval(2 * 60)
+              let windows = RunPostService.photoWindows(forWorkoutId: wid) else {
+            return [now.addingTimeInterval(-3 * 60 * 60)...now.addingTimeInterval(2 * 60)]
         }
-        let start = workout.startDate.addingTimeInterval(-5 * 60)
-        let end = workout.endDate.addingTimeInterval(30 * 60)
-        return start...max(start, end)
+        return windows
     }
 
 }
