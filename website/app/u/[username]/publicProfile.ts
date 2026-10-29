@@ -90,9 +90,15 @@ const BANNER_STOPS: Record<string, [string, string]> = {
   night: ["38,38,38", "13,13,13"], // blackGradient
 };
 
+/** The preset's two "r,g,b" stops (the og.mp4 video draws them itself). */
+export function bannerStops(style: string | null | undefined): [string, string] {
+  const [a, b] = BANNER_STOPS[style ?? ""] ?? BANNER_STOPS.ember;
+  return [a, b];
+}
+
 /** The preset as a CSS gradient image — lay it over black, as the app does. */
 export function bannerGradient(style: string | null | undefined): string {
-  const [a, b] = BANNER_STOPS[style ?? ""] ?? BANNER_STOPS.ember;
+  const [a, b] = bannerStops(style);
   return `linear-gradient(135deg, rgb(${a}), rgba(${b},0.9), rgba(${b},0.32))`;
 }
 

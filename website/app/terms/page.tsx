@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import { LegalPage, Section } from '@/components/legal-page';
+import { ogVideos } from '../_og/video/meta';
 
 export const metadata: Metadata = {
 	title: 'Terms of Use',
@@ -12,7 +13,8 @@ export const metadata: Metadata = {
 		description: 'The terms and conditions for using the Mile A Day app.',
 		url: '/terms',
 		type: 'website',
-		siteName: 'Mile A Day'
+		siteName: 'Mile A Day',
+		videos: ogVideos('/terms/og.mp4')
 	},
 	twitter: {
 		card: 'summary_large_image',

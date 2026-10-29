@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { DeskShowcase } from "@/components/desk/desk-showcase";
+import { ogVideos } from "../_og/video/meta";
 
 export const metadata: Metadata = {
   title: { absolute: "Mile A Day Desk - your streak, live on your desk" },
@@ -12,6 +13,7 @@ export const metadata: Metadata = {
     url: "/desk",
     type: "website",
     siteName: "Mile A Day",
+    videos: ogVideos("/desk/og.mp4"),
   },
 };
 

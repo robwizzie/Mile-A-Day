@@ -11,6 +11,7 @@ import {
 } from "@/lib/releases";
 import { ShowcaseCarousel, type ShowcaseSlide } from "@/components/showcase-carousel";
 import { APP_STORE_URL, SUPPORT_EMAIL, SUPPORT_MAILTO } from "@/lib/site";
+import { ogVideos } from "../_og/video/meta";
 
 const TITLE = "What's New";
 const DESCRIPTION = `Release notes for every Mile A Day update on iPhone and Apple Watch. Now on version ${CURRENT_RELEASE.version}: ${CURRENT_RELEASE.headline}.`;
@@ -27,6 +28,7 @@ export const metadata: Metadata = {
     url: "/updates",
     type: "website",
     siteName: "Mile A Day",
+    videos: ogVideos("/updates/og.mp4"),
   },
   twitter: {
     card: "summary_large_image",

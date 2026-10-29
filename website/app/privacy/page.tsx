@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import { LegalPage, Section } from '@/components/legal-page';
+import { ogVideos } from '../_og/video/meta';
 
 export const metadata: Metadata = {
 	title: 'Privacy Policy',
@@ -12,7 +13,8 @@ export const metadata: Metadata = {
 		description: 'How Mile A Day collects, uses, and protects your data.',
 		url: '/privacy',
 		type: 'website',
-		siteName: 'Mile A Day'
+		siteName: 'Mile A Day',
+		videos: ogVideos('/privacy/og.mp4')
 	},
 	twitter: {
 		card: 'summary_large_image',
