@@ -19,7 +19,6 @@ import {
   lockup,
   radialGlow,
   roundRect,
-  sparkles,
 } from "../kit";
 
 // /desk's video: the desk box itself, running. The panel is drawn by the box's
@@ -128,7 +127,7 @@ export async function deskScene(): Promise<Scene> {
       g,
       72,
       175,
-      { scale: lerp(0.6, 1, tagIn), alpha: clamp01(tagIn * 2) },
+      { scale: lerp(0.85, 1, tagIn), alpha: clamp01(tagIn * 2) },
       () => {
         g.font = font.body(22, 700);
         const label = "MILE A DAY DESK";
@@ -150,29 +149,15 @@ export async function deskScene(): Promise<Scene> {
     lines.forEach(([text, red], i) => {
       const p = ease.outQuint(beat(t, 0.35 + i * 0.14, 0.7));
       const y = 296 + i * 84;
-      around(g, 72, y, { alpha: p, dy: (1 - p) * 50 }, () => {
+      around(g, 72, y, { alpha: p, dy: (1 - p) * 40 }, () => {
         g.font = font.head(96);
-        const shine = beat(t, 2.3, 1.1);
-        g.fillStyle = red
-          ? brandGradient(
-              g,
-              72,
-              480,
-              shine > 0 && shine < 1 ? ease.inOutSine(shine) : null,
-            )
-          : BRAND.ink;
+        g.fillStyle = red ? brandGradient(g, 72, 480) : BRAND.ink;
         g.fillText(text, 72, y);
       });
     });
     livePill(g, t, 72, 532, users);
 
     box(g, t, rgb);
-
-    sparkles(g, t, [
-      { x: 1150, y: 110, s: 9, d: 0.6 },
-      { x: 600, y: 120, s: 7, d: 2.6 },
-      { x: 1140, y: 560, s: 6, d: 3.9 },
-    ]);
   };
 }
 
@@ -225,36 +210,23 @@ function box(g: Ctx, t: number, rgb: Uint8Array) {
   const bx = 648;
   const by = 176;
   const pad = 22;
+  // Lands and stays still: a moving dot grid re-encodes every pixel of it.
   const p = ease.outBack(beat(t, 0.25, 0.9));
-  // Still once landed: a moving dot grid re-encodes every pixel of it.
-  const bob = 0;
-
-  // The panel's average colour tints the glow under the box.
-  let r = 0;
-  let gg = 0;
-  let b = 0;
-  for (let i = 0; i < rgb.length; i += 3) {
-    r += rgb[i];
-    gg += rgb[i + 1];
-    b += rgb[i + 2];
-  }
-  const n = rgb.length / 3;
-  const tint = [r, gg, b]
-    .map((c) => Math.min(255, Math.round((c / n) * LED_GAIN * 6)))
-    .join(",");
+  // The panel dips dark for a beat while the box changes style, instead of
+  // cutting between two looks.
+  const dip = 1 - Math.min(1, Math.abs(t - SWITCH_AT) / 0.18);
 
   around(
     g,
     bx + pw / 2,
     by + ph / 2,
     {
-      scale: lerp(0.75, 1, p),
+      scale: lerp(0.9, 1, p),
       alpha: clamp01(p * 2),
-      dx: (1 - p) * 120,
-      dy: bob,
+      dx: (1 - p) * 60,
     },
     () => {
-      radialGlow(g, bx + pw / 2, by + ph + pad + 40, 300, 0.32, tint);
+      radialGlow(g, bx + pw / 2, by + ph + pad + 30, 300, 0.22);
       g.save();
       g.shadowColor = "rgba(0,0,0,0.7)";
       g.shadowBlur = 60;
@@ -271,6 +243,10 @@ function box(g: Ctx, t: number, rgb: Uint8Array) {
       roundRect(g, bx - pad, by - pad, pw + pad * 2, ph + pad * 2, 26);
       g.stroke();
       leds(g, rgb, bx, by, pw, ph);
+      if (dip > 0) {
+        g.fillStyle = `rgba(5,5,5,${dip * 0.92})`;
+        g.fillRect(bx, by, pw, ph);
+      }
       // Glass sheen.
       const sheen = g.createLinearGradient(bx, by, bx + pw * 0.6, by + ph);
       sheen.addColorStop(0, "rgba(255,255,255,0.06)");

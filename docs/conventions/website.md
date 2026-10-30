@@ -57,13 +57,25 @@ Why it's built this way:
 - **No `react-dom/server` in routes.** Next refuses to build it. Release-note
   icons are built from the lucide component's own `iconNode` (via
   `Component.render`) and loaded as SVG.
+- **Clean, fun, not overwhelming: one payoff, then stillness.** Each clip
+  has ONE moment, and everything has landed by about 3.5 s and holds still
+  so the preview can be read. The moments are: the home card's mile
+  finishing and turning into the streak, the release cards' single
+  highlight pass, the desk changing style, the legal stamp, and a profile's
+  streak landing. The first pass also had twinkling sparkles, shine sweeps
+  over headlines, a pill glint, embers, bobbing cards, an endless card
+  scroll and two counters running at once. Together they read as noise, so
+  they're gone. Pops overshoot only slightly (`ease.outBack`, c = 1.25).
+  Confetti is a small burst in brand colours from BEHIND the thing it
+  celebrates, gone in ~1.4 s. A counter never shows 0: `streakChip` counts
+  from half the streak.
 - **Bitrate is about moving pixels.** H.264 baseline has no weighted
   prediction, so fades and moving photos cost the most. A bobbing phone
   screenshot took home to 2.3 MB, and a Ken Burns banner took a profile to
   4 MB. Hence: photos, banners and the desk box hold still once they land;
   the loop seam fades only the FOREGROUND (`foreground()`) back to the still
   stage the intro starts from; QP 24 with keyframes every 3 s. Clips land
-  around 0.4–1.2 MB.
+  around 0.4–0.9 MB.
 - **Skia is slow at thousands of small paths.** `lib/desk-engine`'s
   `drawLeds` (about 2,000 arcs a frame) took a desk render to 43 s. The video
   draws the same look with three image draws: a blocky upscale, a cached

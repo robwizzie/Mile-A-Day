@@ -35,10 +35,9 @@ export async function profileScene(profile: PublicProfile | null): Promise<Scene
     stats:
       miles != null && friends != null
         ? {
-            miles,
+            // The Miles tile's figure (formatMiles), as on the PNG card.
+            miles: `${formatMiles(miles)} ${miles === 1 ? "mile" : "miles"}`,
             friends,
-            // Counting up through formatMiles' own steps, ending on its figure.
-            milesText: (n) => `${formatMiles(n)} ${miles === 1 ? "mile" : "miles"}`,
           }
         : null,
     banner: profile

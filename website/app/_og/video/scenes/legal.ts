@@ -14,7 +14,6 @@ import {
   radialGlow,
   roundRect,
   seeded,
-  sparkles,
   storePill,
   wrap,
 } from "../kit";
@@ -60,18 +59,9 @@ export async function legalScene(v: LegalVideo): Promise<Scene> {
     v.title.forEach((line, i) => {
       const p = ease.outQuint(beat(t, 0.3 + i * 0.15, 0.7));
       const ly = 290 + i * 118;
-      around(g, 72, ly, { alpha: p, dy: (1 - p) * 50 }, () => {
+      around(g, 72, ly, { alpha: p, dy: (1 - p) * 40 }, () => {
         g.font = font.head(132);
-        const shine = beat(t, 2.6, 1.1);
-        g.fillStyle =
-          i === 1
-            ? brandGradient(
-                g,
-                72,
-                560,
-                shine > 0 && shine < 1 ? ease.inOutSine(shine) : null,
-              )
-            : BRAND.ink;
+        g.fillStyle = i === 1 ? brandGradient(g, 72, 560) : BRAND.ink;
         g.fillText(line, 72, ly);
       });
     });
@@ -86,12 +76,6 @@ export async function legalScene(v: LegalVideo): Promise<Scene> {
     storePill(g, t, 72, 536, undefined, 1.3);
 
     page(g, t, bars, v.badge);
-
-    sparkles(g, t, [
-      { x: 1150, y: 90, s: 9, d: 0.2 },
-      { x: 700, y: 560, s: 7, d: 2.1 },
-      { x: 640, y: 100, s: 6, d: 3.3 },
-    ]);
   };
 }
 
@@ -106,16 +90,14 @@ function page(
   const w = 330;
   const h = 420;
   const p = ease.outBack(beat(t, 0.2, 0.85));
-  const bob = Math.sin(t * 1.3) * 4;
   around(
     g,
     x + w / 2,
     y + h / 2,
     {
-      rotate: lerp(0.22, 0.06, p),
-      scale: lerp(0.75, 1, p),
+      rotate: lerp(0.14, 0.05, p),
+      scale: lerp(0.9, 1, p),
       alpha: clamp01(p * 2),
-      dy: bob,
     },
     () => {
       g.save();
@@ -164,7 +146,7 @@ function page(
     g.lineWidth = 4 * (1 - land);
     g.strokeStyle = `rgba(255,77,125,${0.8 * (1 - land)})`;
     g.beginPath();
-    g.arc(sx, sy + bob, r + 10 + land * 70, 0, Math.PI * 2);
+    g.arc(sx, sy, r + 10 + land * 70, 0, Math.PI * 2);
     g.stroke();
   }
   around(
@@ -172,10 +154,9 @@ function page(
     sx,
     sy,
     {
-      scale: lerp(1.9, 1, ease.outBack(s)),
+      scale: lerp(1.5, 1, ease.outBack(s)),
       alpha: clamp01(s * 3),
       rotate: lerp(-0.5, -0.12, ease.outCubic(s)),
-      dy: bob,
     },
     () => {
       radialGlow(g, sx, sy, r * 2.1, 0.45);
@@ -189,7 +170,7 @@ function page(
       g.arc(sx, sy, r - 9, 0, Math.PI * 2);
       g.stroke();
       if (badge === "shield") shield(g, sx, sy, 34);
-      else seal(g, sx, sy, 30, t);
+      else seal(g, sx, sy, 30);
       check(
         g,
         sx,
@@ -221,12 +202,12 @@ function shield(g: Ctx, cx: number, cy: number, s: number) {
   g.stroke();
 }
 
-/** A scalloped seal, slowly turning. */
-function seal(g: Ctx, cx: number, cy: number, s: number, t: number) {
+/** A scalloped seal. */
+function seal(g: Ctx, cx: number, cy: number, s: number) {
   g.beginPath();
   const n = 14;
   for (let i = 0; i <= n * 2; i++) {
-    const a = (i / (n * 2)) * Math.PI * 2 + t * 0.4;
+    const a = (i / (n * 2)) * Math.PI * 2;
     const rr = i % 2 ? s : s * 0.84;
     const px = cx + Math.cos(a) * rr;
     const py = cy + Math.sin(a) * rr;

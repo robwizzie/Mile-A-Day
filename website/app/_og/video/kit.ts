@@ -25,9 +25,9 @@ export const ease = {
   inOutSine: (p: number) => -(Math.cos(Math.PI * p) - 1) / 2,
   inOutCubic: (p: number) =>
     p < 0.5 ? 4 * p * p * p : 1 - (-2 * p + 2) ** 3 / 2,
-  /** Overshoots and settles — pops and lands. */
+  /** A small overshoot, then settles: lands with life but no bounce. */
   outBack: (p: number) => {
-    const c = 1.9;
+    const c = 1.25;
     return 1 + (c + 1) * (p - 1) ** 3 + c * (p - 1) ** 2;
   },
 };
@@ -162,31 +162,12 @@ export function ellipsize(g: Ctx, text: string, width: number): string {
   return `${s.trimEnd()}…`;
 }
 
-/** Brand red→pink across a span, with a white shine that sweeps at `shine`. */
-export function brandGradient(
-  g: Ctx,
-  x0: number,
-  x1: number,
-  shine: number | null = null,
-) {
+/** Brand red→pink across a span. */
+export function brandGradient(g: Ctx, x0: number, x1: number) {
   const grad = g.createLinearGradient(x0, 0, x1, 0);
   grad.addColorStop(0, BRAND.red);
-  if (shine !== null && shine > 0 && shine < 1) {
-    const p = shine;
-    const lo = Math.max(0.001, p - 0.12);
-    const hi = Math.min(0.999, p + 0.12);
-    grad.addColorStop(lo, mix(BRAND.red, BRAND.pink, lo));
-    grad.addColorStop(p, "#ffe3ea");
-    grad.addColorStop(hi, mix(BRAND.red, BRAND.pink, hi));
-  }
   grad.addColorStop(1, BRAND.pink);
   return grad;
-}
-
-function mix(a: string, b: string, p: number): string {
-  const ca = [1, 3, 5].map((i) => parseInt(a.slice(i, i + 2), 16));
-  const cb = [1, 3, 5].map((i) => parseInt(b.slice(i, i + 2), 16));
-  return `rgb(${ca.map((v, i) => Math.round(lerp(v, cb[i], p))).join(",")})`;
 }
 
 // ── Brand pieces ────────────────────────────────────────────────────────
@@ -215,8 +196,8 @@ const APPLE =
 const applePath = new Path2D(APPLE);
 
 /**
- * The App Store pill every card closes on (`StoreLine`). It pops in at
- * `start` and then glints once; returns its width.
+ * The App Store pill every card closes on (`StoreLine`), popping in at
+ * `start`; returns its width.
  */
 export function storePill(
   g: Ctx,
@@ -230,7 +211,6 @@ export function storePill(
   const w = 24 + 24 + 12 + g.measureText(text).width + 24;
   const h = 54;
   const p = beat(t, start, 0.55);
-  const glint = beat(t, start + 1.6, 0.9);
   around(
     g,
     x + 30,
@@ -243,19 +223,6 @@ export function storePill(
       g.lineWidth = 2;
       g.strokeStyle = "rgba(199,37,84,0.6)";
       g.stroke();
-      if (glint > 0 && glint < 1) {
-        g.save();
-        roundRect(g, x, y, w, h, h / 2);
-        g.clip();
-        const gx = lerp(x - 120, x + w + 120, ease.inOutSine(glint));
-        const grad = g.createLinearGradient(gx - 70, 0, gx + 70, 0);
-        grad.addColorStop(0, "rgba(255,255,255,0)");
-        grad.addColorStop(0.5, "rgba(255,255,255,0.22)");
-        grad.addColorStop(1, "rgba(255,255,255,0)");
-        g.fillStyle = grad;
-        g.fillRect(x, y, w, h);
-        g.restore();
-      }
       g.save();
       g.translate(x + 22, y + 14);
       g.fillStyle = BRAND.ink;
@@ -295,7 +262,8 @@ export function flame(g: Ctx, x: number, y: number, size: number, t: number) {
 export const count = (n: number) => Math.round(n).toLocaleString("en-US");
 
 /**
- * A pill with the flame and "<n> day streak", counting up from `from` over
+ * A pill with the flame and "<n> day streak", counting up from `from` (half
+ * the streak by default: never a "0 day streak", even for a frame) over
  * `dur` seconds starting at `start`. Returns its width.
  */
 export function streakChip(
@@ -306,7 +274,7 @@ export function streakChip(
   streak: number,
   opts: { start?: number; dur?: number; from?: number; px?: number; appear?: number } = {},
 ): number {
-  const { start = 0.9, dur = 1.6, from = 0, px = 30 } = opts;
+  const { start = 0.9, dur = 1.6, from = Math.floor(streak / 2), px = 30 } = opts;
   const p = beat(t, opts.appear ?? start - 0.2, 0.45);
   if (p <= 0) return 0;
   const n = lerp(from, streak, ease.outQuint(beat(t, start, dur)));
@@ -360,7 +328,7 @@ export function avatar(
     { scale: lerp(0.4, 1, ease.outBack(p)), alpha: clamp01(p * 2.5) },
     () => {
       // Halo behind the picture.
-      radialGlow(g, cx, cy, r * 1.9, 0.38 + Math.sin(t * 2.4) * 0.05);
+      radialGlow(g, cx, cy, r * 1.9, 0.34);
       g.save();
       g.beginPath();
       g.arc(cx, cy, r, 0, Math.PI * 2);
@@ -403,37 +371,31 @@ export function avatar(
 
 // ── Celebration ─────────────────────────────────────────────────────────
 
-const CONFETTI = [
-  BRAND.red,
-  BRAND.pink,
-  "#ffd166",
-  "#fb923c",
-  "#f5f5f5",
-  "#4A9FF5",
-];
+// Brand colours plus white and the flame's gold: festive, still on-brand.
+const CONFETTI = [BRAND.red, BRAND.pink, "#ffd166", "#f5f5f5"];
 
-/** A confetti burst from (x, y) at `start`, falling for ~2 s. */
+/** A small confetti burst from (x, y) at `start`, gone within ~1.4 s. */
 export function confetti(
   g: Ctx,
   t: number,
   x: number,
   y: number,
   start: number,
-  { n = 46, seed = 7, spread = 1 } = {},
+  { n = 24, seed = 7, spread = 1 } = {},
 ) {
   const age = t - start;
-  if (age < 0 || age > 2.4) return;
+  if (age < 0 || age > 1.4) return;
   const rand = seeded(seed);
   for (let i = 0; i < n; i++) {
     const angle = -Math.PI / 2 + (rand() - 0.5) * Math.PI * 1.25 * spread;
-    const speed = 330 + rand() * 420;
+    const speed = 260 + rand() * 300;
     const vx = Math.cos(angle) * speed;
     const vy = Math.sin(angle) * speed;
     const drag = 1 - Math.exp(-age * 2.2);
     const px = x + (vx / 2.2) * drag;
-    const py = y + (vy / 2.2) * drag + 260 * age * age;
+    const py = y + (vy / 2.2) * drag + 170 * age * age;
     const spin = rand() * 10 + age * (6 + rand() * 8);
-    const fade = 1 - beat(age, 1.6, 0.8);
+    const fade = 1 - beat(age, 0.75, 0.65);
     const w = 7 + rand() * 7;
     const h = 4 + rand() * 4;
     g.save();
@@ -443,57 +405,6 @@ export function confetti(
     g.scale(1, Math.cos(spin * 1.7));
     g.fillStyle = CONFETTI[i % CONFETTI.length];
     g.fillRect(-w / 2, -h / 2, w, h);
-    g.restore();
-  }
-}
-
-/** Embers drifting up from a point (the flame's), looping forever. */
-export function embers(
-  g: Ctx,
-  t: number,
-  x: number,
-  y: number,
-  { n = 10, seed = 3, alpha = 1 } = {},
-) {
-  const rand = seeded(seed);
-  for (let i = 0; i < n; i++) {
-    const period = 1.6 + rand() * 1.4;
-    const phase = rand() * period;
-    const life = ((t + phase) % period) / period;
-    const drift = (rand() - 0.5) * 60;
-    const ex = x + drift * life + Math.sin((t + i) * 3) * 6;
-    const ey = y - life * (90 + rand() * 70);
-    const r = (1 - life) * (2 + rand() * 2.5);
-    g.fillStyle = `rgba(251,146,60,${(1 - life) * 0.85 * alpha})`;
-    g.beginPath();
-    g.arc(ex, ey, r, 0, Math.PI * 2);
-    g.fill();
-  }
-}
-
-/** Little four-point sparkles that twinkle at fixed spots. */
-export function sparkles(
-  g: Ctx,
-  t: number,
-  spots: { x: number; y: number; s: number; d: number }[],
-  color = "#ffe3ea",
-) {
-  for (const { x, y, s, d } of spots) {
-    const tw = Math.max(0, Math.sin((t + d) * 2.2));
-    if (tw <= 0.02) continue;
-    const r = s * tw;
-    g.save();
-    g.translate(x, y);
-    g.rotate(t * 0.8 + d);
-    g.fillStyle = color;
-    g.globalAlpha *= tw;
-    g.beginPath();
-    g.moveTo(0, -r);
-    g.quadraticCurveTo(0, 0, r, 0);
-    g.quadraticCurveTo(0, 0, 0, r);
-    g.quadraticCurveTo(0, 0, -r, 0);
-    g.quadraticCurveTo(0, 0, 0, -r);
-    g.fill();
     g.restore();
   }
 }

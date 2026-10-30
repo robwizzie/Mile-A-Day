@@ -12,7 +12,6 @@ import {
   count,
   ease,
   ellipsize,
-  embers,
   fitSize,
   font,
   ground,
@@ -23,14 +22,14 @@ import {
   radialGlow,
   roundRect,
   seeded,
-  sparkles,
   storePill,
   streakChip,
 } from "../kit";
 
 // The video for a link about ONE person — a profile or a post (the PersonCard
 // of the PNG cards, in motion): their avatar pops in as the app's ring draws
-// round it, the streak counts up and lands with confetti, the stats tick up.
+// round it, the streak counts up and lands with a small burst — one moment,
+// then everything holds still to be read.
 // Same rule as the cards: only what `/public/users/:username` already
 // publishes. A post shows its AUTHOR — the post itself (photo, route, caption)
 // never appears; its side card is decoration, a locked "friends only" tile.
@@ -42,12 +41,8 @@ export type PersonVideo = {
   name: string;
   handle: string | null;
   streak: number | null;
-  /** Shared stats, counted up; null when the account withholds them. */
-  stats: {
-    miles: number;
-    milesText: (n: number) => string;
-    friends: number;
-  } | null;
+  /** Shared stats ("312 miles", 14); null when the account withholds them. */
+  stats: { miles: string; friends: number } | null;
   /** The profile's banner: its two gradient stops and the photo over them. */
   banner: { stops: [string, string]; image: Image | null } | null;
   headline: string;
@@ -124,36 +119,30 @@ export function personScene(v: PersonVideo): Scene {
     }
     if (v.streak !== null) {
       y += 26;
-      const chipY = y;
-      const w = streakChip(g, t, textX, chipY, v.streak, {
+      // The burst comes from behind the chip, not over its number.
+      confetti(g, t, textX + 150, y + 26, LAND, { seed });
+      streakChip(g, t, textX, y, v.streak, {
         appear: 0.95,
         start: 1.15,
         dur: LAND - 1.15,
         px: 30,
       });
-      if (t > LAND)
-        embers(g, t, textX + 30, chipY + 22, {
-          n: 9,
-          seed,
-          alpha: clamp01((t - LAND) * 2),
-        });
-      confetti(g, t, textX + w / 2, chipY + 26, LAND, { seed, n: 50 });
       y += 52;
     }
     if (v.stats) {
       const s = v.stats;
-      const p = ease.outQuint(beat(t, 1.4, 1.5));
-      const sIn = ease.outCubic(beat(t, 1.3, 0.5));
+      // Plain facts, faded in: one counter (the streak) is enough motion.
+      const sIn = ease.outCubic(beat(t, 1.5, 0.6));
       y += 46;
       const sy = y;
       around(g, textX, sy, { alpha: sIn, dy: (1 - sIn) * 16 }, () => {
         g.font = font.body(28);
         g.fillStyle = BRAND.muted;
-        const friends = Math.round(s.friends * p);
+
         g.fillText(
           ellipsize(
             g,
-            `${s.milesText(s.miles * p)} · ${count(friends)} ${s.friends === 1 ? "friend" : "friends"}`,
+            `${s.miles} · ${count(s.friends)} ${s.friends === 1 ? "friend" : "friends"}`,
             textW,
           ),
           textX,
@@ -175,12 +164,6 @@ export function personScene(v: PersonVideo): Scene {
     g.font = font.body(25, 700);
     const pillW = 24 + 24 + 12 + g.measureText("Get Mile A Day").width + 24;
     storePill(g, t, W - 72 - pillW, 532, "Get Mile A Day", 1.8);
-
-    sparkles(g, t, [
-      { x: W - 120, y: 60, s: 9, d: 0.4 },
-      { x: W - 330, y: 120, s: 6, d: 2.2 },
-      { x: acx + r * 0.9, y: acy - r * 0.95, s: 10, d: 1.2 },
-    ]);
   };
 }
 
@@ -232,16 +215,14 @@ function postTile(g: Ctx, t: number, seed: number) {
   const w = 290;
   const h = 360;
   const p = ease.outBack(beat(t, 0.35, 0.8));
-  const bob = Math.sin(t * 1.4) * 5;
   around(
     g,
     x + w / 2,
     y + h / 2,
     {
-      rotate: lerp(0.2, -0.05, p),
+      rotate: lerp(0.12, -0.04, p),
       scale: lerp(0.7, 1, p),
       alpha: clamp01(p * 2),
-      dy: bob,
     },
     () => {
       g.save();
@@ -286,11 +267,11 @@ function postTile(g: Ctx, t: number, seed: number) {
         .slice(0, upto)
         .forEach(([px, py], i) => (i ? g.lineTo(px, py) : g.moveTo(px, py)));
       g.stroke();
-      // Once drawn, the runner keeps lapping it.
+      // Once drawn, the runner keeps lapping it, unhurried.
       const lap =
         draw < 1
           ? upto - 1
-          : Math.floor(((t - 3) / 2.4) * path.length) % path.length;
+          : Math.floor(((t - 3) / 4) * path.length) % path.length;
       const [dx, dy] = path[Math.min(path.length - 1, lap)];
       radialGlow(g, dx, dy, 26, 0.7, "255,77,125");
       g.fillStyle = "#fff";

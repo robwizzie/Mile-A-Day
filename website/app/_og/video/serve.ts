@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { unstable_cache } from "next/cache";
 import { hashString } from "./kit";
 import { renderVideo, type Scene } from "./render";
@@ -16,11 +18,22 @@ import { renderVideo, type Scene } from "./render";
 // - A render that fails answers 503 uncached: the platform falls back to
 //   the og:image card, and the next request tries again.
 
-/** Changes with every deploy, so new scene code never serves old videos. */
+/**
+ * Changes with every deploy, so new scene code never serves old videos: the
+ * Vercel deployment, else this build's id (`next start`), else the dev
+ * server's start (the data cache outlives both locally).
+ */
 const BUILD =
-  process.env.VERCEL_DEPLOYMENT_ID ??
-  process.env.VERCEL_GIT_COMMIT_SHA ??
-  "dev";
+  process.env.VERCEL_DEPLOYMENT_ID ?? process.env.VERCEL_GIT_COMMIT_SHA ?? localBuild();
+
+function localBuild(): string {
+  if (process.env.NODE_ENV === "development") return `dev-${Date.now()}`;
+  try {
+    return readFileSync(join(process.cwd(), ".next/BUILD_ID"), "utf8").trim();
+  } catch {
+    return `start-${Date.now()}`;
+  }
+}
 
 const MEMORY_MAX = 24;
 const memory = new Map<string, { until: number; bytes: Uint8Array }>();

@@ -3,7 +3,6 @@ import { CURRENT_RELEASE, type ReleaseFeature } from "@/lib/releases";
 import { BRAND } from "../../shared";
 import { ogAsset, type Scene } from "../render";
 import {
-  H,
   around,
   beat,
   brandGradient,
@@ -17,17 +16,18 @@ import {
   lerp,
   lockup,
   roundRect,
-  sparkles,
   storePill,
   wrap,
 } from "../kit";
 
 // /updates' video: the current release from lib/releases.ts — its version and
-// headline, and every feature in it (the same icon and colour as the page)
-// rolling up as a stack of cards. A release added there moves this video too.
+// headline, and its first features (the same icon and colour as the page)
+// dealt in as cards, with the rest counted below. A release added there moves
+// this video too.
 
-const CARD_H = 84;
-const GAP = 14;
+const SHOWN = 4;
+const CARD_H = 88;
+const GAP = 16;
 const COL_X = 676;
 const COL_W = 452;
 
@@ -37,8 +37,13 @@ export async function updatesScene(): Promise<Scene> {
     ogAsset("icon.png"),
     Promise.all(release.features.map(featureGlyph)),
   ]);
-  const features = release.features.map((f, i) => ({ ...f, glyph: glyphs[i] }));
+  const features = release.features
+    .map((f, i) => ({ ...f, glyph: glyphs[i] }))
+    .slice(0, SHOWN);
+  const more = release.features.length - features.length;
   const step = CARD_H + GAP;
+  const stackH = features.length * step - GAP + (more > 0 ? 58 : 0);
+  const top0 = Math.round((630 - stackH) / 2);
 
   return (g, t) => {
     ground(g, t);
@@ -52,7 +57,7 @@ export async function updatesScene(): Promise<Scene> {
       g,
       72,
       175,
-      { scale: lerp(0.6, 1, tagIn), alpha: clamp01(tagIn * 2) },
+      { scale: lerp(0.85, 1, tagIn), alpha: clamp01(tagIn * 2) },
       () => {
         g.font = font.body(22, 700);
         const label = `WHAT'S NEW · v${release.version}`;
@@ -84,18 +89,10 @@ export async function updatesScene(): Promise<Scene> {
     lines.forEach((line, i) => {
       const p = ease.outQuint(beat(t, 0.35 + i * 0.14, 0.7));
       const y = top + i * lh;
-      around(g, 72, y, { alpha: p, dy: (1 - p) * 50 }, () => {
+      around(g, 72, y, { alpha: p, dy: (1 - p) * 40 }, () => {
         g.font = font.head(px);
         const last = i === lines.length - 1;
-        const shine = beat(t, 2.2, 1.1);
-        g.fillStyle = last
-          ? brandGradient(
-              g,
-              72,
-              600,
-              shine > 0 && shine < 1 ? ease.inOutSine(shine) : null,
-            )
-          : BRAND.ink;
+        g.fillStyle = last ? brandGradient(g, 72, 600) : BRAND.ink;
         g.fillText(line, 72, y);
       });
     });
@@ -112,37 +109,30 @@ export async function updatesScene(): Promise<Scene> {
     });
     storePill(g, t, 72, 532, undefined, 1.3);
 
-    // The features, dealt in from the right, then rolling up forever.
-    const scroll = Math.max(0, t - 1.9) * 46;
-    g.save();
-    g.beginPath();
-    g.rect(COL_X - 30, 0, COL_W + 60, H);
-    g.clip();
-    const first = Math.floor(scroll / step);
-    for (let k = first - 1; k < first + 8; k++) {
-      const i = ((k % features.length) + features.length) % features.length;
-      // Before the roll starts only the first pass is dealt; after, the list repeats.
-      if (k < 0 || (t < 1.9 && k >= features.length)) continue;
-      const y = 40 + k * step - scroll;
-      if (y > H || y + CARD_H < 0) continue;
-      const deal = ease.outBack(beat(t, 0.45 + Math.min(k, 6) * 0.11, 0.6));
-      // Fade at the top and bottom edges.
-      const edge = clamp01(Math.min((y + CARD_H) / 90, (H - y) / 110));
+    // The features, dealt in one by one; then a single highlight passes
+    // down the stack, and everything holds.
+    features.forEach((f, k) => {
+      const y = top0 + k * step;
+      const deal = ease.outCubic(beat(t, 0.6 + k * 0.18, 0.55));
+      const lit = beat(t, 2.3 + k * 0.3, 0.6);
+      const glow = lit > 0 && lit < 1 ? Math.sin(lit * Math.PI) : 0;
       around(
         g,
         COL_X + COL_W / 2,
         y + CARD_H / 2,
-        { alpha: clamp01(deal * 2) * edge, dx: (1 - deal) * 320 },
-        () => featureCard(g, features[i], COL_X, y),
+        { alpha: deal, dx: (1 - deal) * 60 },
+        () => featureCard(g, f, COL_X, y, glow),
       );
+    });
+    if (more > 0) {
+      const m = ease.outCubic(beat(t, 1.6, 0.5));
+      const y = top0 + features.length * step + 26;
+      around(g, COL_X, y, { alpha: m, dy: (1 - m) * 10 }, () => {
+        g.font = font.body(24, 700);
+        g.fillStyle = BRAND.muted;
+        g.fillText(`+ ${more} more in this update`, COL_X + 8, y);
+      });
     }
-    g.restore();
-
-    sparkles(g, t, [
-      { x: 620, y: 120, s: 9, d: 0.5 },
-      { x: 1150, y: 600, s: 7, d: 2.4 },
-      { x: 560, y: 470, s: 6, d: 3.6 },
-    ]);
   };
 }
 
@@ -151,21 +141,26 @@ function featureCard(
   f: ReleaseFeature & { glyph: Image | null },
   x: number,
   y: number,
+  /** 0→1→0 as the highlight passes this card: its border takes its colour. */
+  glow: number,
 ) {
+  const pad = (CARD_H - 56) / 2;
   roundRect(g, x, y, COL_W, CARD_H, 22);
   g.fillStyle = "rgba(255,255,255,0.05)";
   g.fill();
+  g.fillStyle = hexA(f.color, 0.06 * glow);
+  g.fill();
   g.lineWidth = 1.5;
-  g.strokeStyle = "rgba(255,255,255,0.09)";
+  g.strokeStyle = glow > 0 ? hexA(f.color, 0.09 + 0.5 * glow) : "rgba(255,255,255,0.09)";
   g.stroke();
-  roundRect(g, x + 14, y + 14, 56, 56, 16);
+  roundRect(g, x + pad, y + pad, 56, 56, 16);
   g.fillStyle = hexA(f.color, 0.18);
   g.fill();
-  if (f.glyph) g.drawImage(f.glyph, x + 26, y + 26, 32, 32);
+  if (f.glyph) g.drawImage(f.glyph, x + pad + 12, y + pad + 12, 32, 32);
   g.font = font.body(25, 700);
   g.fillStyle = BRAND.ink;
   g.textBaseline = "middle";
-  g.fillText(ellipsize(g, f.title, COL_W - 110), x + 88, y + CARD_H / 2 + 1);
+  g.fillText(ellipsize(g, f.title, COL_W - 110), x + pad + 74, y + CARD_H / 2 + 1);
   g.textBaseline = "alphabetic";
 }
 
