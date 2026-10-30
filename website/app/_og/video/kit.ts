@@ -374,7 +374,7 @@ export function avatar(
 // Brand colours plus white and the flame's gold: festive, still on-brand.
 const CONFETTI = [BRAND.red, BRAND.pink, "#ffd166", "#f5f5f5"];
 
-/** A small confetti burst from (x, y) at `start`, gone within ~1.4 s. */
+/** A small confetti burst from (x, y) at `start`, gone within ~1.2 s. */
 export function confetti(
   g: Ctx,
   t: number,
@@ -384,7 +384,7 @@ export function confetti(
   { n = 24, seed = 7, spread = 1 } = {},
 ) {
   const age = t - start;
-  if (age < 0 || age > 1.4) return;
+  if (age < 0 || age > 1.2) return;
   const rand = seeded(seed);
   for (let i = 0; i < n; i++) {
     const angle = -Math.PI / 2 + (rand() - 0.5) * Math.PI * 1.25 * spread;
@@ -395,7 +395,7 @@ export function confetti(
     const px = x + (vx / 2.2) * drag;
     const py = y + (vy / 2.2) * drag + 170 * age * age;
     const spin = rand() * 10 + age * (6 + rand() * 8);
-    const fade = 1 - beat(age, 0.75, 0.65);
+    const fade = 1 - beat(age, 0.6, 0.55);
     const w = 7 + rand() * 7;
     const h = 4 + rand() * 4;
     g.save();

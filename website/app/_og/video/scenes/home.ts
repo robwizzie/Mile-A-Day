@@ -1,3 +1,4 @@
+import type { Image } from "@napi-rs/canvas";
 import { BRAND } from "../../shared";
 import { ogAsset, type Ctx, type Scene } from "../render";
 import {
@@ -7,81 +8,51 @@ import {
   clamp01,
   confetti,
   ease,
-  flame,
   font,
   foreground,
   ground,
   lerp,
   lockup,
+  radialGlow,
   roundRect,
   storePill,
 } from "../kit";
 
-// The home page's video: the hero's headline lands beside the real dashboard,
-// and ONE card tells the story — today's mile fills its ring, a check, a small
-// burst, and the card becomes the streak (512: the screenshot's 511, plus
-// today). Everything has landed by ~3.5 s and holds still to be read.
+// The home page's video, told with the app's own screens: the hero's
+// headline lands beside an iPhone showing the real dashboard (the hero's
+// capture), Start Mile gets a tap, and the app's real "Still lit. Day 511"
+// share card pops out of the phone with a small burst. Everything has landed
+// by ~2.8 s and holds still to be read.
 
-const DONE_AT = 3.0;
+// The phone: the screen is the dashboard capture (776×1680) at this width,
+// bleeding off the bottom edge like a product shot.
+const SX = 832;
+const SY = 54;
+const SW = 322;
+const SCALE = SW / 776;
+const SH = 1680 * SCALE;
+
+/** Start Mile in the capture (776-wide coordinates). */
+const START = { x: 30, y: 991, w: 716, h: 104 };
+
+const TAP_AT = 1.45;
+const CARD_AT = 2.0;
 
 export async function homeScene(): Promise<Scene> {
-  const [icon, dashboard] = await Promise.all([
+  const [icon, dashboard, card] = await Promise.all([
     ogAsset("icon.png"),
-    ogAsset("dashboard.jpg"),
+    ogAsset("dashboard-full.jpg"),
+    ogAsset("still-lit.jpg"),
   ]);
 
   return (g, t) => {
     ground(g, t);
     foreground(g, t);
 
-    // The phone rises in and stays put.
-    const rise = ease.outCubic(beat(t, 0.15, 0.9));
-    const px = 836;
-    const py = 66;
-    const pw = 320;
-    const ph = 590;
-    around(
-      g,
-      px + pw / 2,
-      py + ph / 2,
-      {
-        rotate: (6 * Math.PI) / 180,
-        alpha: clamp01(rise * 1.6),
-        dy: (1 - rise) * 200,
-      },
-      () => {
-        g.save();
-        g.shadowColor = "rgba(199,37,84,0.3)";
-        g.shadowBlur = 90;
-        roundRect(g, px - 10, py - 10, pw + 20, ph + 20, 54);
-        g.fillStyle = "#1c1c1e";
-        g.fill();
-        g.restore();
-        g.lineWidth = 2;
-        g.strokeStyle = "rgba(255,255,255,0.12)";
-        roundRect(g, px - 10, py - 10, pw + 20, ph + 20, 54);
-        g.stroke();
-        g.save();
-        roundRect(g, px, py, pw, ph, 44);
-        g.clip();
-        g.drawImage(
-          dashboard,
-          0,
-          0,
-          dashboard.width,
-          (dashboard.width * ph) / pw,
-          px,
-          py,
-          pw,
-          ph,
-        );
-        g.restore();
-      },
-    );
+    phone(g, t, dashboard);
+    stillLit(g, t, card);
 
-    mileCard(g, t);
-
-    // The copy column.
+    // The copy column — the hero's own words.
     lockup(g, icon, t);
     const l1 = ease.outQuint(beat(t, 0.25, 0.7));
     const l2 = ease.outQuint(beat(t, 0.45, 0.7));
@@ -105,120 +76,133 @@ export async function homeScene(): Promise<Scene> {
   };
 }
 
-/** Today's mile on a card over the phone's corner, turning into the streak. */
-function mileCard(g: Ctx, t: number) {
-  const x = 664;
-  const y = 404;
-  const w = 344;
-  const h = 132;
-  const cardIn = ease.outBack(beat(t, 0.7, 0.6));
-  const fill = ease.inOutCubic(beat(t, 1.1, DONE_AT - 1.1));
-  const done = beat(t, DONE_AT, 0.4); // the card's settle and border
-  // The text swap: the distance goes out, then the streak comes in.
-  const out = beat(t, DONE_AT, 0.15);
-  const into = ease.outCubic(beat(t, DONE_AT + 0.12, 0.35));
-  const settle = done > 0 && done < 1 ? Math.sin(done * Math.PI) * 0.025 : 0;
-
-  // The burst comes from behind the card, not over its words.
-  confetti(g, t, x + 66, y + h / 2, DONE_AT, { seed: 11 });
+/** An iPhone (titanium edge, black bezel) rising in, then still. */
+function phone(g: Ctx, t: number, screen: Image) {
+  const rise = ease.outCubic(beat(t, 0.1, 0.9));
   around(
     g,
-    x + w / 2,
-    y + h / 2,
-    {
-      scale: lerp(0.85, 1, cardIn) + settle,
-      alpha: clamp01(cardIn * 2),
-      dy: (1 - cardIn) * 20,
-    },
+    SX + SW / 2,
+    SY + 300,
+    { alpha: clamp01(rise * 1.5), dy: (1 - rise) * 140 },
     () => {
+      // Backlight: the brand glow the phone sits in.
+      radialGlow(g, SX + SW / 2, SY + 260, 420, 0.3);
+
+      const edge = 13;
+      const bezel = 9;
+      // Side buttons, behind the body.
+      g.fillStyle = "#2c2c30";
+      roundRect(g, SX - edge - 3, SY + 150, 6, 52, 3);
+      g.fill();
+      roundRect(g, SX - edge - 3, SY + 218, 6, 52, 3);
+      g.fill();
+      roundRect(g, SX + SW + edge - 3, SY + 180, 6, 84, 3);
+      g.fill();
+
+      // Body: a titanium edge with a soft shadow.
       g.save();
-      g.shadowColor = "rgba(0,0,0,0.55)";
-      g.shadowBlur = 40;
-      g.shadowOffsetY = 16;
-      roundRect(g, x, y, w, h, 28);
-      g.fillStyle = "rgba(26,26,28,0.95)";
+      g.shadowColor = "rgba(0,0,0,0.6)";
+      g.shadowBlur = 50;
+      g.shadowOffsetY = 20;
+      roundRect(g, SX - edge, SY - edge, SW + edge * 2, SH + edge * 2, 60);
+      const ti = g.createLinearGradient(SX - edge, 0, SX + SW + edge, 0);
+      ti.addColorStop(0, "#4a4a50");
+      ti.addColorStop(0.08, "#26262a");
+      ti.addColorStop(0.92, "#26262a");
+      ti.addColorStop(1, "#4a4a50");
+      g.fillStyle = ti;
       g.fill();
       g.restore();
-      g.lineWidth = 2;
-      g.strokeStyle = `rgba(199,37,84,${lerp(0.12, 0.6, done)})`;
-      roundRect(g, x, y, w, h, 28);
-      g.stroke();
+      roundRect(g, SX - bezel, SY - bezel, SW + bezel * 2, SH + bezel * 2, 54);
+      g.fillStyle = "#030303";
+      g.fill();
 
-      // The ring, then the check inside it.
-      const rx = x + 66;
-      const ry = y + h / 2;
-      g.lineWidth = 11;
-      g.strokeStyle = "rgba(199,37,84,0.2)";
-      g.beginPath();
-      g.arc(rx, ry, 38, 0, Math.PI * 2);
-      g.stroke();
-      if (fill > 0) {
-        g.lineCap = "round";
-        g.strokeStyle = brandGradient(g, rx - 40, rx + 40);
-        g.beginPath();
-        // A full 2π sweep with round caps draws nothing in Skia.
-        g.arc(
-          rx,
-          ry,
-          38,
-          -Math.PI / 2,
-          -Math.PI / 2 + Math.PI * 2 * Math.min(fill, 0.9999),
-        );
-        g.stroke();
-        g.lineCap = "butt";
-      }
-      check(g, rx, ry, ease.outCubic(beat(t, DONE_AT, 0.35)));
-
-      // Text: the distance counting up, crossfading to the streak.
-      const tx = x + 132;
+      // The screen.
       g.save();
-      g.globalAlpha *= 1 - out;
-      g.fillStyle = BRAND.muted;
-      g.font = font.body(19, 700);
-      g.fillText("TODAY", tx, y + 52);
-      g.font = font.head(56);
-      g.fillStyle = BRAND.ink;
-      g.fillText(`${fill.toFixed(2)} MI`, tx, y + 104);
+      roundRect(g, SX, SY, SW, SH, 45);
+      g.clip();
+      g.drawImage(screen, SX, SY, SW, SH);
+      tap(g, t);
       g.restore();
-      if (into > 0) {
-        g.save();
-        g.globalAlpha *= into;
-        const dy = (1 - into) * 10;
-        g.fillStyle = BRAND.muted;
-        g.font = font.body(19, 700);
-        g.fillText("MILE DONE", tx, y + 52 + dy);
-        flame(g, tx - 2, y + 66 + dy, 34, t);
-        g.font = font.head(56);
-        g.fillStyle = brandGradient(g, tx, tx + 200);
-        g.fillText("512 DAYS", tx + 38, y + 104 + dy);
-        g.restore();
-      }
+
+      g.lineWidth = 1.5;
+      g.strokeStyle = "rgba(255,255,255,0.14)";
+      roundRect(g, SX - edge, SY - edge, SW + edge * 2, SH + edge * 2, 60);
+      g.stroke();
     },
   );
 }
 
-/** A check drawing itself inside the ring (k: 0→1). */
-function check(g: Ctx, cx: number, cy: number, k: number) {
-  if (k <= 0) return;
-  const pts: [number, number][] = [
-    [cx - 15, cy + 1],
-    [cx - 4, cy + 12],
-    [cx + 17, cy - 11],
-  ];
-  g.lineWidth = 8;
-  g.lineCap = "round";
-  g.lineJoin = "round";
-  g.strokeStyle = BRAND.ink;
+/** A tap on Start Mile: the button dips and a ripple spreads across it. */
+function tap(g: Ctx, t: number) {
+  const p = beat(t, TAP_AT, 0.55);
+  if (p <= 0 || p >= 1) return;
+  const x = SX + START.x * SCALE;
+  const y = SY + START.y * SCALE;
+  const w = START.w * SCALE;
+  const h = START.h * SCALE;
+  g.save();
+  roundRect(g, x, y, w, h, h / 2);
+  g.clip();
+  g.fillStyle = `rgba(0,0,0,${0.22 * Math.sin(Math.min(1, p * 2.2) * Math.PI)})`;
+  g.fillRect(x, y, w, h);
+  const r = lerp(8, w * 0.75, ease.outCubic(p));
+  g.fillStyle = `rgba(255,255,255,${0.32 * (1 - p)})`;
   g.beginPath();
-  g.moveTo(...pts[0]);
-  if (k < 0.4) {
-    const q = k / 0.4;
-    g.lineTo(lerp(pts[0][0], pts[1][0], q), lerp(pts[0][1], pts[1][1], q));
-  } else {
-    const q = (k - 0.4) / 0.6;
-    g.lineTo(...pts[1]);
-    g.lineTo(lerp(pts[1][0], pts[2][0], q), lerp(pts[1][1], pts[2][1], q));
-  }
-  g.stroke();
-  g.lineCap = "butt";
+  g.arc(x + w * 0.42, y + h / 2, r, 0, Math.PI * 2);
+  g.fill();
+  g.restore();
+}
+
+/**
+ * The app's real share card ("Still lit." · Day 511) popping out of the
+ * phone and landing tilted beside it, with a small burst from behind.
+ */
+function stillLit(g: Ctx, t: number, card: Image) {
+  const h = 364;
+  const w = (h * card.width) / card.height;
+  const fx = 668; // where it lands (top-left)
+  const fy = 206;
+  const p = beat(t, CARD_AT, 0.75);
+  if (p <= 0) return;
+  const move = ease.outCubic(p);
+  const pop = ease.outBack(p);
+  // From the phone's screen to its spot.
+  const cx = lerp(SX + SW / 2, fx + w / 2, move);
+  const cy = lerp(SY + 290, fy + h / 2, move);
+
+  // The burst comes from the card's top edge as it lands, above it.
+  confetti(g, t, fx + w / 2, fy + 24, CARD_AT + 0.4, { seed: 11 });
+
+  around(
+    g,
+    cx,
+    cy,
+    {
+      scale: lerp(0.55, 1, pop),
+      rotate: lerp(0.06, -0.105, move),
+      alpha: clamp01(p * 3),
+    },
+    () => {
+      const x = cx - w / 2;
+      const y = cy - h / 2;
+      g.save();
+      g.shadowColor = "rgba(0,0,0,0.6)";
+      g.shadowBlur = 50;
+      g.shadowOffsetY = 22;
+      roundRect(g, x, y, w, h, 20);
+      g.fillStyle = "#120c0a";
+      g.fill();
+      g.restore();
+      g.save();
+      roundRect(g, x, y, w, h, 20);
+      g.clip();
+      g.drawImage(card, x, y, w, h);
+      g.restore();
+      g.lineWidth = 1.5;
+      g.strokeStyle = "rgba(255,255,255,0.16)";
+      roundRect(g, x, y, w, h, 20);
+      g.stroke();
+    },
+  );
 }

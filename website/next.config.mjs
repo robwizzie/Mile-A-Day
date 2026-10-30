@@ -1,4 +1,4 @@
-const OG_ASSETS = ['./app/_og/fonts/*', './app/_og/icon.png', './app/_og/dashboard.jpg'];
+const OG_ASSETS = ['./app/_og/fonts/*', './app/_og/*.png', './app/_og/*.jpg'];
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {

@@ -59,8 +59,9 @@ Why it's built this way:
   `Component.render`) and loaded as SVG.
 - **Clean, fun, not overwhelming: one payoff, then stillness.** Each clip
   has ONE moment, and everything has landed by about 3.5 s and holds still
-  so the preview can be read. The moments are: the home card's mile
-  finishing and turning into the streak, the release cards' single
+  so the preview can be read. The moments are: on home, the app's real
+  "Still lit." share card popping out of the phone after a tap on Start
+  Mile, the release cards' single
   highlight pass, the desk changing style, the legal stamp, and a profile's
   streak landing. The first pass also had twinkling sparkles, shine sweeps
   over headlines, a pill glint, embers, bobbing cards, an endless card
@@ -69,6 +70,15 @@ Why it's built this way:
   Confetti is a small burst in brand colours from BEHIND the thing it
   celebrates, gone in ~1.4 s. A counter never shows 0: `streakChip` counts
   from half the streak.
+- **Show the real app, not a mock of it.** The home video is built from
+  real captures, pre-cropped into `app/_og/`: `dashboard-full.jpg` (the
+  hero's `public/images/hero` shot) in a drawn iPhone frame, and
+  `still-lit.jpg` (the share card cropped from the 1.2.07 What's New
+  capture). An earlier version drew its own "mile done" card over a
+  cropped screenshot, and it read as a mock-up. `next.config.mjs` traces
+  `app/_og/*.jpg|png`, so a new asset ships without a config change, but
+  a replaced capture needs the scene's coordinates re-checked (`START` in
+  `home.ts` is the Start Mile button in 776-wide capture pixels).
 - **Bitrate is about moving pixels.** H.264 baseline has no weighted
   prediction, so fades and moving photos cost the most. A bobbing phone
   screenshot took home to 2.3 MB, and a Ken Burns banner took a profile to
