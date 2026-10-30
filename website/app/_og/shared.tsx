@@ -67,6 +67,16 @@ export const dashboardDataURI = () =>
 export async function remoteImageDataURI(
   url: string | null,
 ): Promise<string | null> {
+  const got = await remoteImageBytes(url);
+  return got
+    ? `data:${got.type};base64,${Buffer.from(got.bytes).toString("base64")}`
+    : null;
+}
+
+/** The bytes behind `remoteImageDataURI` (the og.mp4 videos draw them too). */
+export async function remoteImageBytes(
+  url: string | null,
+): Promise<{ type: string; bytes: Buffer } | null> {
   if (!url) return null;
   try {
     const controller = new AbortController();
@@ -81,7 +91,7 @@ export async function remoteImageDataURI(
     if (!type.startsWith("image/")) return null;
     const bytes = await res.arrayBuffer();
     if (bytes.byteLength === 0 || bytes.byteLength > 2_000_000) return null;
-    return `data:${type};base64,${Buffer.from(bytes).toString("base64")}`;
+    return { type, bytes: Buffer.from(bytes) };
   } catch {
     return null;
   }

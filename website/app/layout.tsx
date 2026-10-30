@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from 'next'
 import { DM_Sans, Bebas_Neue } from 'next/font/google'
 import { Analytics } from '@vercel/analytics/next'
 import './globals.css'
+import { ogVideos } from './_og/video/meta'
 
 const dmSans = DM_Sans({
   subsets: ['latin'],
@@ -58,6 +59,8 @@ export const metadata: Metadata = {
     type: 'website',
     siteName: 'Mile A Day',
     locale: 'en_US',
+    // The animated preview (app/og.mp4); opengraph-image.tsx stays og:image.
+    videos: ogVideos('/og.mp4'),
   },
   twitter: {
     card: 'summary_large_image',

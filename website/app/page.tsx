@@ -19,6 +19,7 @@ import { Footer } from "@/components/footer";
 import { ScrollReveal } from "@/components/scroll-reveal";
 import { CURRENT_RELEASE } from "@/lib/releases";
 import { APP_STORE_URL, SITE_URL, SUPPORT_EMAIL } from "@/lib/site";
+import { ogVideos } from "./_og/video/meta";
 
 export const metadata: Metadata = {
   alternates: { canonical: "/" },
@@ -32,6 +33,7 @@ export const metadata: Metadata = {
     type: "website",
     siteName: "Mile A Day",
     locale: "en_US",
+    videos: ogVideos("/og.mp4"),
   },
   // Smart App Banner: iOS Safari offers "Get"/"Open" for the app up top.
   itunes: { appId: "6746970905" },

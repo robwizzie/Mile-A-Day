@@ -13,6 +13,7 @@ import {
   publicStreak,
   type PublicPost,
 } from "./publicPost";
+import { ogVideos } from "../../_og/video/meta";
 
 const APP_STORE_URL = "https://apps.apple.com/us/app/mile-a-day/id6746970905";
 
@@ -51,7 +52,14 @@ export async function generateMetadata({
     // link previews are unaffected) while still letting crawlers follow
     // through to the author's public profile.
     robots: { index: false, follow: true },
-    openGraph: { title, description, type: "article", siteName: "Mile A Day" },
+    openGraph: {
+      title,
+      description,
+      type: "article",
+      siteName: "Mile A Day",
+      // The animated card (og.mp4 beside this page); the PNG stays og:image.
+      videos: ogVideos(`/p/${encodeURIComponent(post.post_id)}/og.mp4`),
+    },
     // The co-located opengraph-image is 1200x630 and Next emits it for Twitter
     // too. `summary` rendered that as a small square thumbnail with most of the
     // card cropped away — the one shape it is not.

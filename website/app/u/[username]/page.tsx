@@ -25,6 +25,7 @@ import {
   profileInitials,
   type PublicMedal,
 } from "./publicProfile";
+import { ogVideos } from "../../_og/video/meta";
 
 const getProfile = getPublicProfile;
 
@@ -60,6 +61,8 @@ export async function generateMetadata({
       url: canonical,
       type: "profile",
       siteName: "Mile A Day",
+      // The animated card (og.mp4 beside this page); the PNG stays og:image.
+      videos: ogVideos(`/u/${encodeURIComponent(profile.username ?? username)}/og.mp4`),
     },
     // The co-located opengraph-image is a 1200x630 card; `summary` would crop
     // it to a small square.

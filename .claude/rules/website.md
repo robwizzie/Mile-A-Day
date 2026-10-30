@@ -49,6 +49,7 @@ Use `npm` for all operations.
 
 ## SEO / link previews
 - Every unfurl card draws from `app/_og/shared.tsx` (vendored Bebas Neue + DM Sans `.woff` — Satori can't read woff2 or next/font — the app icon, a pre-cropped dashboard shot, `PersonCard`). A page that sets its own `openGraph`/`twitter` REPLACES the root object (no merge) and LOSES the root card image: restate title/description/url and give the segment an `opengraph-image` (re-exporting the root one is enough — see `privacy/`). Profile/post cards show only what `/public/users/:username` already publishes. Check rendered tags with `next start` + curl and LOOK at each PNG.
+- Every page with a card also has an `og.mp4` route: a scene in `app/_og/video/scenes/`, served by `ogVideoResponse` (keyed by `factsKey` of what it draws, never raw params), tagged via `ogVideos()` in the page's `openGraph.videos`; the PNG stays og:image. ONE payoff per clip, everything landed by ~3.5 s then held still to read; no ambient sparkles, shine sweeps or bobbing. Keep moving pixels small (backgrounds still, `foreground()` for the loop fade), clips ≲1.2 MB, and look at the frames before shipping. Details: docs/conventions/website.md § Link-preview videos
 
 ## Release notes
 - `lib/releases.ts` is the site's copy of the app's `WhatsNewCatalog` (newest first): adding a release there moves the home page's "New in" section, `/updates`, the hero pill, the footer's version and the JSON-LD `softwareVersion` together. Version = the App Store MARKETING_VERSION that shipped it. Support email lives once in `lib/site.ts`.
