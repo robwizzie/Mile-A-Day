@@ -268,4 +268,11 @@ export interface StoryGroup {
    *  actually watch, so an unearned today-story can't leave a permanently
    *  unclearable ring. Additive field. */
   unviewed_local_dates: string[];
+  /** The author's newest story PHOTO (a real, non-auto picture), for the
+   *  rail tile's preview. null when the newest stories are all auto cards, or
+   *  when the photo gate withholds it (`gateStoryRailPreviews`). Additive. */
+  preview_url?: string | null;
+  /** Author-local day of `preview_url`, so the gate can judge it. Stripped
+   *  by `gateStoryRailPreviews` before the response goes out. */
+  preview_local_date?: string | null;
 }

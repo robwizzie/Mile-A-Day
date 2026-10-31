@@ -1,7 +1,8 @@
 import SwiftUI
 
-/// SPLITS, the second chip on a card's media — dark glass beside the filled
-/// FLYOVER pill, so the two read as "the primary thing" and "the detail".
+/// Splits, the second chip under a card's media: a quiet neutral capsule
+/// beside the colour-washed Flyover one, so the two read as "the primary
+/// thing" and "the detail".
 /// Drawn only when the post's workout actually carries splits.
 struct SplitsChipButton: View {
     /// The workout's colour — the glyph's tint.
@@ -18,13 +19,12 @@ struct SplitsChipButton: View {
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: "chart.bar.fill")
-                    .font(.system(size: iconOnly ? 12 : 10, weight: .black))
+                    .font(.system(size: iconOnly ? 12 : 10, weight: .bold))
                     .foregroundColor(accent)
                 if !iconOnly {
-                    Text("SPLITS")
-                        .font(.system(size: 12, weight: .heavy, design: .rounded))
-                        .tracking(0.6)
-                        .foregroundColor(.white)
+                    Text("Splits")
+                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+                        .foregroundColor(.white.opacity(0.9))
                         // Constant text, so a published width can't run away —
                         // and without it a squeezed row wraps the word inside its
                         // own capsule instead of the row re-arranging.
@@ -32,7 +32,7 @@ struct SplitsChipButton: View {
                         .fixedSize(horizontal: true, vertical: false)
                 }
             }
-            .padding(.horizontal, iconOnly ? 9 : 10)
+            .padding(.horizontal, iconOnly ? 9 : 12)
             .padding(.vertical, 8)
             // The glyph alone keeps a 44pt-wide target.
             .frame(minWidth: iconOnly ? 44 : nil)
@@ -40,8 +40,7 @@ struct SplitsChipButton: View {
             // it sat ON a photo: both call sites moved into the control row
             // under the media, and a 55%-black capsule on a dark card reads as
             // a hole punched in it rather than a button.
-            .background(Capsule().fill(Color.white.opacity(0.10)))
-            .overlay(Capsule().strokeBorder(Color.white.opacity(0.14), lineWidth: 1))
+            .background(Capsule().fill(Color.white.opacity(0.08)))
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)

@@ -249,10 +249,13 @@ struct InstagramZoomModifier: ViewModifier {
     /// stats cards) render their floating copy on demand — nothing is baked
     /// eagerly or retained per-card for a gesture most cards never receive.
     let imageProvider: () -> UIImage?
-    var cornerRadius: CGFloat = MADTheme.CornerRadius.medium
+    /// nil = the slide's own `feedMediaCornerRadius`, so the floating copy
+    /// lifts out with the same corners the slide has.
+    var cornerRadius: CGFloat? = nil
     var onDoubleTap: (() -> Void)? = nil
 
     @State private var isZooming = false
+    @Environment(\.feedMediaCornerRadius) private var mediaRadius
 
     func body(content: Content) -> some View {
         content
@@ -262,7 +265,7 @@ struct InstagramZoomModifier: ViewModifier {
             .overlay(
                 ZoomGestureHost(
                     imageProvider: imageProvider,
-                    cornerRadius: cornerRadius,
+                    cornerRadius: cornerRadius ?? mediaRadius,
                     isZooming: $isZooming,
                     onDoubleTap: onDoubleTap
                 )
@@ -274,7 +277,7 @@ extension View {
     /// Instagram-style in-place pinch zoom + optional double-tap action.
     func instagramZoomable(
         image: UIImage?,
-        cornerRadius: CGFloat = MADTheme.CornerRadius.medium,
+        cornerRadius: CGFloat? = nil,
         onDoubleTap: (() -> Void)? = nil
     ) -> some View {
         modifier(InstagramZoomModifier(
@@ -284,7 +287,7 @@ extension View {
     /// Variant for slides whose floating copy is composed on demand.
     func instagramZoomable(
         imageProvider: @escaping () -> UIImage?,
-        cornerRadius: CGFloat = MADTheme.CornerRadius.medium,
+        cornerRadius: CGFloat? = nil,
         onDoubleTap: (() -> Void)? = nil
     ) -> some View {
         modifier(InstagramZoomModifier(

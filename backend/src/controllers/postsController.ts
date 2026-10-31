@@ -7,6 +7,7 @@ import { AuthenticatedRequest } from "../middleware/auth.js";
 import {
   createPost,
   getStoriesRail,
+  gateStoryRailPreviews,
   getUserActiveStories,
   markStoryViewed,
   getFeed,
@@ -539,7 +540,13 @@ export async function getStoriesRailController(
   res: Response,
 ) {
   try {
-    res.status(200).json(signMediaUrlsDeep(await getStoriesRail(req.userId!)));
+    const [rail, gate] = await Promise.all([
+      getStoriesRail(req.userId!),
+      viewerPhotoGate(req.userId!),
+    ]);
+    res
+      .status(200)
+      .json(signMediaUrlsDeep(gateStoryRailPreviews(rail, req.userId!, gate)));
   } catch (error: any) {
     console.error("Error fetching stories rail:", error.message);
     logError("api", `stories rail failed: ${error.message}`, {
