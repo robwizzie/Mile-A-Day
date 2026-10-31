@@ -21,8 +21,9 @@ enum FeedLayout {
     /// Story rail: cell width and the gap between cells.
     static let storyCell: CGFloat = 72
     static let storyGap: CGFloat = 12
-    /// How far the deep-link landing ring sits outside a stacked post.
-    static let highlightOutset: CGFloat = 8
+    /// Extra space under each stacked post, on top of `postGap`, so posts
+    /// separate by space alone (no rule, no panel).
+    static let postSpacing: CGFloat = 12
 }
 
 /// How a feed card draws its surface.
@@ -45,6 +46,20 @@ extension EnvironmentValues {
     var feedCardChrome: FeedCardChrome {
         get { self[FeedCardChromeKey.self] }
         set { self[FeedCardChromeKey.self] = newValue }
+    }
+}
+
+private struct FeedMediaCornerRadiusKey: EnvironmentKey {
+    static let defaultValue: CGFloat = MADTheme.CornerRadius.medium
+}
+
+extension EnvironmentValues {
+    /// The corner radius every feed media face clips to (photos, route art,
+    /// the routeless card, the locked card, and the pinch-zoom copy). 0 on
+    /// the Feed tab, where media runs edge to edge; rounded everywhere else.
+    var feedMediaCornerRadius: CGFloat {
+        get { self[FeedMediaCornerRadiusKey.self] }
+        set { self[FeedMediaCornerRadiusKey.self] = newValue }
     }
 }
 

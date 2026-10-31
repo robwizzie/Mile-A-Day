@@ -126,10 +126,16 @@ struct PostCardView: View {
     @MADScaledMetric(relativeTo: .subheadline) private var captionSize: CGFloat = 14
 
     @Environment(\.feedCardChrome) private var chrome
+    @Environment(\.feedMediaCornerRadius) private var mediaRadius
+
+    /// Stacked (Feed tab): media runs edge to edge and only the text rows sit
+    /// on the gutter. Boxed: the surface's own inset already does that.
+    private var textInset: CGFloat { chrome == .stacked ? FeedLayout.gutter : 0 }
 
     var body: some View {
         VStack(alignment: .leading, spacing: FeedLayout.rowGap) {
             header
+                .padding(.horizontal, textInset)
             // Instagram behavior: double-tap ANYWHERE on the post body —
             // photo, route map, stats, caption, or the space between — hypes.
             // `simultaneousGesture` so single taps (paging dots, horizontal
@@ -142,6 +148,7 @@ struct PostCardView: View {
                 // the stats band owns the bottom of that face.
                 if currentFace == .map {
                     crewRouteLegend
+                        .padding(.horizontal, textInset)
                 }
                 // The header shows the day's combined mile when this post is
                 // attached to the workout that completed one made of several
@@ -151,6 +158,7 @@ struct PostCardView: View {
                         segments: segments,
                         accent: ActivityCardView.color(post.workout_type)
                     )
+                    .padding(.horizontal, textInset)
                 }
             }
             .contentShape(Rectangle())
@@ -159,8 +167,10 @@ struct PostCardView: View {
             )
             if onRespondCoauthor != nil {
                 coauthorInviteBanner
+                    .padding(.horizontal, textInset)
             }
             footer
+                .padding(.horizontal, textInset)
         }
         // Boxed on detail screens, stacked on the Feed tab (`FeedLayout`).
         .modifier(FeedCardSurface(chrome: chrome))
@@ -575,7 +585,7 @@ struct PostCardView: View {
         }
         .frame(maxWidth: .infinity)
         .aspectRatio(4.0 / 5.0, contentMode: .fit)
-        .clipShape(RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: mediaRadius, style: .continuous))
     }
 
     /// One page of the media carousel.
@@ -705,8 +715,8 @@ struct PostCardView: View {
     /// "MAP" when there's a route to draw, "STATS" for the indoor card —
     /// never "indoor": routeless can also mean maps switched off.
     private var mapFaceTitle: String {
-        if case .statsCard = mapSlide { return "STATS" }
-        return "MAP"
+        if case .statsCard = mapSlide { return "Stats" }
+        return "Map"
     }
 
     @ViewBuilder
@@ -839,12 +849,11 @@ struct PostCardView: View {
     /// a 55%-black capsule on a dark card reads as a hole in it.
     private var faceToggle: some View {
         HStack(spacing: 2) {
-            faceSegment("PHOTO", .photo)
+            faceSegment("Photo", .photo)
             faceSegment(mapFaceTitle, .map)
         }
         .padding(3)
-        .background(Capsule().fill(Color.white.opacity(0.08)))
-        .overlay(Capsule().strokeBorder(Color.white.opacity(0.12), lineWidth: 1))
+        .background(Capsule().fill(Color.white.opacity(0.06)))
     }
 
     private func faceSegment(_ title: String, _ target: MediaFace) -> some View {
@@ -857,17 +866,16 @@ struct PostCardView: View {
             }
         } label: {
             Text(title)
-                .madFont(size: 10, weight: .heavy, design: .rounded)
-                .tracking(0.5)
-                .foregroundColor(selected ? .black : .white.opacity(0.85))
+                .madFont(size: 12, weight: .semibold, design: .rounded)
+                .foregroundColor(.white.opacity(selected ? 0.95 : 0.5))
                 // "PHOTO" and "MAP"/"STATS" are constants, so this can't
                 // publish a runaway width — and it is what stopped a narrow
                 // card rendering the segment as "PHOT / O".
                 .lineLimit(1)
                 .fixedSize(horizontal: true, vertical: false)
-                .padding(.horizontal, 9)
-                .padding(.vertical, 6)
-                .background(Capsule().fill(selected ? Color.white.opacity(0.94) : Color.clear))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(Capsule().fill(selected ? Color.white.opacity(0.14) : Color.clear))
                 .contentShape(Capsule())
         }
         .buttonStyle(.plain)
@@ -899,6 +907,7 @@ struct PostCardView: View {
                         indoorCard(stats, still: true)
                             .frame(width: FeedMediaAspect.designSize(mediaAspect).width,
                                    height: FeedMediaAspect.designSize(mediaAspect).height)
+                            .environment(\.feedMediaCornerRadius, mediaRadius)
                     )
                     renderer.scale = 2
                     renderer.isOpaque = true
@@ -1190,7 +1199,7 @@ struct PostCardView: View {
                 RouteStatsBandOverlay(stats: stats, workoutType: post.workout_type ?? "running")
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: mediaRadius, style: .continuous))
         // Same pinch-zoom as the photo slides. The floating copy (canvas +
         // route + stats band) is composed at pinch-begin — nothing big is
         // baked per card up front.
@@ -1707,6 +1716,7 @@ struct PostCardView: View {
 /// loaded UIImage feeds the zoom overlay so the floating copy is pixel-
 /// identical to what's in the card.
 struct ZoomablePhotoSlide: View {
+    @Environment(\.feedMediaCornerRadius) private var mediaRadius
     let url: URL?
     /// FRONT & BACK: the same photo arranged the other way round. Non-nil
     /// turns the baked corner inset into a control — tap it and the two
@@ -1751,8 +1761,8 @@ struct ZoomablePhotoSlide: View {
         }
         .frame(maxWidth: .infinity)
         .aspectRatio(4.0 / 5.0, contentMode: .fit)
-        .clipShape(RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous))
-        .contentShape(RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: mediaRadius, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: mediaRadius, style: .continuous))
         .instagramZoomable(image: shownImage, onDoubleTap: onDoubleTap)
         // AFTER the zoom host, like every other control on a slide — the
         // zoom gesture host eats the taps of anything overlaid before it.

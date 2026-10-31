@@ -129,14 +129,17 @@ struct FeedMetaLine<Middle: View>: View {
     @ViewBuilder
     private var leading: some View {
         if let streak {
-            HStack(spacing: 3) {
+            // The flame carries the colour; the words stay quiet, like the
+            // rest of the line.
+            HStack(spacing: 4) {
                 Image(systemName: "flame.fill")
                     .madFont(size: 10, weight: .semibold)
+                    .foregroundColor(.orange)
                 Text("\(streak)-day streak")
-                    .madFont(size: 12, weight: .semibold, design: .rounded)
+                    .madFont(size: 12, weight: .medium, design: .rounded)
                     .monospacedDigit()
+                    .foregroundColor(.white.opacity(0.6))
             }
-            .foregroundColor(.orange.opacity(0.85))
             .lineLimit(1)
             .fixedSize()
             .accessibilityElement(children: .ignore)
@@ -159,9 +162,8 @@ struct FeedMetaLine<Middle: View>: View {
     private var time: some View {
         if let timestamp {
             Text(timestamp)
-                .madFont(size: 11, weight: .medium, design: .rounded)
-                .foregroundColor(.white.opacity(0.46))
-                .textCase(.uppercase)
+                .madFont(size: 12, weight: .regular, design: .rounded)
+                .foregroundColor(.white.opacity(0.4))
                 .lineLimit(1)
                 .fixedSize()
                 .accessibilityLabel(timestamp)

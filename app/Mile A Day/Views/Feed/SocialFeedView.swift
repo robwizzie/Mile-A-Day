@@ -461,12 +461,6 @@ struct SocialFeedView: View {
                                 feedSectionHeader(title)
                                     .padding(.horizontal, FeedLayout.gutter)
                                     .padding(.top, FeedLayout.rowGap)
-                            } else if entry.id != feed.first?.id {
-                                // Stacked posts: a hairline between neighbours
-                                // instead of a panel around each. A day label
-                                // already separates, so it takes the rule's place.
-                                FeedHairline()
-                                    .padding(.horizontal, FeedLayout.gutter)
                             }
 
                             feedCard(entry)
@@ -477,9 +471,6 @@ struct SocialFeedView: View {
                                             Color.orange.opacity(highlightedEntryId == entry.id ? 0.75 : 0),
                                             lineWidth: 2
                                         )
-                                        // Stacked posts have no inset of their
-                                        // own, so the ring steps outside them.
-                                        .padding(-FeedLayout.highlightOutset)
                                         .allowsHitTesting(false)
                                 )
                                 .animation(.easeInOut(duration: 0.35), value: highlightedEntryId)
@@ -491,7 +482,10 @@ struct SocialFeedView: View {
                                         Task { await loadMore() }
                                     }
                                 }
-                                .padding(.horizontal, FeedLayout.gutter)
+                                // Edge to edge: the card pads its own text
+                                // rows; the extra bottom space is what
+                                // separates one post from the next.
+                                .padding(.bottom, FeedLayout.postSpacing)
                                 .id(entry.id)
                         }
                         if isLoadingMore {
@@ -505,6 +499,7 @@ struct SocialFeedView: View {
                 .padding(.bottom, MADTheme.Spacing.xxl)
                 // Posts on the Feed tab are stacked, not boxed (`FeedLayout`).
                 .environment(\.feedCardChrome, .stacked)
+                .environment(\.feedMediaCornerRadius, 0)
                 .lockedToScrollWidth()
             }
             .scrollIndicators(.hidden)
@@ -946,7 +941,9 @@ struct SocialFeedView: View {
                     .foregroundColor(.white)
                     .frame(width: 56, height: 56)
                     .background(
-                        Circle().fill(canPostNow ? AnyShapeStyle(MADTheme.Colors.redGradient) : AnyShapeStyle(Color.gray.opacity(0.6)))
+                        // Flat brand red: one colour, no gradient, so it sits
+                        // with the flat chrome above it rather than glowing over it.
+                        Circle().fill(canPostNow ? MADTheme.Colors.madRed : Color.gray.opacity(0.6))
                     )
                     // Countdown ring around the FAB — now a deadline, not just
                     // a nudge, so it runs whenever the window is what's open.
@@ -957,7 +954,7 @@ struct SocialFeedView: View {
                                 .padding(-5)
                         }
                     }
-                    .shadow(color: .black.opacity(0.3), radius: 8, y: 4)
+                    .shadow(color: .black.opacity(0.25), radius: 12, y: 6)
             }
             .padding(.trailing, MADTheme.Spacing.lg)
             .padding(.bottom, MADTheme.Spacing.lg)

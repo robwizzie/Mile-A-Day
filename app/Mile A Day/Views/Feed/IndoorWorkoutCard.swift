@@ -83,6 +83,8 @@ struct IndoorWorkoutCard: View {
     /// motion.
     var still: Bool = false
 
+    @Environment(\.feedMediaCornerRadius) private var mediaRadius
+
     var body: some View {
         let style = RoutelessCardStyle.resolve(authorFlamey: authorFlamey, isOwn: isOwn)
         let accent = ActivityCardView.color(workoutType)
@@ -102,7 +104,7 @@ struct IndoorWorkoutCard: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(RoutelessCardBackground(style: style, accent: accent))
         .aspectRatio(aspect, contentMode: .fit)
-        .clipShape(RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: mediaRadius, style: .continuous))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilitySummary)
     }

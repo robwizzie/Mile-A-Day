@@ -264,11 +264,13 @@ struct WeeklyFlyoverPlayerView: View {
 
 /// THE flyover entry, everywhere a route can fly: post cards (both faces),
 /// raw workout cards, the walk detail, and the two workout detail sheets.
-/// Deliberately loud — a filled pill in the workout's own colour with a
-/// white play disc, not the black glass chip it used to be, which people
-/// only found because they already knew it was there. Until the user has
+/// A solid dark capsule washed in the workout's colour, with the play glyph
+/// in that colour and a sentence-case label. It was a saturated filled pill
+/// with a white disc, a white rim and a drop shadow, which shouted over the
+/// photo it sat under. The colour still marks it out, and until the user has
 /// EVER tapped one it also wears a one-shot glow pulse (transform/opacity on
-/// a cached layer, suppressed under Reduce Motion).
+/// a cached layer, suppressed under Reduce Motion). The base is opaque, not
+/// glass, because some hosts put it ON route art.
 struct FlyoverChipButton: View {
     /// The workout's colour (red runs, blue walks) — the pill's fill.
     var accent: Color = MADTheme.Colors.madRed
@@ -289,14 +291,11 @@ struct FlyoverChipButton: View {
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: "play.fill")
-                    .font(.system(size: 10, weight: .black))
+                    .font(.system(size: 10, weight: .bold))
                     .foregroundColor(accent)
-                    .frame(width: 20, height: 20)
-                    .background(Circle().fill(Color.white))
-                Text("FLYOVER")
-                    .font(.system(size: 12, weight: .heavy, design: .rounded))
-                    .tracking(0.6)
-                    .foregroundColor(.white)
+                Text("Flyover")
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.94))
                     // The word is a constant, so publishing its true width is
                     // safe (the `.fixedSize` trap is a label whose text is
                     // DATA) — and it is the only thing that stops a squeezed
@@ -305,12 +304,13 @@ struct FlyoverChipButton: View {
                     .lineLimit(1)
                     .fixedSize(horizontal: true, vertical: false)
             }
-            .padding(.leading, 5)
-            .padding(.trailing, 11)
-            .padding(.vertical, 5)
-            .background(Capsule().fill(accent))
-            .overlay(Capsule().strokeBorder(Color.white.opacity(0.35), lineWidth: 1))
-            .shadow(color: .black.opacity(0.35), radius: 6, y: 3)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(
+                Capsule()
+                    .fill(accent.opacity(0.22))
+                    .background(Capsule().fill(Color(white: 0.11)))
+            )
             .overlay(
                 Capsule().stroke(Color.white.opacity(unseen ? (pulsing ? 0.0 : 0.85) : 0),
                                  lineWidth: 1.5)
