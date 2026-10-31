@@ -99,8 +99,10 @@ struct ActivityCardView: View {
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
+    @Environment(\.feedCardChrome) private var chrome
+
     var body: some View {
-        VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
+        VStack(alignment: .leading, spacing: FeedLayout.rowGap) {
             header
             // Instagram behavior: double-tap ANYWHERE on the card body hypes.
             // Header/footer buttons stay out so double-tapping them can't
@@ -119,11 +121,8 @@ struct ActivityCardView: View {
             )
             footer
         }
-        .padding(MADTheme.Spacing.sm + 2)
-        .background(
-            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
-                .fill(Color.white.opacity(0.04))
-        )
+        // Boxed on detail screens, stacked on the Feed tab (`FeedLayout`).
+        .modifier(FeedCardSurface(chrome: chrome))
         // Card-level so the burst plays centered over the whole card.
         .overlay(HypeBurstView(trigger: hypeBurst))
         // Same rule as PostCardView: chrome scales, media doesn't; above the
@@ -180,11 +179,11 @@ struct ActivityCardView: View {
     /// Same header as PostCardView: avatar + name + subtitle on the left and
     /// (for others) the "…" menu on the right.
     private var header: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: FeedLayout.avatarGap) {
             Button {
                 onTapAuthor?()
             } label: {
-                HStack(spacing: 10) {
+                HStack(spacing: FeedLayout.avatarGap) {
                     AvatarView(name: entry.displayName, imageURL: entry.profile_image_url, size: 40)
                     VStack(alignment: .leading, spacing: 1) {
                         Text(entry.displayName)
@@ -205,8 +204,8 @@ struct ActivityCardView: View {
                     }
                 } label: {
                     Image(systemName: "ellipsis")
-                        .madFont(size: 16, weight: .bold, maxScale: 1.3)
-                        .foregroundColor(.white.opacity(0.6))
+                            .madFont(size: 15, weight: .semibold, maxScale: 1.3)
+                        .foregroundColor(.white.opacity(0.45))
                         .padding(6)
                         .contentShape(Rectangle())
                 }

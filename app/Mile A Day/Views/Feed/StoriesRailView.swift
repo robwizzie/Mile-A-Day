@@ -42,7 +42,7 @@ struct StoriesRailView: View {
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(alignment: .top, spacing: MADTheme.Spacing.md) {
+            HStack(alignment: .top, spacing: FeedLayout.storyGap) {
                 addCell
                 ForEach(friendGroups) { group in
                     let viewable = isGroupViewable(group)
@@ -68,8 +68,8 @@ struct StoriesRailView: View {
                     .buttonStyle(StoryRingButtonStyle())
                 }
             }
-            .padding(.horizontal, MADTheme.Spacing.md)
-            .padding(.vertical, MADTheme.Spacing.sm)
+            .padding(.horizontal, FeedLayout.gutter)
+            .padding(.vertical, MADTheme.Spacing.xs)
         }
     }
 
@@ -121,11 +121,11 @@ struct StoriesRailView: View {
                     }
                 }
                 Text("Your story")
-                    .font(.system(size: 11, weight: .semibold, design: .rounded))
-                    .foregroundColor(.white.opacity(0.7))
+                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .foregroundColor(.white.opacity(0.6))
                     .lineLimit(1)
             }
-            .frame(width: 76)
+            .frame(width: FeedLayout.storyCell)
         }
         .buttonStyle(StoryRingButtonStyle())
     }
@@ -146,12 +146,12 @@ struct StoriesRailView: View {
                 }
             }
             Text(name)
-                .font(.system(size: 11, weight: .semibold, design: .rounded))
-                .foregroundColor(.white.opacity(0.7))
+                .font(.system(size: 11, weight: .medium, design: .rounded))
+                .foregroundColor(.white.opacity(0.6))
                 .lineLimit(1)
                 .truncationMode(.tail)
         }
-        .frame(width: 76)
+        .frame(width: FeedLayout.storyCell)
     }
 
     @ViewBuilder
@@ -168,8 +168,8 @@ struct StoriesRailView: View {
                             ? AnyShapeStyle(LinearGradient(
                                 colors: [MADTheme.Colors.madRed, .orange],
                                 startPoint: .topLeading, endPoint: .bottomTrailing))
-                            : AnyShapeStyle(Color.white.opacity(0.25)),
-                        style: StrokeStyle(lineWidth: 2.5, dash: dashed ? [4] : [])
+                            : AnyShapeStyle(Color.white.opacity(0.14)),
+                        style: StrokeStyle(lineWidth: 2, dash: dashed ? [4] : [])
                     )
             )
     }

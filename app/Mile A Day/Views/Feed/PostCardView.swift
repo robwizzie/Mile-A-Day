@@ -125,8 +125,10 @@ struct PostCardView: View {
     /// AttributedString and have to be handed the same scaled value.
     @MADScaledMetric(relativeTo: .subheadline) private var captionSize: CGFloat = 14
 
+    @Environment(\.feedCardChrome) private var chrome
+
     var body: some View {
-        VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
+        VStack(alignment: .leading, spacing: FeedLayout.rowGap) {
             header
             // Instagram behavior: double-tap ANYWHERE on the post body —
             // photo, route map, stats, caption, or the space between — hypes.
@@ -160,11 +162,8 @@ struct PostCardView: View {
             }
             footer
         }
-        .padding(MADTheme.Spacing.sm + 2)
-        .background(
-            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
-                .fill(Color.white.opacity(0.04))
-        )
+        // Boxed on detail screens, stacked on the Feed tab (`FeedLayout`).
+        .modifier(FeedCardSurface(chrome: chrome))
         // Dynamic Type: the card's chrome (header, controls, footer, captions,
         // comments) scales; the MEDIA does not — its faces carry no madFont
         // text, and the indoor card is also baked by ImageRenderer for zoom.
@@ -264,7 +263,7 @@ struct PostCardView: View {
     /// today.
     private var multiCollabHeader: some View {
         let others = post.acceptedCoauthors
-        return HStack(spacing: 10) {
+        return HStack(spacing: FeedLayout.avatarGap) {
             ZStack(alignment: .leading) {
                 Button { onTapAuthor?() } label: {
                     AvatarView(name: post.displayName, imageURL: post.profile_image_url, size: 40)
@@ -320,7 +319,7 @@ struct PostCardView: View {
     }
 
     private var header: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: FeedLayout.avatarGap) {
             if post.isMultiCollab {
                 multiCollabHeader
             } else if post.hasAcceptedCoauthor {
@@ -365,7 +364,7 @@ struct PostCardView: View {
                 Button {
                     onTapAuthor?()
                 } label: {
-                    HStack(spacing: 10) {
+                    HStack(spacing: FeedLayout.avatarGap) {
                         AvatarView(name: post.displayName, imageURL: post.profile_image_url, size: 40)
                         VStack(alignment: .leading, spacing: 1) {
                             nameText(post.displayName)
@@ -470,8 +469,8 @@ struct PostCardView: View {
                 }
             } label: {
                 Image(systemName: "ellipsis")
-                    .madFont(size: 16, weight: .bold, maxScale: 1.3)
-                    .foregroundColor(.white.opacity(0.6))
+                    .madFont(size: 15, weight: .semibold, maxScale: 1.3)
+                    .foregroundColor(.white.opacity(0.45))
                     .padding(6)
                     .contentShape(Rectangle())
             }

@@ -395,7 +395,7 @@ struct SocialFeedView: View {
 
             ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(spacing: MADTheme.Spacing.md) {
+                LazyVStack(spacing: FeedLayout.postGap) {
                     Group {
                         StoriesRailView(
                             groups: stories,
@@ -418,12 +418,12 @@ struct SocialFeedView: View {
 
                     if !memories.isEmpty {
                         MemoriesCardView(memories: memories) { showMemories = true }
-                            .padding(.horizontal, MADTheme.Spacing.md)
+                            .padding(.horizontal, FeedLayout.gutter)
                     }
 
                     if isWeeklyRecapDay {
                         weeklyRecapTeaserCard
-                            .padding(.horizontal, MADTheme.Spacing.md)
+                            .padding(.horizontal, FeedLayout.gutter)
                     }
 
                     // One-time, dismissible: hide start & end now exists and
@@ -434,8 +434,8 @@ struct SocialFeedView: View {
                     // nothing when there are none.
                     PostDraftsCard()
 
-                    Divider()
-                        .overlay(Color.white.opacity(0.08))
+                    FeedHairline()
+                        .padding(.horizontal, FeedLayout.gutter)
                         .id(feedTopAnchorId)
 
                     if isLoading && feed.isEmpty {
@@ -459,8 +459,14 @@ struct SocialFeedView: View {
                         ForEach(feed) { entry in
                             if let title = sectionHeaderBefore[entry.id] {
                                 feedSectionHeader(title)
-                                    .padding(.horizontal, MADTheme.Spacing.md)
-                                    .padding(.top, 6)
+                                    .padding(.horizontal, FeedLayout.gutter)
+                                    .padding(.top, FeedLayout.rowGap)
+                            } else if entry.id != feed.first?.id {
+                                // Stacked posts: a hairline between neighbours
+                                // instead of a panel around each. A day label
+                                // already separates, so it takes the rule's place.
+                                FeedHairline()
+                                    .padding(.horizontal, FeedLayout.gutter)
                             }
 
                             feedCard(entry)
@@ -471,6 +477,9 @@ struct SocialFeedView: View {
                                             Color.orange.opacity(highlightedEntryId == entry.id ? 0.75 : 0),
                                             lineWidth: 2
                                         )
+                                        // Stacked posts have no inset of their
+                                        // own, so the ring steps outside them.
+                                        .padding(-FeedLayout.highlightOutset)
                                         .allowsHitTesting(false)
                                 )
                                 .animation(.easeInOut(duration: 0.35), value: highlightedEntryId)
@@ -482,7 +491,7 @@ struct SocialFeedView: View {
                                         Task { await loadMore() }
                                     }
                                 }
-                                .padding(.horizontal, MADTheme.Spacing.md)
+                                .padding(.horizontal, FeedLayout.gutter)
                                 .id(entry.id)
                         }
                         if isLoadingMore {
@@ -494,6 +503,8 @@ struct SocialFeedView: View {
                 }
                 .padding(.vertical, MADTheme.Spacing.sm)
                 .padding(.bottom, MADTheme.Spacing.xxl)
+                // Posts on the Feed tab are stacked, not boxed (`FeedLayout`).
+                .environment(\.feedCardChrome, .stacked)
                 .lockedToScrollWidth()
             }
             .scrollIndicators(.hidden)
@@ -770,23 +781,15 @@ struct SocialFeedView: View {
         .buttonStyle(.plain)
     }
 
+    /// "Yesterday", "This week" — a plain label on the gutter. It stands in
+    /// for the hairline between stacked posts, so it carries no rule of its own.
     private func feedSectionHeader(_ title: String) -> some View {
-        HStack(spacing: 10) {
-            Text(title.uppercased())
-                .font(.system(size: 10, weight: .heavy, design: .rounded))
-                .tracking(1.4)
-                .foregroundColor(.white.opacity(0.4))
-            Rectangle()
-                .fill(
-                    LinearGradient(
-                        colors: [Color.white.opacity(0.12), Color.white.opacity(0)],
-                        startPoint: .leading,
-                        endPoint: .trailing
-                    )
-                )
-                .frame(height: 1)
-        }
-        .padding(.horizontal, 4)
+        Text(title)
+            .font(.system(size: 13, weight: .bold, design: .rounded))
+            .foregroundColor(.white.opacity(0.5))
+            .lineLimit(1)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityAddTraits(.isHeader)
     }
 
     private func newActivityPill(_ action: @escaping () -> Void) -> some View {
