@@ -42,6 +42,7 @@ Details: docs/conventions/ios.md § HealthKit
 Details: docs/conventions/ios.md § Key Patterns
 - Profiles compose from `ProfileHero.swift`; `NextMilestoneChip` gets the loaded badges; friend screen re-fetches `GET /users/:id`; the banner PATCH can only CLEAR `profile_banner_url`.
 - Feed tab spacing comes from `FeedLayout` (one `gutter`); feed posts are `.stacked` (`\.feedCardChrome`: text rows on the gutter via `textInset`, media edge to edge, posts split by `postSpacing`), `.card` elsewhere; media faces clip to `\.feedMediaCornerRadius`, never a literal; surfaces only via `FeedCardSurface`.
+- The feed's top row is `TodayBoardView` (stories rail + `fetchFriendsActivityToday` + `BuddySessionService.friendsOutNow`), one tile per friend; previews read `StoryGroup.previewURL` (server-gated); story "Race" writes `ghostTargetV1.<activity>` then `requestOpenTracker` after dismiss.
 - Post-card controls sit in `mediaControls` UNDER the media; on-media items go after `.instagramZoomable`; flyover entry is always `FlyoverChipButton(accent:)`; no-photo media is 1:1 (`FeedMediaAspect`).
 - Media faces are one `TabView(selection: $mediaPage)`; never gate hypes on `is_self`/`isMine`; wire `HypersListSheet`'s `onSelectUser`; one `DashboardMilestoneBar`; Activity labels go inside `profileCard()`; toolbar back = bare chevron.
 - Buddy cards share `PostCardView.crewColors`; `WorkoutSplitsSheet(walkers:)` keeps split-less walkers; pace via `DisplayPace`/`Walker.servedPace`; `hasSplits` = anyone has splits.

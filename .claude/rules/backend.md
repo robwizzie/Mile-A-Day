@@ -111,7 +111,7 @@ Details: docs/conventions/backend.md § Hypes & Posts
 - Keep the `express.json` limit at 2mb.
 - `posts.is_auto` is tri-state; a user post replaces only an auto post, else 409.
 - Wrap `media_url` responses in `signMediaUrlsDeep(...)`; `stripMediaQuery(...)` inputs; store bare paths.
-- Others' photos go behind `DIRECT_POST_ACCESS_SQL` (`visiblePostAuthor(s)`) + `lockUnearnedPhotos`.
+- Others' photos go behind `DIRECT_POST_ACCESS_SQL` (`visiblePostAuthor(s)`) + `lockUnearnedPhotos`; the stories rail's `preview_url` goes through `gateStoryRailPreviews`.
 - One walk = one feed card: resolve the walk via `buddy_session_participants`, never stored links.
 - Live auto cards store `media_url = ''`; `AUTO_FLAG_SQL` gates on `live_auto_card_v1`. Check: `live-auto-card-check`.
 - Crew session = `CREW_SESSION_SQL`; duel standing via one `standing()`.

@@ -64,6 +64,7 @@ export type {
 } from "./posts/createPost.js";
 export {
   getStoriesRail,
+  gateStoryRailPreviews,
   getUserActiveStories,
   markStoryViewed,
   getStoryViewers,

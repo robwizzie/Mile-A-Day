@@ -56,6 +56,13 @@ struct SocialFeedView: View {
     /// "Fresh" badge on the viewer's own in-window posts. Never gates posting.
     /// The rings self-tick via `TimelineView`, so no feed-level timer is needed.
     @StateObject private var freshWindow = FreshPostWindowManager.shared
+    /// Who's out walking right now, for the Today board's live tiles.
+    @ObservedObject private var buddy = BuddySessionService.shared
+    /// Every friend's miles + done flag today, for the Today board.
+    @State private var friendsToday: [FriendActivityItem] = []
+    /// Friends nudged from the board this session (the server allows one a
+    /// day), so the tile flips to "Nudged" without a round trip.
+    @State private var nudgedFriendIds: Set<String> = []
 
     @State private var feed: [FeedEntry] = []
     /// Entry id → the day header drawn above that entry. See
@@ -397,22 +404,40 @@ struct SocialFeedView: View {
             ScrollView {
                 LazyVStack(spacing: FeedLayout.postGap) {
                     Group {
-                        StoriesRailView(
+                        TodayBoardView(
                             groups: stories,
+                            friendsToday: friendsToday,
+                            friendsOut: buddy.friendsOutNow,
                             currentUserId: currentUserId,
                             myName: userManager.currentUser.username ?? userManager.currentUser.name,
                             myImageURL: userManager.currentUser.profileImageUrl,
+                            myMiles: todaysDistance,
+                            myGoal: userManager.currentUser.goalMiles,
+                            mileDone: mileDone,
                             canPost: canPostNow,
                             hasSharedWorkout: alreadySharedWorkout,
                             // The ring tracks the CAMERA countdown only; posting
                             // itself outlives it, so the "+" stays unlocked.
                             windowOpen: freshWindow.isCameraOpen,
                             windowOpenedAt: freshWindow.windowOpenedAt,
+                            nudgedIds: nudgedFriendIds,
                             isGroupViewable: { canViewStories(of: $0) },
                             isGroupUnviewed: { isGroupUnviewed(of: $0) },
                             onTapAdd: handleCompose,
                             onTapGroup: { viewerGroup = $0 },
-                            onLockedStoryTap: { showMileHint = true }
+                            onLockedStoryTap: { showMileHint = true },
+                            onTapLive: { friend in
+                                openFriendProfile(id: friend.userId, username: friend.username,
+                                                  firstName: friend.firstName, lastName: friend.lastName,
+                                                  imageURL: friend.profileImageUrl)
+                            },
+                            onNudge: { friend in nudgeFromBoard(friend) },
+                            onTapFriend: { friend in
+                                openFriendProfile(id: friend.user_id, username: friend.username,
+                                                  firstName: friend.first_name, lastName: friend.last_name,
+                                                  imageURL: friend.profile_image_url)
+                            },
+                            refreshLive: { await buddy.refreshFriendsOutNow() }
                         )
                     }
 
@@ -1181,6 +1206,7 @@ struct SocialFeedView: View {
         // the rail + own-stories round trips (three serial fetches), which was
         // the bulk of the "feed takes forever to load" wait.
         async let railFetch = PostService.fetchStoriesRail()
+        async let todayFetch: Void = refreshToday()
         // Timing is measured around the feed request ALONE. Measuring the whole
         // of refresh() reports the same number for every request, because the
         // concurrent calls share one HTTP/2 connection and a slow feed response
@@ -1208,6 +1234,7 @@ struct SocialFeedView: View {
             loadedOnce = true
         }
         let storyGroups = try? await railFetch
+        _ = await todayFetch
         // Own active stories carry their workout ids — needed to know which
         // of today's workouts are already "spent" on a story share.
         var storyWorkoutIds: Set<String> = []
@@ -1228,6 +1255,41 @@ struct SocialFeedView: View {
                 optimisticSharedWorkoutIds.removeAll()
             }
         }
+    }
+
+    /// The Today board's people: friends' day status and who's out now. Both
+    /// keep their last good value on a failed fetch.
+    private func refreshToday() async {
+        async let live: Void = buddy.refreshFriendsOutNow()
+        let today = try? await profileFriendService.fetchFriendsActivityToday()
+        _ = await live
+        await MainActor.run {
+            if let today { friendsToday = today }
+        }
+    }
+
+    private func nudgeFromBoard(_ friend: FriendActivityItem) {
+        nudgedFriendIds.insert(friend.user_id)
+        Task {
+            do {
+                try await profileFriendService.nudgeFriend(friend.user_id)
+            } catch {
+                // Already done today, or the daily nudge was spent elsewhere:
+                // either way the tile shouldn't claim a nudge went out.
+                await MainActor.run { _ = nudgedFriendIds.remove(friend.user_id) }
+            }
+        }
+    }
+
+    private func openFriendProfile(id: String, username: String?, firstName: String?,
+                                   lastName: String?, imageURL: String?) {
+        guard id != currentUserId else { return }
+        profileUser = BackendUser(
+            user_id: id, username: username, email: nil,
+            first_name: firstName, last_name: lastName,
+            bio: nil, profile_image_url: imageURL,
+            apple_id: nil, auth_provider: nil, role: nil
+        )
     }
 
     /// Reload just the stories rail (viewed rings, expired groups) without the
