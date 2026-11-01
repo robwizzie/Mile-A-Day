@@ -131,7 +131,9 @@ struct TodayBoardView: View {
                     }
                 }
                 .padding(.horizontal, FeedLayout.gutter)
-                .padding(.vertical, 2)
+                // Room for the live tile's pulse, which scales 8% past the
+                // tile (~4pt each side); the scroll view clips at its bounds.
+                .padding(.vertical, 6)
             }
             if !mileDone, lockedStoryCount > 0 {
                 unlockBar
@@ -207,14 +209,16 @@ struct TodayBoardView: View {
                 ZStack {
                     if let url = group.previewURL {
                         TodayPreviewImage(url: url)
-                            .blur(radius: locked ? 8 : 0)
+                            // Opaque: a plain blur fades the photo's own edges
+                            // to clear, which reads as a dark rim inside the tile.
+                            .blur(radius: locked ? 8 : 0, opaque: true)
                             .saturation(locked ? 0.6 : 1)
                     } else {
                         TodayTileStyle.ground
+                        // Centred like every other avatar tile, so a live chip
+                        // on top never lands on the face.
                         AvatarView(name: entry.name, imageURL: entry.imageURL, size: 46)
                             .blur(radius: locked ? 4 : 0)
-                            .frame(maxHeight: .infinity, alignment: .center)
-                            .padding(.bottom, 16)
                     }
                     TodayTileStyle.bottomScrim
                     if locked {
@@ -363,8 +367,10 @@ struct TodayBoardView: View {
                                     .padding(-4)
                             }
                         }
+                        // Centred in the space above the distance label (which
+                        // sits 7pt off the bottom), clear of the "+" badge.
                         .frame(maxHeight: .infinity, alignment: .center)
-                        .padding(.bottom, 14)
+                        .padding(.bottom, 8)
                     }
                     .overlay(alignment: .bottom) {
                         Text(mileDone ? "Done" : myMiles.distanceFormatted)
@@ -554,13 +560,22 @@ private struct TodayChip: View {
 }
 
 /// A story preview filling its tile, through the feed's image cache.
+///
+/// The photo rides an overlay on `Color.clear` so it can NEVER size the
+/// tile: a fill-scaled image reports its full scaled size, and laid out
+/// directly it grew the tile's ZStack past the tile (a 9:16 photo by ~30pt),
+/// pushing the bottom-pinned avatar and top-pinned chip out of view under the
+/// clip. `Color.clear` takes exactly the space offered; the photo fills it
+/// centred and is cropped to it.
 private struct TodayPreviewImage: View {
     let url: URL
     @State private var image: UIImage?
 
     var body: some View {
-        FeedImageView(url: url, loadedImage: $image)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        Color.clear
+            .overlay {
+                FeedImageView(url: url, loadedImage: $image)
+            }
             .clipped()
     }
 }
