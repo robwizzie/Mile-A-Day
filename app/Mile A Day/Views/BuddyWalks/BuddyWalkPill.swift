@@ -101,10 +101,7 @@ struct BuddyWalkPill: View {
                 .padding(.vertical, 12)
                 .frame(maxWidth: .infinity)
                 .background(
-                    Capsule().fill(Color.white.opacity(0.10))
-                )
-                .overlay(
-                    Capsule().stroke(Color.white.opacity(0.14), lineWidth: 1)
+                    Capsule().fill(Color.white.opacity(0.06))
                 )
             }
             .buttonStyle(.plain)
@@ -115,8 +112,8 @@ struct BuddyWalkPill: View {
 
     private var badgeCount: Int? {
         if isLive { return nil }
-        if inviteCount > 0 { return inviteCount }
-        return joinableCount > 0 ? joinableCount : nil
+        // Invites keep their count; friends out are named in the title now.
+        return inviteCount > 0 ? inviteCount : nil
     }
 
     private var title: String {
@@ -124,6 +121,12 @@ struct BuddyWalkPill: View {
         if inviteCount > 0 {
             return inviteCount == 1 ? "Buddy walk invite" : "Buddy walk invites"
         }
-        return joinableCount == 1 ? "A friend is out — join" : "Friends are out — join"
+        // Name the person: "goose is out walking" is a reason to go; "A friend
+        // is out" plus a count badge read like a notification.
+        let joinable = buddy.friendsOutNow.filter(\.hasJoinableRoom)
+        if joinable.count == 1, let friend = joinable.first {
+            return "\(friend.displayName) is out walking · Join"
+        }
+        return "\(joinable.count) friends are out walking · Join"
     }
 }
