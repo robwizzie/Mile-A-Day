@@ -51,9 +51,12 @@ struct TodayBoardView: View {
     /// Re-reads who's out; the board polls it while it is on screen.
     var refreshLive: () async -> Void = {}
 
-    /// The "out right now" sheet (Hype / Join), from a walking tile or the
-    /// header's pill.
-    @State private var showOutNow = false
+    /// A friend's profile, opened from the live sheet (after it closes).
+    var onOpenLiveProfile: (FriendOutNow) -> Void = { _ in }
+
+    /// The live sheet: one person (a walking tile) or everyone (the header's
+    /// pill). nil = closed.
+    @State private var outNowRoute: OutNowRoute?
 
     // MARK: - Entries
 
@@ -162,20 +165,27 @@ struct TodayBoardView: View {
         }
         // Who's out, with Hype and Join: the existing live list (the same
         // one the Friends tab shows), one tap from any walking tile.
-        .sheet(isPresented: $showOutNow) {
-            OutNowSheet {
-                showOutNow = false
-                // Hand the joined walk to the Dashboard after this sheet has
-                // gone (a presentation raised in a dismissal is dropped).
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
-                    guard let sessionId = BuddySessionService.shared.session?.id else { return }
-                    DeepLinkRouter.shared.requestOpenBuddySession(sessionId: sessionId)
-                    NotificationCenter.default.post(
-                        name: NSNotification.Name("MAD_SwitchTab"), object: nil, userInfo: ["tab": 0]
-                    )
+        .sheet(item: $outNowRoute) { route in
+            OutNowContainer(
+                initial: route,
+                onJoined: {
+                    outNowRoute = nil
+                    // Hand the joined walk to the Dashboard after this sheet
+                    // has gone (a presentation raised in a dismissal is dropped).
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                        guard let sessionId = BuddySessionService.shared.session?.id else { return }
+                        DeepLinkRouter.shared.requestOpenBuddySession(sessionId: sessionId)
+                        NotificationCenter.default.post(
+                            name: NSNotification.Name("MAD_SwitchTab"), object: nil, userInfo: ["tab": 0]
+                        )
+                    }
+                },
+                onOpenProfile: { friend in
+                    outNowRoute = nil
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { onOpenLiveProfile(friend) }
                 }
-            }
-            .presentationDetents([.medium, .large])
+            )
+            .presentationDetents([.large])
             .presentationDragIndicator(.visible)
         }
     }
@@ -198,7 +208,7 @@ struct TodayBoardView: View {
                 // a live dot, the words, and the sheet with Hype and Join.
                 Button {
                     MADHaptics.tap()
-                    showOutNow = true
+                    outNowRoute = .everyone
                 } label: {
                     HStack(spacing: 5) {
                         Circle()
@@ -363,9 +373,10 @@ struct TodayBoardView: View {
                 MADHaptics.tap()
                 onTapGroup(group)
             }
-        case .walking:
+        case .walking(let friend):
+            // Tapping a person opens THAT person, not a list they're in.
             MADHaptics.tap()
-            showOutNow = true
+            outNowRoute = .person(friend.userId)
         case .done(let friend):
             MADHaptics.tap()
             onTapFriend(friend)
@@ -685,12 +696,49 @@ private struct LiveProgressAvatar: View {
     }
 }
 
+/// Which live sheet: one friend, or everyone out.
+enum OutNowRoute: Identifiable, Equatable {
+    case person(String)
+    case everyone
+
+    var id: String {
+        switch self {
+        case .person(let id): return "person-\(id)"
+        case .everyone: return "everyone"
+        }
+    }
+}
+
+/// The live sheet's content. Switching from one person to everyone happens
+/// INSIDE the sheet, so "See everyone out" never dismisses and re-presents.
+struct OutNowContainer: View {
+    let initial: OutNowRoute
+    let onJoined: () -> Void
+    let onOpenProfile: (FriendOutNow) -> Void
+
+    @State private var route: OutNowRoute?
+
+    var body: some View {
+        switch route ?? initial {
+        case .person(let id):
+            LiveFriendSheet(
+                friendId: id,
+                onJoined: onJoined,
+                onOpenProfile: onOpenProfile,
+                onSeeEveryone: { withAnimation(.easeInOut(duration: 0.2)) { route = .everyone } }
+            )
+        case .everyone:
+            OutNowSheet(onJoined: onJoined)
+        }
+    }
+}
+
 /// Everyone out right now, with Hype and Join, opened from the Today board.
 ///
 /// The list itself is `BuddyJoinFriendCard`, reused verbatim (the Friends
 /// tab's "Out right now"): closest-to-finishing first, a live ring per
 /// person, Hype that lands on their tracker mid-walk, and Join / Ask to walk.
-private struct OutNowSheet: View {
+struct OutNowSheet: View {
     let onJoined: () -> Void
     @ObservedObject private var buddy = BuddySessionService.shared
 

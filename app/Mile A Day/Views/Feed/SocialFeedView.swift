@@ -443,7 +443,12 @@ struct SocialFeedView: View {
                                                   firstName: friend.first_name, lastName: friend.last_name,
                                                   imageURL: friend.profile_image_url)
                             },
-                            refreshLive: { await buddy.refreshFriendsOutNow() }
+                            refreshLive: { await buddy.refreshFriendsOutNow() },
+                            onOpenLiveProfile: { friend in
+                                openFriendProfile(id: friend.userId, username: friend.username,
+                                                  firstName: friend.firstName, lastName: friend.lastName,
+                                                  imageURL: friend.profileImageUrl)
+                            }
                         )
                     }
                     // Its own node: the feed's other nodes already carry
