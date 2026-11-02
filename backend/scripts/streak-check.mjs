@@ -19,7 +19,7 @@ const { refreshCurrentStreak, reconcileStaleStreaks } =
   await import("../dist/services/leaderboardService.js");
 const { getFriends, getFriendsActivityToday } =
   await import("../dist/services/friendshipService.js");
-const { refundEarnedCoverage } =
+const { refundEarnedCoverage, getStreakFeaturesPayload } =
   await import("../dist/services/streakFeatureService.js");
 const { upsertDailySteps, upsertDailyStepsBatch } =
   await import("../dist/services/dailyStepsService.js");
@@ -43,9 +43,7 @@ async function cleanup() {
   );
   // The refund path sends pushes, which write inbox rows that hold a FK on
   // users — so they have to go before the users do.
-  await db.query(
-    `DELETE FROM in_app_notifications WHERE user_id LIKE 'sc-%'`,
-  );
+  await db.query(`DELETE FROM in_app_notifications WHERE user_id LIKE 'sc-%'`);
   await db.query(
     `DELETE FROM streak_coverage_refunds WHERE user_id LIKE 'sc-%'`,
   );
@@ -351,10 +349,11 @@ console.log("G2. coverage refunds");
   await seedWorkout("sc-refund", ago(1), 1.4);
   const refunded = await refundEarnedCoverage("sc-refund");
   ok("the covered day is refunded once", refunded.length, 1);
-  ok("…naming the day and the token", [refunded[0].local_date, refunded[0].kind], [
-    ago(1),
-    "streak_save",
-  ]);
+  ok(
+    "…naming the day and the token",
+    [refunded[0].local_date, refunded[0].kind],
+    [ago(1), "streak_save"],
+  );
   ok(
     "coverage row is gone",
     (
@@ -382,7 +381,11 @@ console.log("G2. coverage refunds");
     ).map((r) => r.kind),
     ["streak_save"],
   );
-  ok("re-running it is a no-op", (await refundEarnedCoverage("sc-refund")).length, 0);
+  ok(
+    "re-running it is a no-op",
+    (await refundEarnedCoverage("sc-refund")).length,
+    0,
+  );
   // The whole point: the day still counts, so the number must not move.
   ok(
     "the streak is unchanged — the day is earned now, not covered",
@@ -490,6 +493,89 @@ console.log("G2. coverage refunds");
     0,
   );
   delete process.env.STREAK_FEATURES_DISABLED;
+}
+
+// ── G3. A held Save already committed to a miss reads as pending ───────────
+//
+// The sweep spends a Save on a LATER morning, a day later still while a held
+// Double Down's window is open. Until then the stored streak reads broken, so
+// `pending_save` has to name the day, the morning and the streak it protects —
+// mirroring sweepOneUser's decision, never inventing one it won't make.
+console.log("G3. pending save");
+{
+  const pending = async (id) =>
+    (await getStreakFeaturesPayload(id, 0, undefined)).pending_save;
+
+  // (1) Missed yesterday, ran today, holding a Double Down → the sweep waits a
+  // day for the Double Down, then the Save covers yesterday tomorrow morning.
+  await mkUser("sc-pend-dd", { enrolled: true });
+  await seedRange("sc-pend-dd", 31, 2);
+  await seedWorkout("sc-pend-dd", TODAY, 1.2);
+  ok("DD window open, today run: fires tomorrow", await pending("sc-pend-dd"), {
+    local_date: ago(1),
+    fires_on: plus(1),
+    protected_streak: 32,
+    needs_today: false,
+  });
+
+  // (2) Same, today not run yet → only if today's mile gets done.
+  await mkUser("sc-pend-dd-today", { enrolled: true });
+  await seedRange("sc-pend-dd-today", 31, 2);
+  ok(
+    "DD window open, today not run: needs today",
+    await pending("sc-pend-dd-today"),
+    {
+      local_date: ago(1),
+      fires_on: plus(1),
+      protected_streak: 32,
+      needs_today: true,
+    },
+  );
+
+  // (3) No Double Down held → nothing to wait for; this morning's sweep.
+  await mkUser("sc-pend-nodd", { enrolled: true });
+  await seedRange("sc-pend-nodd", 31, 2);
+  await db.query(
+    `UPDATE users SET double_down_last_used = $2::date WHERE user_id = $1`,
+    ["sc-pend-nodd", ago(2)],
+  );
+  ok("no Double Down: fires this morning", await pending("sc-pend-nodd"), {
+    local_date: ago(1),
+    fires_on: TODAY,
+    protected_streak: 31,
+    needs_today: false,
+  });
+
+  // (4) The hole a closed Double Down window left (ran yesterday, not 2×).
+  await mkUser("sc-pend-hole", { enrolled: true });
+  await seedRange("sc-pend-hole", 31, 3);
+  await seedRange("sc-pend-hole", 1, 0);
+  ok("closed window hole: fires this morning", await pending("sc-pend-hole"), {
+    local_date: ago(2),
+    fires_on: TODAY,
+    protected_streak: 32,
+    needs_today: false,
+  });
+
+  // (5) No Save held → nothing pending, whatever the gap.
+  await mkUser("sc-pend-nosave", { enrolled: true });
+  await seedRange("sc-pend-nosave", 31, 2);
+  await db.query(
+    `UPDATE users SET streak_save_last_used = $2::date WHERE user_id = $1`,
+    ["sc-pend-nosave", ago(1)],
+  );
+  ok("no Save held: null", await pending("sc-pend-nosave"), null);
+
+  // (6) Two missed days: tokens never partially bridge.
+  await mkUser("sc-pend-gap", { enrolled: true });
+  await seedRange("sc-pend-gap", 31, 3);
+  await seedWorkout("sc-pend-gap", TODAY, 1.2);
+  ok("two-day gap: null", await pending("sc-pend-gap"), null);
+
+  // (7) Nothing missed → null.
+  await mkUser("sc-pend-none", { enrolled: true });
+  await seedRange("sc-pend-none", 31, 0);
+  ok("intact streak: null", await pending("sc-pend-none"), null);
 }
 
 // ── H. Reads decay without a recompute ─────────────────────────────────────
@@ -691,43 +777,87 @@ async function seedSteps(userId, date, steps) {
   // (1) Steps alone carry a streak.
   await mkUser("sc-steps-only");
   for (let n = 0; n < 10; n++) await seedSteps("sc-steps-only", ago(n), 10500);
-  ok("ten 10k-step days, no workouts: 10", await refreshCurrentStreak("sc-steps-only"), 10);
-  ok("…start is the first steps day", (await row("sc-steps-only")).start, ago(9));
+  ok(
+    "ten 10k-step days, no workouts: 10",
+    await refreshCurrentStreak("sc-steps-only"),
+    10,
+  );
+  ok(
+    "…start is the first steps day",
+    (await row("sc-steps-only")).start,
+    ago(9),
+  );
 
   // (2) Exactly 10,000 counts; 9,999 doesn't.
   await mkUser("sc-steps-edge");
   await seedRange("sc-steps-edge", 9, 5);
   await seedSteps("sc-steps-edge", ago(4), 10000);
   await seedRange("sc-steps-edge", 3, 0);
-  ok("10,000 steps bridges a mile-less day", await refreshCurrentStreak("sc-steps-edge"), 10);
+  ok(
+    "10,000 steps bridges a mile-less day",
+    await refreshCurrentStreak("sc-steps-edge"),
+    10,
+  );
   await seedSteps("sc-steps-edge", ago(4), 9999);
   ok("…9,999 doesn't", await refreshCurrentStreak("sc-steps-edge"), 4);
-  ok("streakEndingAt sees a steps day", await core.streakEndingAt("sc-steps-edge", ago(4)), 0);
+  ok(
+    "streakEndingAt sees a steps day",
+    await core.streakEndingAt("sc-steps-edge", ago(4)),
+    0,
+  );
   await seedSteps("sc-steps-edge", ago(4), 10000);
-  ok("…and runs through it", await core.streakEndingAt("sc-steps-edge", ago(2)), 8);
+  ok(
+    "…and runs through it",
+    await core.streakEndingAt("sc-steps-edge", ago(2)),
+    8,
+  );
 
   // (3) A steps day and a mile day on the same date are one day, not two.
   await mkUser("sc-steps-both");
   await seedRange("sc-steps-both", 4, 0);
   for (let n = 0; n <= 4; n++) await seedSteps("sc-steps-both", ago(n), 12000);
-  ok("mile + steps on the same days still 5", await refreshCurrentStreak("sc-steps-both"), 5);
+  ok(
+    "mile + steps on the same days still 5",
+    await refreshCurrentStreak("sc-steps-both"),
+    5,
+  );
 
   // (4) The upsert refreshes the stored streak the moment 10k is crossed —
   // no workout, no explicit refresh call.
   await mkUser("sc-steps-live");
   await seedRange("sc-steps-live", 5, 1);
   await refreshCurrentStreak("sc-steps-live");
-  ok("before today's steps: 5, valid through today", [
-    (await row("sc-steps-live")).current_streak,
-    (await row("sc-steps-live")).valid_through,
-  ], [5, TODAY]);
+  ok(
+    "before today's steps: 5, valid through today",
+    [
+      (await row("sc-steps-live")).current_streak,
+      (await row("sc-steps-live")).valid_through,
+    ],
+    [5, TODAY],
+  );
   await upsertDailySteps("sc-steps-live", TODAY, 9000, 0);
-  ok("9,000 steps: stored streak unchanged", (await row("sc-steps-live")).current_streak, 5);
+  ok(
+    "9,000 steps: stored streak unchanged",
+    (await row("sc-steps-live")).current_streak,
+    5,
+  );
   await upsertDailySteps("sc-steps-live", TODAY, 10200, 0);
-  ok("crossing 10k: stored streak is 6 at once", (await row("sc-steps-live")).current_streak, 6);
-  ok("…valid through tomorrow, so the decay sweep leaves it", (await row("sc-steps-live")).valid_through, plus(1));
+  ok(
+    "crossing 10k: stored streak is 6 at once",
+    (await row("sc-steps-live")).current_streak,
+    6,
+  );
+  ok(
+    "…valid through tomorrow, so the decay sweep leaves it",
+    (await row("sc-steps-live")).valid_through,
+    plus(1),
+  );
   await upsertDailySteps("sc-steps-live", TODAY, 8000, 0);
-  ok("a stale lower post can't undo it (GREATEST)", (await row("sc-steps-live")).current_streak, 6);
+  ok(
+    "a stale lower post can't undo it (GREATEST)",
+    (await row("sc-steps-live")).current_streak,
+    6,
+  );
 
   // (5) A late 10k for yesterday rescues a streak that read 0 — the classic
   // "crossed at 11 PM on a locked phone, synced next morning".
@@ -735,7 +865,11 @@ async function seedSteps(userId, date, steps) {
   await seedRange("sc-steps-late", 8, 2);
   ok("missed yesterday: 0", await refreshCurrentStreak("sc-steps-late"), 0);
   await upsertDailySteps("sc-steps-late", ago(1), 11000, 0);
-  ok("yesterday's late steps bring it back: 8", (await row("sc-steps-late")).current_streak, 8);
+  ok(
+    "yesterday's late steps bring it back: 8",
+    (await row("sc-steps-late")).current_streak,
+    8,
+  );
 
   // (6) The batch endpoint: history that joins two old runs ratchets the
   // longest streak, which no current-streak write would ever notice.
@@ -744,7 +878,9 @@ async function seedSteps(userId, date, steps) {
   await seedRange("sc-steps-batch", 39, 30); // 10 days, gap at 40 ago
   await seedRange("sc-steps-batch", 4, 0);
   await refreshCurrentStreak("sc-steps-batch");
-  await db.query(`UPDATE users SET longest_streak = 20 WHERE user_id = 'sc-steps-batch'`);
+  await db.query(
+    `UPDATE users SET longest_streak = 20 WHERE user_id = 'sc-steps-batch'`,
+  );
   const b1 = await upsertDailyStepsBatch(
     "sc-steps-batch",
     [
@@ -754,15 +890,27 @@ async function seedSteps(userId, date, steps) {
     ],
     0,
   );
-  ok("batch: two days written, one new goal day", [b1.upserted, b1.newGoalDays], [2, 1]);
+  ok(
+    "batch: two days written, one new goal day",
+    [b1.upserted, b1.newGoalDays],
+    [2, 1],
+  );
   ok("…current streak unaffected (5)", b1.streak, 5);
-  ok("…longest ratcheted to the joined run (31)", (await row("sc-steps-batch")).longest_streak, 31);
+  ok(
+    "…longest ratcheted to the joined run (31)",
+    (await row("sc-steps-batch")).longest_streak,
+    31,
+  );
   const b2 = await upsertDailyStepsBatch(
     "sc-steps-batch",
     [{ localDate: ago(40), steps: 15000 }],
     0,
   );
-  ok("re-sending the same history writes nothing", [b2.upserted, b2.newGoalDays], [0, 0]);
+  ok(
+    "re-sending the same history writes nothing",
+    [b2.upserted, b2.newGoalDays],
+    [0, 0],
+  );
   const b3 = await upsertDailyStepsBatch("sc-steps-batch", [], 0);
   ok("an empty batch is fine", [b3.upserted, b3.streak], [0, 5]);
 
@@ -776,7 +924,11 @@ async function seedSteps(userId, date, steps) {
   );
   // Written straight into the table, as the old server did: no refresh.
   await seedSteps("sc-steps-backfill", ago(10), 13000);
-  ok("before the re-count the stored row is stale", (await row("sc-steps-backfill")).current_streak, 10);
+  ok(
+    "before the re-count the stored row is stale",
+    (await row("sc-steps-backfill")).current_streak,
+    10,
+  );
   const client = new Client({ connectionString: process.env.DATABASE_URL });
   await client.connect();
   try {
@@ -789,7 +941,11 @@ async function seedSteps(userId, date, steps) {
   } finally {
     await client.end();
   }
-  ok("after the re-count: 31", (await row("sc-steps-backfill")).current_streak, 31);
+  ok(
+    "after the re-count: 31",
+    (await row("sc-steps-backfill")).current_streak,
+    31,
+  );
   ok("…longest too", (await row("sc-steps-backfill")).longest_streak, 31);
 
   // (8) A Save spent on a day the steps turn out to cover goes back.
@@ -806,10 +962,22 @@ async function seedSteps(userId, date, steps) {
     ["sc-steps-refund", ago(1), ago(40)],
   );
   await seedSteps("sc-steps-refund", ago(1), 9500);
-  ok("9,500 steps: the Save stays spent", (await refundEarnedCoverage("sc-steps-refund")).length, 0);
+  ok(
+    "9,500 steps: the Save stays spent",
+    (await refundEarnedCoverage("sc-steps-refund")).length,
+    0,
+  );
   await seedSteps("sc-steps-refund", ago(1), 10100);
-  ok("10,100 steps: the Save comes back", (await refundEarnedCoverage("sc-steps-refund")).length, 1);
-  ok("…and the day still counts on its own", await refreshCurrentStreak("sc-steps-refund"), 9);
+  ok(
+    "10,100 steps: the Save comes back",
+    (await refundEarnedCoverage("sc-steps-refund")).length,
+    1,
+  );
+  ok(
+    "…and the day still counts on its own",
+    await refreshCurrentStreak("sc-steps-refund"),
+    9,
+  );
 
   // (9) Friends see a 10k-step day as done (and why).
   await mkUser("sc-steps-viewer");
@@ -820,7 +988,11 @@ async function seedSteps(userId, date, steps) {
   const act = (await getFriendsActivityToday("sc-steps-viewer")).find(
     (a) => a.user_id === "sc-steps-live",
   );
-  ok("friends activity: done by steps", [act?.completed_today, act?.today_steps, act?.today_miles], [true, 10200, 0]);
+  ok(
+    "friends activity: done by steps",
+    [act?.completed_today, act?.today_steps, act?.today_miles],
+    [true, 10200, 0],
+  );
 }
 
 // ── L. Random histories vs an independent reference walk ───────────────────

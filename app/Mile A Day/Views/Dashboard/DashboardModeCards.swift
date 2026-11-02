@@ -603,7 +603,31 @@ private struct ModernHeroCard: View {
     /// tokens screen. Hidden until the token status has loaded.
     @ViewBuilder
     private var saversLine: some View {
-        if tokensState.payload != nil {
+        if let pending = tokensState.payload?.pending_save {
+            // A Save already committed to a missed day: the number beside
+            // this reads reset until the morning sweep spends it, so say so
+            // here instead of "N savers" next to an apparently broken streak.
+            Button {
+                showTokens = true
+            } label: {
+                HStack(spacing: 3) {
+                    Image(systemName: "snowflake")
+                        .madFont(size: 8, weight: .black)
+                        .accessibilityHidden(true)
+                    Text(pending.heroLabel)
+                        .madFont(size: 9, weight: .black, design: .rounded)
+                        .tracking(0.6)
+                        .textCase(.uppercase)
+                }
+                .foregroundColor(SavedDayStyle.tint)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(pending.accessibilitySummary)
+            .accessibilityHint("Opens your streak tokens")
+        } else if tokensState.payload != nil {
             Button {
                 showTokens = true
             } label: {
@@ -2040,7 +2064,31 @@ private struct FlameBuddyHeroCard: View {
     /// tokens screen. Hidden until the token status has loaded.
     @ViewBuilder
     private var saversLine: some View {
-        if tokensState.payload != nil {
+        if let pending = tokensState.payload?.pending_save {
+            // A Save already committed to a missed day: the number beside
+            // this reads reset until the morning sweep spends it, so say so
+            // here instead of "N savers" next to an apparently broken streak.
+            Button {
+                showTokens = true
+            } label: {
+                HStack(spacing: 3) {
+                    Image(systemName: "snowflake")
+                        .madFont(size: 8, weight: .black)
+                        .accessibilityHidden(true)
+                    Text(pending.heroLabel)
+                        .madFont(size: 9, weight: .black, design: .rounded)
+                        .tracking(0.6)
+                        .textCase(.uppercase)
+                }
+                .foregroundColor(SavedDayStyle.tint)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(pending.accessibilitySummary)
+            .accessibilityHint("Opens your streak tokens")
+        } else if tokensState.payload != nil {
             Button {
                 showTokens = true
             } label: {

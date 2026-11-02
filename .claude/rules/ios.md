@@ -83,6 +83,7 @@ Details: docs/conventions/ios.md § Key Patterns
 - One post opens as `PostDetailView`/`PostDetailLoaderView` via `PostDeepLink`; from a sheet use `openAfterDismiss`; `FeedDeepLink` is for raw workouts only.
 - `SaveFriendStreakView` only OFFERS; accept via root-hosted `StreakAssistOfferSheet`; gate on `donation_budget.remaining`; ask on `my_savable_day`; meter text via `assistCaption`.
 - A covered today reads `today_covered` on every today surface (`SavedDayStyle`); explain via `SavedTodayBanner` (keep the refund line); keep the flame and countdown live.
+- A Save waiting for the morning sweep reads `pending_save` (hero `saversLine`, token card, `pendingSaveBanner`); wording only via the `PendingSave` extension.
 - Show who spends each token via `StreakTokenKind.usage` + `TokenUsageBadge`.
 - An `EmptyView` body gets no lifecycle: first load in `init`, `.task(id:)` only for reloads.
 - Present pick confirmations FROM the `PHPickerViewController` (`ImagePicker.confirmation`), never `picker.dismiss` on confirm; one `ProfileImageCropper`; crop a `.up` copy.
