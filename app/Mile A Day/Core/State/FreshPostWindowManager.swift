@@ -318,7 +318,7 @@ final class FreshPostWindowManager: ObservableObject {
 /// makes the affordance underneath quietly go from "camera" to "camera roll"
 /// rather than locking.
 /// Decoupled from the manager — callers pass a plain `openedAt`, not the
-/// singleton — so components like `StoriesRailView` stay independent.
+/// singleton — so components like `TodayBoardView` stay independent.
 struct FreshWindowRing: View {
     let openedAt: Date
     var duration: TimeInterval = FreshPostWindowManager.duration

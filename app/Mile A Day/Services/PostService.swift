@@ -540,8 +540,17 @@ struct StoryGroup: Codable, Identifiable {
     /// of these is a day the viewer can actually watch. Optional (older
     /// servers omit it → fall back to has_unviewed).
     let unviewed_local_dates: [String]?
+    /// The author's newest story photo, for the Today board tile. nil on
+    /// older servers, for auto-card-only stories, and when the server's photo
+    /// gate withholds a friend's today picture.
+    let preview_url: String?
 
     var id: String { user_id }
+
+    var previewURL: URL? {
+        guard let preview_url, !preview_url.isEmpty else { return nil }
+        return ProfileImageService.fullImageURL(for: preview_url)
+    }
 
     var displayName: String {
         if let username, !username.isEmpty { return username }

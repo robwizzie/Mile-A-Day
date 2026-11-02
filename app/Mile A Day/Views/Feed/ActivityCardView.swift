@@ -99,9 +99,16 @@ struct ActivityCardView: View {
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
+    @Environment(\.feedCardChrome) private var chrome
+    @Environment(\.feedMediaCornerRadius) private var mediaRadius
+
+    /// Stacked (Feed tab): media edge to edge, text rows on the gutter.
+    private var textInset: CGFloat { chrome == .stacked ? FeedLayout.gutter : 0 }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
+        VStack(alignment: .leading, spacing: FeedLayout.rowGap) {
             header
+                .padding(.horizontal, textInset)
             // Instagram behavior: double-tap ANYWHERE on the card body hypes.
             // Header/footer buttons stay out so double-tapping them can't
             // hype by accident.
@@ -111,6 +118,7 @@ struct ActivityCardView: View {
                 // day renders exactly as it did before.
                 if entry.isStitchedMile, let segments = entry.segments, segments.count > 1 {
                     MileSegmentStrip(segments: segments, accent: accent)
+                        .padding(.horizontal, textInset)
                 }
             }
             .contentShape(Rectangle())
@@ -118,12 +126,10 @@ struct ActivityCardView: View {
                 TapGesture(count: 2).onEnded { doubleTapHype() }
             )
             footer
+                .padding(.horizontal, textInset)
         }
-        .padding(MADTheme.Spacing.sm + 2)
-        .background(
-            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
-                .fill(Color.white.opacity(0.04))
-        )
+        // Boxed on detail screens, stacked on the Feed tab (`FeedLayout`).
+        .modifier(FeedCardSurface(chrome: chrome))
         // Card-level so the burst plays centered over the whole card.
         .overlay(HypeBurstView(trigger: hypeBurst))
         // Same rule as PostCardView: chrome scales, media doesn't; above the
@@ -180,11 +186,11 @@ struct ActivityCardView: View {
     /// Same header as PostCardView: avatar + name + subtitle on the left and
     /// (for others) the "…" menu on the right.
     private var header: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: FeedLayout.avatarGap) {
             Button {
                 onTapAuthor?()
             } label: {
-                HStack(spacing: 10) {
+                HStack(spacing: FeedLayout.avatarGap) {
                     AvatarView(name: entry.displayName, imageURL: entry.profile_image_url, size: 40)
                     VStack(alignment: .leading, spacing: 1) {
                         Text(entry.displayName)
@@ -205,8 +211,8 @@ struct ActivityCardView: View {
                     }
                 } label: {
                     Image(systemName: "ellipsis")
-                        .madFont(size: 16, weight: .bold, maxScale: 1.3)
-                        .foregroundColor(.white.opacity(0.6))
+                            .madFont(size: 15, weight: .semibold, maxScale: 1.3)
+                        .foregroundColor(.white.opacity(0.45))
                         .padding(6)
                         .contentShape(Rectangle())
                 }
@@ -277,7 +283,7 @@ struct ActivityCardView: View {
                 RouteStatsBandOverlay(stats: stats, workoutType: entry.workout_type ?? "running")
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: mediaRadius, style: .continuous))
         // Same pinch-zoom as post slides; the floating copy is composed on
         // demand at pinch-begin.
         .instagramZoomable(
@@ -348,6 +354,7 @@ struct ActivityCardView: View {
                         indoorCard(still: true)
                             .frame(width: FeedMediaAspect.designSize(FeedMediaAspect.compact).width,
                                    height: FeedMediaAspect.designSize(FeedMediaAspect.compact).height)
+                            .environment(\.feedMediaCornerRadius, mediaRadius)
                     )
                     renderer.scale = 2
                     renderer.isOpaque = true

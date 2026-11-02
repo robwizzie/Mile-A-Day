@@ -5,6 +5,7 @@ import { sendPush } from "../pushNotificationService.js";
 import { shouldSendNotification } from "../notificationSettingsService.js";
 import { OWNER_NOT_PRIVATE_SQL } from "../visibilityService.js";
 import { type StoryGroup, type PostRow } from "./postTypes.js";
+import { type ViewerGoalGate } from "./photoLock.js";
 import { CIRCLE_CTE, POST_SELECT } from "./postSql.js";
 
 const db = PostgresService.getInstance();
@@ -25,12 +26,15 @@ export async function getStoriesRail(viewerId: string): Promise<StoryGroup[]> {
     created_at: string;
     is_viewed: boolean;
     local_date: string | null;
+    media_url: string | null;
+    is_auto: boolean | null;
   }>(
     `
 		${CIRCLE_CTE}
 		SELECT
 			p.user_id, u.username, u.first_name, u.last_name, u.profile_image_url, p.created_at,
 			p.local_date::text AS local_date,
+			p.media_url, p.is_auto,
 			EXISTS (
 				SELECT 1 FROM story_views sv WHERE sv.post_id = p.post_id AND sv.viewer_id = $1
 			) AS is_viewed
@@ -49,6 +53,9 @@ export async function getStoriesRail(viewerId: string): Promise<StoryGroup[]> {
 
   const groups = new Map<string, StoryGroup>();
   for (const r of rows) {
+    // Rows run oldest→newest, so the last real photo seen wins the preview.
+    // Auto cards (and live auto cards' empty media_url) are never previews.
+    const photo = r.is_auto !== true && r.media_url ? r.media_url : null;
     const g = groups.get(r.user_id);
     if (!g) {
       groups.set(r.user_id, {
@@ -63,8 +70,14 @@ export async function getStoriesRail(viewerId: string): Promise<StoryGroup[]> {
         story_local_dates: r.local_date ? [r.local_date] : [],
         unviewed_local_dates:
           !r.is_viewed && r.local_date ? [r.local_date] : [],
+        preview_url: photo,
+        preview_local_date: photo ? r.local_date : null,
       });
     } else {
+      if (photo) {
+        g.preview_url = photo;
+        g.preview_local_date = r.local_date;
+      }
       g.story_count += 1;
       g.has_unviewed = g.has_unviewed || !r.is_viewed;
       if (r.created_at > g.latest_at) g.latest_at = r.created_at;
@@ -87,6 +100,30 @@ export async function getStoriesRail(viewerId: string): Promise<StoryGroup[]> {
     if (a.has_unviewed !== b.has_unviewed) return a.has_unviewed ? -1 : 1;
     return a.latest_at < b.latest_at ? 1 : -1;
   });
+}
+
+/**
+ * The photo gate for rail previews: a viewer who hasn't finished their own
+ * mile gets no preview of a friend's TODAY photo, the same rule
+ * `lockUnearnedPhotos` applies to the stories themselves. Own previews always
+ * show. Strips the internal `preview_local_date` either way. Mutates and
+ * returns the groups.
+ */
+export function gateStoryRailPreviews(
+  groups: StoryGroup[],
+  viewerId: string,
+  gate: ViewerGoalGate,
+): StoryGroup[] {
+  for (const g of groups) {
+    const gated =
+      !gate.completed &&
+      !!gate.localDate &&
+      g.user_id !== viewerId &&
+      (g.preview_local_date ?? null) === gate.localDate;
+    if (gated) g.preview_url = null;
+    delete g.preview_local_date;
+  }
+  return groups;
 }
 
 /**

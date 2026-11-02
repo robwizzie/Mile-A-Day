@@ -356,6 +356,8 @@ private struct StoryGroupPlayerView: View {
     /// postId → the viewer's own emoji (hydrated from the server on load, so a
     /// re-view shows the reaction they already left; the server keeps one/story).
     @State private var myReactions: [String: String] = [:]
+    /// Friends' fastest miles, for the "Race" button on their stories.
+    @ObservedObject private var ghostService = FriendGhostService.shared
     /// postId → everyone who reacted, for the Instagram-style bubble row shown
     /// to ALL viewers (not just the author).
     @State private var reactors: [String: [StoryReactor]] = [:]
@@ -424,6 +426,13 @@ private struct StoryGroupPlayerView: View {
         .onReceive(tick) { _ in advanceProgress() }
         .onChange(of: isActive) { _, active in
             if active { activate() }
+        }
+        .task {
+            // Cached for five minutes, so paging through friends costs one
+            // fetch per activity, not one per story.
+            guard group.user_id != currentUserId else { return }
+            await ghostService.refreshIfNeeded(activityKey: "walking")
+            await ghostService.refreshIfNeeded(activityKey: "running")
         }
         // onDismiss also covers swiping the sheet away, which would otherwise
         // leave `paused` stuck true and freeze the story.
@@ -657,6 +666,9 @@ private struct StoryGroupPlayerView: View {
                     Spacer(minLength: 0)
                 }
             } else {
+                if let ghost = raceGhost(for: post) {
+                    raceButton(post, ghost: ghost)
+                }
                 reactionBar(post)
             }
         }
@@ -670,6 +682,65 @@ private struct StoryGroupPlayerView: View {
                 .allowsHitTesting(false)
                 .ignoresSafeArea()
         )
+    }
+
+    // MARK: - Race
+
+    /// A story is an invitation, not just a broadcast: "Race megs" sets that
+    /// friend's fastest mile as your ghost and opens the tracker. Shown only
+    /// when the server has a mile of theirs for this activity to chase.
+    private func raceActivityKey(_ post: PostItem) -> String {
+        (post.workout_type ?? "").lowercased().contains("run") ? "running" : "walking"
+    }
+
+    private func raceGhost(for post: PostItem) -> FriendGhost? {
+        guard !post.is_self else { return nil }
+        return ghostService.ghosts(for: raceActivityKey(post)).first { $0.user_id == post.user_id }
+    }
+
+    private func raceButton(_ post: PostItem, ghost: FriendGhost) -> some View {
+        Button {
+            startRace(post, ghost: ghost)
+        } label: {
+            HStack(spacing: 8) {
+                GhostSprite(size: 16, color: .black, floats: false)
+                    .accessibilityHidden(true)
+                Text("Race \(ghost.displayName)")
+                    .madFont(size: 15, weight: .heavy, design: .rounded, maxScale: 1.3)
+                    .lineLimit(1)
+                Text("best mile \(Self.mileClock(ghost.mile_seconds))")
+                    .madFont(size: 13, weight: .semibold, design: .rounded, maxScale: 1.3, monospacedDigit: true)
+                    .opacity(0.55)
+                    .lineLimit(1)
+            }
+            .minimumScaleFactor(0.8)
+            .foregroundColor(.black)
+            .padding(.horizontal, 16)
+            .frame(maxWidth: .infinity, minHeight: 48)
+            .background(Capsule().fill(Color.white))
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Race \(ghost.displayName)'s best mile, \(Self.mileClock(ghost.mile_seconds))")
+    }
+
+    private func startRace(_ post: PostItem, ghost: FriendGhost) {
+        let key = raceActivityKey(post)
+        // The same per-activity slot the tracker's race step reads and writes
+        // (`ghostTargetV1.running` / `.walking`), so the race opens on them.
+        UserDefaults.standard.set(ghost.target.storage, forKey: "ghostTargetV1.\(key)")
+        MADHaptics.action()
+        onRequestClose()
+        // After the viewer's cover has gone: a presentation raised inside a
+        // dismissal's own transaction is dropped.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
+            DeepLinkRouter.shared.requestOpenTracker(activity: key == "running" ? .run : .walk)
+        }
+    }
+
+    private static func mileClock(_ seconds: Double) -> String {
+        let total = max(0, Int(seconds.rounded()))
+        return String(format: "%d:%02d", total / 60, total % 60)
     }
 
     /// Ephemeral emoji reactions — the story counterpart to feed hype.
