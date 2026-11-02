@@ -444,33 +444,8 @@ struct WeeklyMileChartView: View {
     // MARK: - Card Background
 
     private var cardBackground: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(.ultraThinMaterial)
-            LinearGradient(
-                colors: [
-                    accentRed.opacity(0.06),
-                    Color.clear
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(
-                    LinearGradient(
-                        colors: [
-                            Color.white.opacity(colorScheme == .dark ? 0.2 : 0.3),
-                            Color.clear
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ),
-                    lineWidth: 1
-                )
-        }
-        .shadow(color: .black.opacity(0.1), radius: 8, x: 0, y: 4)
+        // The shared dashboard surface: no glass, gradient, rim or shadow.
+        DashboardCardSurface(style: .fun)
     }
 
     // MARK: - Geometry Helpers

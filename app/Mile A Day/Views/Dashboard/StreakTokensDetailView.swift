@@ -599,38 +599,9 @@ struct StreakTokensCard: View {
     }
 
     private func tokenCardBackground(readyCount: Int) -> some View {
-        RoundedRectangle(cornerRadius: 24, style: .continuous)
-            .fill(Color(red: 0.055, green: 0.050, blue: 0.058))
-            .overlay(
-                RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                Color.white.opacity(0.05),
-                                Color(red: 1.0, green: 0.56, blue: 0.20).opacity(0.06),
-                                MADTheme.Colors.madRed.opacity(0.04)
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .strokeBorder(
-                        LinearGradient(
-                            colors: [
-                                Color.white.opacity(0.22),
-                                readyCount > 0 ? Color.white.opacity(0.14) : Color.white.opacity(0.08),
-                                Color.white.opacity(0.06)
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        ),
-                        lineWidth: 1
-                    )
-            )
-            .shadow(color: Color.black.opacity(0.16), radius: 14, x: 0, y: 7)
+        // The shared dashboard surface (rimless, unshadowed); the tokens'
+        // own tiles carry the colour.
+        DashboardCardSurface(style: .fun)
     }
 
     private func medallionCell(

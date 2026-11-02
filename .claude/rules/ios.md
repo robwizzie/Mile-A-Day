@@ -187,7 +187,7 @@ When in doubt: cite the guideline number, propose the compliant path, and ask be
 - Lane crew lines in screen space (`RouteLaneOffset`); legend chips are buttons (`highlightedRouteId`); author route ships on every post read.
 - The challenge grid draws today from `todayChallenge` and refetches history once per open.
 - Throttle Flyover overlay invalidation by time; odometer base recomputed from the leg index.
-- Dashboard: say each fact once (distance lives in `DailyGoalBars`, so `HeroStatColumn` is to-go + left today); sentence-case labels, no icon circles, cards on one rimless `white.opacity(0.045)` surface; the main action is `DashboardStartMileButton` on flat `madRed`.
+- Dashboard: say each fact once (distance lives in `DailyGoalBars`, so `HeroStatColumn` is to-go + left today); sentence-case labels, no icon circles, every card below the hero draws `DashboardCardSurface` (one radius, rimless `white.opacity(0.045)`, no glass/gradient/shadow; colour lives in content); the home buddy pill opens `OutNowContainer` for friends out; the main action is `DashboardStartMileButton` on flat `madRed`.
 - Every dashboard card below the day's cards is switchable, stored per style (`dashboardCardsFunV1`/`ModernV1`); mount `DashboardCustomizeRow` after the style `switch`.
 - Flamey: one look via `FlameyLook.resolve(...)` (owning never dresses him); six shared files stay BYTE-IDENTICAL in `Views/Components/` and `MileADayWidgets/` (cp + cmp); no control in the hero's top-left; the Closet edits a draft (`saveDraft`); bubble anchors at `FlameyArt.crest`.
 - Build a figure's palette (body, arms, legs, glow) from `FlameyLook.figurePalette`, never `FlameyPalette.palette(for: look.color)`: a whole-body costume (`skeletonSuit`) skins his limbs.

@@ -669,7 +669,6 @@ struct DailyChallengeCard: View {
         }
         .padding(16)
         .background(cardBackground)
-        .shadow(color: .black.opacity(0.12), radius: 12, x: 0, y: 6)
     }
 
     @ViewBuilder
@@ -748,7 +747,6 @@ struct DailyChallengeCard: View {
         }
         .padding(16)
         .background(cardBackground)
-        .shadow(color: accentColor.opacity(0.16), radius: 14, x: 0, y: 7)
     }
 
     @ViewBuilder
@@ -871,37 +869,9 @@ struct DailyChallengeCard: View {
     }
 
     private var cardBackground: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .fill(.ultraThinMaterial)
-
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            accentColor.opacity(0.10),
-                            accentColor.opacity(0.035),
-                            Color.clear
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .stroke(
-                    LinearGradient(
-                        colors: [
-                            accentColor.opacity(0.32),
-                            accentColor.opacity(0.10),
-                            Color.white.opacity(0.07)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ),
-                    lineWidth: 1
-                )
-        }
+        // The shared dashboard surface; the challenge's colour lives in its
+        // icon and progress bar, not in a tinted, rimmed, shadowed frame.
+        DashboardCardSurface(style: .fun)
     }
 
     private func progressLabel(_ value: Double) -> String {
@@ -1487,9 +1457,8 @@ struct ActiveCompetitionBannerCard: View {
                     .lineLimit(1)
 
                 HStack(spacing: 6) {
-                    Text(competition.type.displayName.uppercased())
-                        .madFont(size: 9, weight: .black, design: .rounded)
-                        .tracking(0.8)
+                    Text(competition.type.displayName)
+                        .madFont(size: 11, weight: .bold, design: .rounded)
                         .foregroundColor(typeGradientColors.first ?? .green)
 
                     if let interval = competition.options.interval {

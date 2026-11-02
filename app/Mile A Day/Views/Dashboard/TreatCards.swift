@@ -132,13 +132,7 @@ struct ModernTreatsCard: View {
             }
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .topLeading)
-            // ModernTile's surface, restated: it's private to DashboardModeCards.
-            .background(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(Color(red: 0.075, green: 0.075, blue: 0.085))
-                    .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .strokeBorder(Color.white.opacity(0.09), lineWidth: 1))
-            )
+            .background(DashboardCardSurface(style: .modern))
         }
         .buttonStyle(.plain)
         .animation(.snappy, value: model.count)

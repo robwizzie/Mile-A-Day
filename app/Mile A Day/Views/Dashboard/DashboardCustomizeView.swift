@@ -176,20 +176,22 @@ struct DashboardQuietCard: View {
 }
 
 /// The quiet card background each style uses for its secondary cards.
+/// THE dashboard card surface: one soft fill, one radius, no rim, no shadow.
+///
+/// Every card below the hero draws this. They used to draw their own: frosted
+/// glass under an accent gradient under a gradient rim under a drop shadow,
+/// at radii from 14 to 24, so a page of cards read as a page of different
+/// apps. Colour now lives in each card's content (an icon, a bar, a number),
+/// never in its frame. `style` is kept so call sites read the same; both
+/// styles share the look.
 struct DashboardCardSurface: View {
     let style: DashboardStyle
 
+    static let radius: CGFloat = 18
+
     var body: some View {
-        switch style {
-        case .fun:
-            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
-                .fill(Color.white.opacity(0.05))
-        case .modern:
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(Color(red: 0.075, green: 0.075, blue: 0.085))
-                .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .strokeBorder(Color.white.opacity(0.09), lineWidth: 1))
-        }
+        RoundedRectangle(cornerRadius: Self.radius, style: .continuous)
+            .fill(Color.white.opacity(0.045))
     }
 }
 
