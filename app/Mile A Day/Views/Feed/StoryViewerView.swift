@@ -392,7 +392,18 @@ private struct StoryGroupPlayerView: View {
             if isLoading {
                 ProgressView().tint(.white)
             } else if let post = current {
-                storyImage(post)
+                if post.is_auto == true && post.photoURL == nil {
+                    // A finish frame the author chose to add: drawn live,
+                    // nothing to load, so the timer can run at once.
+                    StoryFinishFrame(stats: post.stats_snapshot,
+                                     coordinates: post.routeCoordinates,
+                                     workoutType: post.workout_type)
+                        .id(post.post_id)
+                        .ignoresSafeArea()
+                        .onAppear { imageReady = true }
+                } else {
+                    storyImage(post)
+                }
                 tapZones
 
                 // Top scrim so the white progress bars + author stay legible over

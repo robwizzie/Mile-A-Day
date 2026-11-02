@@ -7,6 +7,18 @@ import { OWNER_NOT_PRIVATE_SQL } from "../visibilityService.js";
 import { type StoryGroup, type PostRow } from "./postTypes.js";
 import { type ViewerGoalGate } from "./photoLock.js";
 import { CIRCLE_CTE, POST_SELECT } from "./postSql.js";
+import {
+  CLIENT_FEATURES,
+  supportsClientFeatureSql,
+} from "../clientFeatures.js";
+
+/**
+ * A story row the VIEWER (`$1`) can draw: every photo story, and a photo-less
+ * story frame (an image-less auto card) only for a build that renders one.
+ * Older builds show an empty photo for such a frame, so they never get it.
+ */
+const STORY_FRAME_VISIBLE_SQL = `(NOT p.is_auto OR p.media_url <> ''
+	OR ${supportsClientFeatureSql("$1", CLIENT_FEATURES.storyFinishCardV1)})`;
 
 const db = PostgresService.getInstance();
 
@@ -44,6 +56,7 @@ export async function getStoriesRail(viewerId: string): Promise<StoryGroup[]> {
 		WHERE p.share_to_story
 			AND p.deleted_at IS NULL
 			AND p.story_expires_at > NOW()
+			AND ${STORY_FRAME_VISIBLE_SQL}
 			AND p.user_id NOT IN (SELECT uid FROM blocked)
 			AND ${OWNER_NOT_PRIVATE_SQL("p.user_id")}
 		ORDER BY p.created_at ASC
@@ -161,6 +174,7 @@ export async function getUserActiveStories(
 			AND p.share_to_story
 			AND p.deleted_at IS NULL
 			AND p.story_expires_at > NOW()
+			AND ${STORY_FRAME_VISIBLE_SQL}
 			AND p.user_id NOT IN (SELECT uid FROM blocked)
 			AND ${OWNER_NOT_PRIVATE_SQL("p.user_id")}
 		ORDER BY p.created_at ASC

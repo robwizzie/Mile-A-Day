@@ -523,6 +523,24 @@ enum RunPostService {
         )
     }
 
+    /// The finish frame, added to the user's STORY because they asked for it
+    /// (the Today tile's "Add to my story"). Never called automatically: a
+    /// story is something you choose to put up. No picture: like the feed's
+    /// auto card it is drawn live from the walk (`StoryFinishFrame`), and a
+    /// later photo story for the same walk replaces it in place.
+    @MainActor
+    static func addFinishCardToStory(stats: RunStatsInput) async throws {
+        _ = try await PostService.createPost(
+            mediaUrl: nil,
+            caption: nil,
+            workoutId: stats.workoutId,
+            shareToFeed: false,
+            shareToStory: true,
+            stats: stats.snapshot,
+            isAuto: true
+        )
+    }
+
     private static func todayText() -> String {
         let f = DateFormatter()
         f.dateFormat = "MMM d"

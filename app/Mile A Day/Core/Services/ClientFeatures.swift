@@ -130,11 +130,18 @@ enum ClientFeatures {
     /// already shared this walk" and offers the photo that replaces it.
     static let liveAutoCardV1 = "live_auto_card_v1"
 
+    /// The story viewer draws a photo-less story frame (an auto card shared
+    /// to a story only: the "finish" frame, `StoryFinishFrame`), and the user
+    /// can add one on purpose from their Today tile. The server hides such
+    /// frames from builds without this, which would show an empty photo.
+    static let storyFinishCardV1 = "story_finish_card_v1"
+
     static let supported: [String] = [
         friendRequestV2, collabTagV1, ghostFriendRaceV1, postWindowV1, buddyWalksV1,
         weeklyChallengeV1, buddyGroupPostV1, buddyJoinRequestV1, activityDigestV1,
         widgetRefreshPushV1,
         weeklyRecapV1,
         liveAutoCardV1,
+        storyFinishCardV1,
     ]
 }

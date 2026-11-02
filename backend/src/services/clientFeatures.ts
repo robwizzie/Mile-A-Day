@@ -191,6 +191,17 @@ export const CLIENT_FEATURES = {
    * post — the shape their code already draws live.
    */
   liveAutoCardV1: "live_auto_card_v1",
+
+  /**
+   * The build's story viewer draws a photo-less STORY frame (an auto card
+   * shared to a story only: the "finish" frame, route + distance + streak),
+   * and lets the user add one on purpose from their Today tile.
+   *
+   * Gated per VIEWER in the stories rail and story reads
+   * (`STORY_FRAME_VISIBLE_SQL`): an older viewer would show such a frame as an
+   * empty photo for five seconds, so it never receives one.
+   */
+  storyFinishCardV1: "story_finish_card_v1",
 } as const;
 
 export type ClientFeature =
