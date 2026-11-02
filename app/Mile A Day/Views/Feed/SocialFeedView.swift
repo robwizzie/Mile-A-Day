@@ -437,11 +437,6 @@ struct SocialFeedView: View {
                             },
                             onTapGroup: { viewerGroup = $0 },
                             onLockedStoryTap: { showMileHint = true },
-                            onTapLive: { friend in
-                                openFriendProfile(id: friend.userId, username: friend.username,
-                                                  firstName: friend.firstName, lastName: friend.lastName,
-                                                  imageURL: friend.profileImageUrl)
-                            },
                             onNudge: { friend in nudgeFromBoard(friend) },
                             onTapFriend: { friend in
                                 openFriendProfile(id: friend.user_id, username: friend.username,
