@@ -223,7 +223,8 @@ final class StreakTokensState: ObservableObject {
                 my_savable_day: status.my_savable_day,
                 // This status endpoint doesn't carry the pause; the stats
                 // payload does, and InjuryPauseState is fed from there.
-                injury_pause: nil
+                injury_pause: nil,
+                pending_save: status.pending_save
             )
             assistableFriends = status.assistable_friends ?? []
             donationBudget = status.donation_budget

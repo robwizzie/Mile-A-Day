@@ -102,7 +102,7 @@ enum StreakTokenKind {
         case .doubleDown:
             return "Nothing to tap. Miss a day, then run double your goal before the next midnight — we back-fill the missed day as soon as the miles sync."
         case .save:
-            return "Nothing to tap and nothing to decide. Miss a day you don't run back, and this spends itself the next morning. We always tell you when it does."
+            return "Nothing to tap and nothing to decide. Miss a day and this covers it the next morning. Holding a Double Down too? The Save waits one more morning so you can run 2× first. Either way, keep doing your daily mile. Your streak may show as reset until the Save is used, and we always tell you when it is."
         case .assist:
             return "The only one you choose. Tap “Ask a friend” when your streak is on the line, or hand someone a mile you ran past your own goal. It spends only once you've both said yes."
         }
@@ -112,10 +112,59 @@ enum StreakTokenKind {
     var whenItFires: String {
         switch self {
         case .doubleDown: return "The day after a miss, the moment your second mile lands."
-        case .save: return "The morning after a miss you didn't run back."
+        case .save: return "The morning after a miss, or the morning after that if you hold a Double Down."
         case .assist: return "The moment the other person accepts."
         }
     }
+}
+
+// MARK: - Pending Save copy (one wording for every surface)
+
+extension PendingSave {
+    /// "Oct 31" for the covered day.
+    var missedDayShort: String {
+        guard let date = Self.parse.date(from: local_date) else { return local_date }
+        return Self.short.string(from: date)
+    }
+
+    /// "this morning" / "tomorrow morning", read against the device's day.
+    /// `fires_on` is the user's local day as the server files it, so a device
+    /// a zone away can be a day off; "tomorrow" is the safe reading then.
+    var whenText: String {
+        fires_on <= Self.parse.string(from: Date()) ? "this morning" : "tomorrow morning"
+    }
+
+    /// Hero chip: "Save pending · 32 days" (the streak it brings back).
+    var heroLabel: String { "Save pending · \(protected_streak) days" }
+
+    var headline: String { "Your Streak Save is covering \(missedDayShort)" }
+
+    /// The full sentence, honest about the one condition that can stop it.
+    var detail: String {
+        if needs_today {
+            return "Finish today's mile and it's used \(whenText). Your streak goes back to \(protected_streak) days."
+        }
+        return "It's used \(whenText). Your streak goes back to \(protected_streak) days. Until then it may show as reset."
+    }
+
+    var accessibilitySummary: String {
+        "Streak Save pending. \(detail)"
+    }
+
+    private static let parse: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        f.locale = Locale(identifier: "en_US_POSIX")
+        return f
+    }()
+
+    private static let short: DateFormatter = {
+        let f = DateFormatter()
+        // Same zone as `parse` (the device's), so the day can't shift.
+        f.dateFormat = "MMM d"
+        f.locale = Locale(identifier: "en_US_POSIX")
+        return f
+    }()
 }
 
 /// Who acts for a token to be spent. Three tokens, three completely different
@@ -428,11 +477,35 @@ struct StreakTokensCard: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
 
+                    if let pending = payload.pending_save {
+                        HStack(alignment: .top, spacing: 6) {
+                            Image(systemName: "snowflake")
+                                .font(.system(size: 10, weight: .bold))
+                                .padding(.top, 1)
+                                .accessibilityHidden(true)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(pending.headline)
+                                    .font(.system(size: 11, weight: .heavy, design: .rounded))
+                                    .lineLimit(2)
+                                    .multilineTextAlignment(.leading)
+                                Text(pending.detail)
+                                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                                    .foregroundColor(SavedDayStyle.tint.opacity(0.75))
+                                    .lineLimit(3)
+                                    .multilineTextAlignment(.leading)
+                            }
+                        }
+                        .foregroundColor(SavedDayStyle.tint)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+
                     if payload.streak_at_risk {
                         HStack(spacing: 6) {
                             Image(systemName: "bolt.fill")
                                 .font(.system(size: 10, weight: .bold))
-                            Text("Missed yesterday — run 2× today to save your streak!")
+                            Text(payload.pending_save != nil
+                                 ? "Or run 2× today to Double Down and keep your Save"
+                                 : "Missed yesterday — run 2× today to save your streak!")
                                 .font(.system(size: 11, weight: .heavy, design: .rounded))
                                 .lineLimit(2)
                                 .multilineTextAlignment(.leading)
@@ -747,6 +820,9 @@ struct StreakTokensDetailView: View {
                 ScrollView {
                     VStack(spacing: MADTheme.Spacing.md) {
                         if let payload = tokensState.payload {
+                            if let pending = payload.pending_save {
+                                pendingSaveBanner(pending)
+                            }
                             if payload.streak_at_risk {
                                 atRiskBanner(payload)
                             }
@@ -962,10 +1038,12 @@ struct StreakTokensDetailView: View {
                 .font(.system(size: 18, weight: .bold))
                 .foregroundColor(.orange)
             VStack(alignment: .leading, spacing: 2) {
-                Text("Your streak is on the line")
+                Text(payload.pending_save != nil ? "Want to keep your Save?" : "Your streak is on the line")
                     .font(.system(size: 14, weight: .heavy, design: .rounded))
                     .foregroundColor(.primary)
-                Text("You missed yesterday. Run \(String(format: "%.1f", payload.double_down.recover_miles ?? 2.0)) mi today to Double Down and save it.")
+                Text(payload.pending_save != nil
+                     ? "Optional: run \(String(format: "%.1f", payload.double_down.recover_miles ?? 2.0)) mi today to Double Down and keep your Streak Save for later."
+                     : "You missed yesterday. Run \(String(format: "%.1f", payload.double_down.recover_miles ?? 2.0)) mi today to Double Down and save it.")
                     .font(.system(size: 12, weight: .medium, design: .rounded))
                     .foregroundColor(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -981,6 +1059,39 @@ struct StreakTokensDetailView: View {
                         .strokeBorder(Color.orange.opacity(0.35), lineWidth: 1)
                 )
         )
+    }
+
+    /// A Save already committed to a missed day. Leads the sheet: this is
+    /// where someone lands after seeing a reset streak beside an "Available"
+    /// Save, so it answers that before anything else.
+    private func pendingSaveBanner(_ pending: PendingSave) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "snowflake")
+                .font(.system(size: 18, weight: .bold))
+                .foregroundColor(SavedDayStyle.tint)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(pending.headline)
+                    .font(.system(size: 14, weight: .heavy, design: .rounded))
+                    .foregroundColor(.primary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(pending.detail)
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 14)
+                .fill(SavedDayStyle.tint.opacity(0.13))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14)
+                        .strokeBorder(SavedDayStyle.tint.opacity(0.35), lineWidth: 1)
+                )
+        )
+        .accessibilityElement(children: .combine)
     }
 
     private func tokenCard(

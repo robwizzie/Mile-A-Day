@@ -143,10 +143,7 @@ function dateOnly(value: string | Date | null): string | null {
  * local today, which can legitimately read a day ahead of a caller further
  * west — a negative here would render as a countdown longer than the target.
  */
-function assistDaysElapsed(
-  lastUsed: string | null,
-  userToday: string,
-): number {
+function assistDaysElapsed(lastUsed: string | null, userToday: string): number {
   if (!lastUsed) return STREAK_ASSIST_TARGET_DAYS;
   const from = Date.parse(`${lastUsed.slice(0, 10)}T00:00:00Z`);
   const to = Date.parse(`${userToday}T00:00:00Z`);
@@ -232,7 +229,9 @@ export async function getMeters(
   // live, so a lapse puts the regular target back on the next read — a token
   // already spent stays spent, one not yet held simply needs the longer run.
   const plus = await isPlusActive(userId);
-  const ddTarget = plus ? PLUS_DOUBLE_DOWN_TARGET_DAYS : DOUBLE_DOWN_TARGET_DAYS;
+  const ddTarget = plus
+    ? PLUS_DOUBLE_DOWN_TARGET_DAYS
+    : DOUBLE_DOWN_TARGET_DAYS;
   const saveTarget = plus
     ? PLUS_STREAK_SAVE_TARGET_RUN_DAYS
     : STREAK_SAVE_TARGET_RUN_DAYS;
@@ -924,7 +923,8 @@ async function validateTarget(
     // this offer is about a date that is no longer the one in play.
     return {
       ok: false,
-      reason: target.local_date > targetDate ? "no_savable_day" : "gap_too_wide",
+      reason:
+        target.local_date > targetDate ? "no_savable_day" : "gap_too_wide",
     };
   }
   return { ok: true, restored_streak: target.restored_streak };
@@ -944,7 +944,8 @@ async function loadExchange(
       target: SavableTarget;
     }
 > {
-  if (!streakFeaturesGloballyEnabled()) return { ok: false, status: "disabled" };
+  if (!streakFeaturesGloballyEnabled())
+    return { ok: false, status: "disabled" };
   if (donorId === recipientId) return { ok: false, status: "forbidden" };
 
   const [donorRow, recipientRow] = await Promise.all([
@@ -1122,7 +1123,8 @@ export async function respondToAssistOffer(
   if (!offer) return { status: "not_found" };
 
   // Only the side that DIDN'T open it gets to answer.
-  const responder = offer.initiator === "donor" ? offer.recipient_id : offer.donor_id;
+  const responder =
+    offer.initiator === "donor" ? offer.recipient_id : offer.donor_id;
   if (responder !== userId) return { status: "forbidden" };
 
   if (!accept) {
@@ -1407,6 +1409,64 @@ export interface StreakFeaturesPayload {
    * object; shipped clients ignore the extra key.
    */
   injury_pause: InjuryPauseStatus;
+  /**
+   * A held Streak Save that is already committed to a missed day but hasn't
+   * been spent yet, because the sweep only spends it on a later morning (and
+   * waits out an open Double Down window first). Until then the stored streak
+   * reads broken, so without this the user sees a reset streak beside an
+   * "Available" Save and assumes it failed. Additive; null when nothing is
+   * pending.
+   */
+  pending_save: PendingSave | null;
+}
+
+export interface PendingSave {
+  /** The missed day the Save will cover. */
+  local_date: string;
+  /** The user's local day whose morning sweep spends it (today or tomorrow). */
+  fires_on: string;
+  /** The streak once the day is covered (counting today if it must be run). */
+  protected_streak: number;
+  /**
+   * True while today's mile is still needed: a Double Down window is open,
+   * and tomorrow's sweep only covers the miss if today is intact. False once
+   * today is done (or when no window is open).
+   */
+  needs_today: boolean;
+}
+
+/**
+ * Mirror of `sweepOneUser`'s decision, read-only: which missed day a held Save
+ * WILL cover, and on which morning. Same shapes (`pickTargetDay`), same order
+ * (an open Double Down window with the token held delays the Save a day).
+ */
+async function getPendingSave(
+  userId: string,
+  userToday: string,
+  meters: Awaited<ReturnType<typeof getMeters>>,
+): Promise<PendingSave | null> {
+  if (!meters.streak_save.held) return null;
+  if (await isPaused(userId)) return null;
+
+  const facts = await recentDayFacts(userId, dateStrMinus(userToday, 4));
+  const ok = (d: string) => facts.qualified.has(d) || facts.covered.has(d);
+  const pick = pickTargetDay(userToday, ok);
+  if (!pick || pick.kind !== "missed") return null;
+
+  const waitsForDoubleDown = pick.ddWindowOpen && meters.double_down.held;
+  const needsToday = waitsForDoubleDown && !ok(userToday);
+
+  const prior = await streakEndingAt(userId, dateStrMinus(pick.local_date, 1));
+  if (prior < 1) return null;
+
+  return {
+    local_date: pick.local_date,
+    fires_on: waitsForDoubleDown ? dateStrPlus(userToday, 1) : userToday,
+    protected_streak:
+      projectRestoredStreak(pick.local_date, userToday, prior, ok) +
+      (needsToday ? 1 : 0),
+    needs_today: needsToday,
+  };
 }
 
 /**
@@ -1495,6 +1555,7 @@ export async function getStreakFeaturesPayload(
     // Only worth reporting when they're holding the token that would pay for
     // it — an ask they can't complete is worse than no ask.
     injury_pause: await getInjuryPauseStatus(userId),
+    pending_save: await getPendingSave(userId, userToday, meters),
     my_savable_day: meters.streak_assist.held
       ? await getSavableTarget(userId, userToday, row).then((t) =>
           t
@@ -1666,7 +1727,9 @@ export async function getAssistableFriends(
       ),
       // Only an offer aimed at THIS day counts as already offered.
       offer_status:
-        row.offer_target === pick.local_date ? (row.offer_status ?? "none") : "none",
+        row.offer_target === pick.local_date
+          ? (row.offer_status ?? "none")
+          : "none",
       offer_id: row.offer_target === pick.local_date ? row.offer_id : null,
     });
   }
@@ -1819,7 +1882,9 @@ export async function getFriendRescueStatus(
       reason: multiDayGap ? "gap_too_wide" : "no_savable_day",
     };
   }
-  if (target.local_date < dateStrMinus(friendToday, ASSIST_RESCUE_WINDOW_DAYS)) {
+  if (
+    target.local_date < dateStrMinus(friendToday, ASSIST_RESCUE_WINDOW_DAYS)
+  ) {
     return { ...base, available: false, reason: "window_passed" };
   }
 

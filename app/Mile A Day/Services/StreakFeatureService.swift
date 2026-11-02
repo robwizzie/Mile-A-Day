@@ -90,6 +90,24 @@ struct StreakFeaturesPayload: Codable {
     /// of this payload — an older server omits it and the feature simply isn't
     /// offered, instead of failing the whole stats decode.
     let injury_pause: InjuryPauseStatus?
+    /// A held Streak Save already committed to a missed day but not spent yet
+    /// (the sweep spends it on a later morning, a day later still while a
+    /// Double Down window is open). The stored streak reads broken until then,
+    /// so every surface that shows the streak explains it from this field.
+    /// Optional with a default: absent on older servers.
+    var pending_save: PendingSave? = nil
+}
+
+/// Mirrors the backend's `PendingSave`.
+struct PendingSave: Codable, Equatable {
+    /// The missed day the Save will cover, "yyyy-MM-dd".
+    let local_date: String
+    /// The user's local day whose morning sweep spends it.
+    let fires_on: String
+    /// The streak once the day is covered.
+    let protected_streak: Int
+    /// True while today's mile is still needed for the Save to fire.
+    let needs_today: Bool
 }
 
 /// Mirrors the backend's `InjuryPauseStatus`. Every field the server sends is
@@ -257,6 +275,7 @@ struct StreakFeaturesStatus: Codable {
     let natural_streak: Bool?
     let streak_at_risk: Bool?
     let my_savable_day: SavableDay?
+    let pending_save: PendingSave?
     let assistable_friends: [AssistableFriend]?
     let donation_budget: DonationBudget?
     let pending_offers: [PendingAssistOffer]?

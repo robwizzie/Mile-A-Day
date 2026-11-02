@@ -32,6 +32,7 @@ Details: docs/conventions/backend.md § Backend Conventions
 - Streak Save meter is in RUN-day units: run-alone ≥0.95 = 1, any other mile day = `STREAK_SAVE_WALK_DAY_CREDIT` (½); same rule in `getMeters` and `adminAnalyticsService`. Check: `plus-check`.
 - `refundEarnedCoverage` DELETES a run day's `streak_coverage` row; every spend writes `prior_last_used` + `spent_stamp`. Check: `streak-check` §G2.
 - Today surfaces read `today_covered` / `fetchTodayCoverage`; never re-derive coverage from `frozen_dates`.
+- A held Save committed to a miss is served as `pending_save` (`getPendingSave`), which must mirror `sweepOneUser`'s day/morning choice; never fold it into the stored streak. Check: `streak-check` §G3.
 - Streak is STORED: write via `refreshCurrentStreak`, read via `readStoredStreak`/`effectiveStreakSql`; every qualifying mutation awaits `refreshCurrentStreak`. Check: `streak-check`.
 - Coauthor switches stay independent (NULL = permissive); reach gate goes INSIDE `collabReachSql`'s non-self arm; `setCoauthorFeedVisibility` writes both shapes.
 - `dual_media_url` rides `POST_COLUMNS`, `FEED_ENTRY_PROJECTION`, `MULTI_COAUTHORS_JSON`; validate via `normalizeDualMediaUrl`, write wholesale; lock/sweep/repair it too.
