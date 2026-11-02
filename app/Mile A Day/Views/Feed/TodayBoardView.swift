@@ -8,7 +8,11 @@ import SwiftUI
 ///
 /// Each tile is one of four states, in this order along the row:
 /// - **Walking now**: live distance from `/live/friends-out` (which already
-///   honours `share_live_presence`), a pulsing walk-blue edge. Tap → them.
+///   honours `share_live_presence`), said in words: a progress ring toward
+///   their goal, the distance on top, "Walking"/"Running" along the bottom,
+///   and a pulsing walk-blue edge. Tap → the Out now sheet (Hype / Join),
+///   also reachable from the header's "N out now" pill. Polled every 20s
+///   while anyone is out, 60s otherwise.
 /// - **New / seen story**: the newest story photo as the tile (`preview_url`,
 ///   withheld server-side when the photo gate applies), the brand ring while
 ///   unseen. Locked behind the viewer's own mile like every story.
@@ -41,12 +45,18 @@ struct TodayBoardView: View {
     let onTapAdd: () -> Void
     let onTapGroup: (StoryGroup) -> Void
     var onLockedStoryTap: () -> Void = {}
-    let onTapLive: (FriendOutNow) -> Void
     let onNudge: (FriendActivityItem) -> Void
     /// A done-today friend with nothing to watch: their profile.
     let onTapFriend: (FriendActivityItem) -> Void
     /// Re-reads who's out; the board polls it while it is on screen.
     var refreshLive: () async -> Void = {}
+
+    /// A friend's profile, opened from the live sheet (after it closes).
+    var onOpenLiveProfile: (FriendOutNow) -> Void = { _ in }
+
+    /// The live sheet: one person (a walking tile) or everyone (the header's
+    /// pill). nil = closed.
+    @State private var outNowRoute: OutNowRoute?
 
     // MARK: - Entries
 
@@ -142,38 +152,89 @@ struct TodayBoardView: View {
         }
         .task {
             // Who's out moves minute to minute; nothing else on the board does.
+            // Faster while someone IS out, so their tile reads as live: a
+            // walker's phone reports every ~45s, so 20s keeps us within one
+            // beat of it. Idle, once a minute is enough to notice a new walker.
+            await refreshLive()
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 60 * 1_000_000_000)
+                let seconds: UInt64 = friendsOut.isEmpty ? 60 : 20
+                try? await Task.sleep(nanoseconds: seconds * 1_000_000_000)
                 guard !Task.isCancelled else { break }
                 await refreshLive()
             }
         }
+        // Who's out, with Hype and Join: the existing live list (the same
+        // one the Friends tab shows), one tap from any walking tile.
+        .sheet(item: $outNowRoute) { route in
+            OutNowContainer(
+                initial: route,
+                onJoined: {
+                    outNowRoute = nil
+                    // Hand the joined walk to the Dashboard after this sheet
+                    // has gone (a presentation raised in a dismissal is dropped).
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                        guard let sessionId = BuddySessionService.shared.session?.id else { return }
+                        DeepLinkRouter.shared.requestOpenBuddySession(sessionId: sessionId)
+                        NotificationCenter.default.post(
+                            name: NSNotification.Name("MAD_SwitchTab"), object: nil, userInfo: ["tab": 0]
+                        )
+                    }
+                },
+                onOpenProfile: { friend in
+                    outNowRoute = nil
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { onOpenLiveProfile(friend) }
+                }
+            )
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+        }
     }
 
     private var header: some View {
-        HStack(alignment: .firstTextBaseline) {
+        HStack(alignment: .center, spacing: 8) {
             Text("Today")
                 .madFont(size: 15, weight: .bold, design: .rounded)
                 .foregroundColor(.white.opacity(0.92))
             Spacer(minLength: 8)
-            Text(summary)
-                .madFont(size: 12, weight: .medium, design: .rounded)
-                .foregroundColor(.white.opacity(0.5))
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
+            if !friendsToday.isEmpty {
+                Text("\(doneCount) of \(friendsToday.count) done")
+                    .madFont(size: 12, weight: .medium, design: .rounded, monospacedDigit: true)
+                    .foregroundColor(.white.opacity(0.5))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+            if !friendsOut.isEmpty {
+                // "Out now" is a THING you can open, not a count in a caption:
+                // a live dot, the words, and the sheet with Hype and Join.
+                Button {
+                    MADHaptics.tap()
+                    outNowRoute = .everyone
+                } label: {
+                    HStack(spacing: 5) {
+                        Circle()
+                            .fill(MADTheme.Colors.walkBlue)
+                            .frame(width: 6, height: 6)
+                            .accessibilityHidden(true)
+                        Text("\(friendsOut.count) out now")
+                            .madFont(size: 12, weight: .bold, design: .rounded, maxScale: 1.3, monospacedDigit: true)
+                            .lineLimit(1)
+                            .fixedSize()
+                        Image(systemName: "chevron.right")
+                            .madFont(size: 9, weight: .bold, maxScale: 1.3)
+                            .opacity(0.6)
+                            .accessibilityHidden(true)
+                    }
+                    .foregroundColor(MADTheme.Colors.walkBlue)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 5)
+                    .background(Capsule().fill(MADTheme.Colors.walkBlue.opacity(0.14)))
+                    .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("\(friendsOut.count) friends out walking now. Opens hype and join.")
+            }
         }
         .padding(.horizontal, FeedLayout.gutter)
-    }
-
-    private var summary: String {
-        var parts: [String] = []
-        if !friendsToday.isEmpty {
-            parts.append("\(doneCount) of \(friendsToday.count) done")
-        }
-        if !friendsOut.isEmpty {
-            parts.append("\(friendsOut.count) out now")
-        }
-        return parts.joined(separator: " · ")
     }
 
     // MARK: - Tiles
@@ -241,12 +302,20 @@ struct TodayBoardView: View {
                 }
             }
         case .walking(let friend):
+            // Says what it is in words: their progress as a ring around the
+            // face (filling toward THEIR goal), the distance on top, and
+            // "Walking"/"Running" along the bottom. A blue edge and a number
+            // alone read as decoration to anyone who hadn't been told.
             TodayTile(edge: .live) {
                 ZStack {
                     TodayTileStyle.ground
-                    AvatarView(name: entry.name, imageURL: entry.imageURL, size: 46)
+                    LiveProgressAvatar(name: entry.name, imageURL: entry.imageURL,
+                                       progress: liveProgress(friend))
+                        .frame(maxHeight: .infinity, alignment: .center)
+                        .padding(.bottom, 10)
                 }
                 .overlay(alignment: .top) { liveChip(friend) }
+                .overlay(alignment: .bottom) { liveLabel(friend) }
             }
         case .done:
             TodayTile(edge: .done) {
@@ -277,7 +346,21 @@ struct TodayBoardView: View {
 
     private func liveChip(_ friend: FriendOutNow) -> some View {
         TodayChip(text: friend.distanceMiles.map { $0.distanceFormatted } ?? "Out now",
-                  icon: nil, style: .live)
+                  icon: friend.isRunning ? "figure.run" : "figure.walk", style: .live)
+            .animation(.easeOut(duration: 0.4), value: friend.distanceMiles)
+    }
+
+    private func liveLabel(_ friend: FriendOutNow) -> some View {
+        Text(friend.isRunning ? "Running" : "Walking")
+            .madFont(size: 10, weight: .heavy, design: .rounded, maxScale: 1.1)
+            .foregroundColor(MADTheme.Colors.walkBlue)
+            .lineLimit(1)
+            .padding(.bottom, 8)
+    }
+
+    private func liveProgress(_ friend: FriendOutNow) -> Double {
+        guard let miles = friend.distanceMiles else { return 0 }
+        return min(1, max(0, miles / friend.goal))
     }
 
     private func tap(_ entry: Entry) {
@@ -291,8 +374,9 @@ struct TodayBoardView: View {
                 onTapGroup(group)
             }
         case .walking(let friend):
+            // Tapping a person opens THAT person, not a list they're in.
             MADHaptics.tap()
-            onTapLive(friend)
+            outNowRoute = .person(friend.userId)
         case .done(let friend):
             MADHaptics.tap()
             onTapFriend(friend)
@@ -532,6 +616,7 @@ private struct TodayChip: View {
                 .madFont(size: 10, weight: .heavy, design: .rounded, maxScale: 1.1, monospacedDigit: true)
                 .lineLimit(1)
                 .fixedSize()
+                .contentTransition(.numericText())
         }
         .foregroundColor(foreground)
         .padding(.horizontal, 7)
@@ -585,5 +670,118 @@ private struct TodayTileButtonStyle: ButtonStyle {
         configuration.label
             .scaleEffect(configuration.isPressed ? 0.95 : 1)
             .animation(.spring(response: 0.22, dampingFraction: 0.72), value: configuration.isPressed)
+    }
+}
+
+
+/// A face with a progress ring around it, for a friend mid-walk: the ring
+/// fills toward their own goal as their phone reports in.
+private struct LiveProgressAvatar: View {
+    let name: String
+    let imageURL: String?
+    let progress: Double
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .stroke(Color.white.opacity(0.14), lineWidth: 3)
+            Circle()
+                .trim(from: 0, to: progress)
+                .stroke(MADTheme.Colors.walkBlue, style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+                .animation(.easeOut(duration: 0.6), value: progress)
+            AvatarView(name: name, imageURL: imageURL, size: 40)
+        }
+        .frame(width: 50, height: 50)
+    }
+}
+
+/// Which live sheet: one friend, or everyone out.
+enum OutNowRoute: Identifiable, Equatable {
+    case person(String)
+    case everyone
+
+    var id: String {
+        switch self {
+        case .person(let id): return "person-\(id)"
+        case .everyone: return "everyone"
+        }
+    }
+}
+
+/// The live sheet's content. Switching from one person to everyone happens
+/// INSIDE the sheet, so "See everyone out" never dismisses and re-presents.
+struct OutNowContainer: View {
+    let initial: OutNowRoute
+    let onJoined: () -> Void
+    let onOpenProfile: (FriendOutNow) -> Void
+
+    @State private var route: OutNowRoute?
+
+    var body: some View {
+        switch route ?? initial {
+        case .person(let id):
+            LiveFriendSheet(
+                friendId: id,
+                onJoined: onJoined,
+                onOpenProfile: onOpenProfile,
+                onSeeEveryone: { withAnimation(.easeInOut(duration: 0.2)) { route = .everyone } }
+            )
+        case .everyone:
+            OutNowSheet(onJoined: onJoined)
+        }
+    }
+}
+
+/// Everyone out right now, with Hype and Join, opened from the Today board.
+///
+/// The list itself is `BuddyJoinFriendCard`, reused verbatim (the Friends
+/// tab's "Out right now"): closest-to-finishing first, a live ring per
+/// person, Hype that lands on their tracker mid-walk, and Join / Ask to walk.
+struct OutNowSheet: View {
+    let onJoined: () -> Void
+    @ObservedObject private var buddy = BuddySessionService.shared
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Out right now")
+                    .madFont(size: 22, weight: .heavy, design: .rounded)
+                    .foregroundColor(.white)
+                Text("Hype them mid-walk and it shows up on their screen. Or go with them.")
+                    .madFont(size: 14, weight: .medium, design: .rounded)
+                    .foregroundColor(.white.opacity(0.6))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 24)
+
+            ScrollView {
+                if buddy.friendsOutNow.isEmpty {
+                    Text("Nobody is out right now.")
+                        .madFont(size: 15, weight: .semibold, design: .rounded)
+                        .foregroundColor(.white.opacity(0.5))
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, 40)
+                } else {
+                    BuddyJoinFriendCard(
+                        // You can't join a walk mid-walk; hyping still works.
+                        hasActiveWorkout: InProgressWorkoutStore.load()?.isActive == true,
+                        onJoined: onJoined
+                    )
+                    .padding(.horizontal, 16)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(red: 0.09, green: 0.05, blue: 0.07).ignoresSafeArea())
+        .madTypeCap(.madCardCap)
+        .task {
+            // Fresh numbers the moment it opens, then every 20s while open.
+            while !Task.isCancelled {
+                await buddy.refreshFriendsOutNow()
+                try? await Task.sleep(nanoseconds: 20 * 1_000_000_000)
+            }
+        }
     }
 }
