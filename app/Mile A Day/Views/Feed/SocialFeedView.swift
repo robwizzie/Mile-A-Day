@@ -63,6 +63,8 @@ struct SocialFeedView: View {
     /// Friends nudged from the board this session (the server allows one a
     /// day), so the tile flips to "Nudged" without a round trip.
     @State private var nudgedFriendIds: Set<String> = []
+    /// The opt-in "add today's finish to your story" sheet (your Today tile).
+    @State private var showFinishStorySheet = false
 
     @State private var feed: [FeedEntry] = []
     /// Entry id → the day header drawn above that entry. See
@@ -423,7 +425,16 @@ struct SocialFeedView: View {
                             nudgedIds: nudgedFriendIds,
                             isGroupViewable: { canViewStories(of: $0) },
                             isGroupUnviewed: { isGroupUnviewed(of: $0) },
-                            onTapAdd: handleCompose,
+                            onTapAdd: {
+                                // After the mile, your tile OFFERS the finish
+                                // frame for your story; nothing is added until
+                                // you choose it. Before, it explains the lock.
+                                if mileDone, statsInput.workoutId != nil {
+                                    showFinishStorySheet = true
+                                } else {
+                                    handleCompose()
+                                }
+                            },
                             onTapGroup: { viewerGroup = $0 },
                             onLockedStoryTap: { showMileHint = true },
                             onTapLive: { friend in
@@ -439,6 +450,21 @@ struct SocialFeedView: View {
                             },
                             refreshLive: { await buddy.refreshFriendsOutNow() }
                         )
+                    }
+                    // Its own node: the feed's other nodes already carry
+                    // presentations, and two on one node drop one.
+                    .sheet(isPresented: $showFinishStorySheet) {
+                        AddFinishStorySheet(
+                            stats: statsInput,
+                            onAdded: { Task { await refreshRail() } },
+                            onPostPhoto: {
+                                // After this sheet has gone, or the composer's
+                                // cover is dropped in its dismissal.
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { handleCompose() }
+                            }
+                        )
+                        .presentationDetents([.large])
+                        .presentationDragIndicator(.visible)
                     }
 
                     if !memories.isEmpty {
