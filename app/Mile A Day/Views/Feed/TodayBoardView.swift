@@ -354,19 +354,12 @@ struct TodayBoardView: View {
                             Text(friends.count == 1 ? "1 streak ends tonight" : "\(friends.count) streaks end tonight")
                                 .madFont(size: 14, weight: .heavy, design: .rounded, maxScale: 1.2)
                                 .foregroundColor(.white)
-                            HStack(spacing: 4) {
-                                Image(systemName: "hourglass")
-                                    .font(.system(size: 9, weight: .bold))
-                                    .accessibilityHidden(true)
-                                Text("\(Self.shortTime(soonest)) left")
-                                    .contentTransition(.numericText())
-                                if pending > 0 {
-                                    Text("· \(pending) to nudge")
-                                        .foregroundColor(.white.opacity(0.55))
-                                }
+                            // Narrow phones / large text drop "· N to nudge"
+                            // before anything scales down.
+                            ViewThatFits(in: .horizontal) {
+                                riskSubline(soonest: soonest, pending: pending)
+                                riskSubline(soonest: soonest, pending: 0)
                             }
-                            .madFont(size: 12, weight: .bold, design: .rounded, maxScale: 1.2, monospacedDigit: true)
-                            .foregroundColor(MADTheme.Colors.madRed)
                         }
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
@@ -396,6 +389,24 @@ struct TodayBoardView: View {
                 .accessibilityHint("Shows who, with a nudge for each")
             }
         }
+    }
+
+    private func riskSubline(soonest: Int, pending: Int) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: "hourglass")
+                .font(.system(size: 9, weight: .bold))
+                .accessibilityHidden(true)
+            Text("\(Self.shortTime(soonest)) left")
+                .contentTransition(.numericText())
+            if pending > 0 {
+                Text("· \(pending) to nudge")
+                    .foregroundColor(.white.opacity(0.55))
+            }
+        }
+        .madFont(size: 12, weight: .bold, design: .rounded, maxScale: 1.2, monospacedDigit: true)
+        .foregroundColor(MADTheme.Colors.madRed)
+        .lineLimit(1)
+        .fixedSize()
     }
 
     /// "17" — their streak at stake — plus their own time left only when
@@ -523,21 +534,33 @@ struct TodayBoardView: View {
             TodayTile(edge: atRisk ? (nudged ? .riskQuiet : .risk) : .none) {
                 ZStack {
                     TodayTileStyle.dimGround
-                    // Smaller and lifted, so the streak chip on top and the
-                    // Nudge button along the bottom both clear the face.
-                    AvatarView(name: entry.name, imageURL: entry.imageURL, size: 40)
-                        .opacity(nudged ? 0.75 : 0.9)
-                        .padding(.bottom, 12)
+                    // Face, then the streak at stake UNDER it, centred in the
+                    // room above the Nudge band. A chip on top of the tile
+                    // sat on the face (its top edge covered the photo).
+                    VStack(spacing: 4) {
+                        AvatarView(name: entry.name, imageURL: entry.imageURL, size: 40)
+                            .opacity(nudged ? 0.75 : 0.9)
+                        if atRisk, let streak = friend.current_streak {
+                            HStack(spacing: 2) {
+                                Image(systemName: "flame.fill")
+                                    .font(.system(size: 9, weight: .bold))
+                                    .accessibilityHidden(true)
+                                Text(riskChipText(friend, streak: streak))
+                                    .madFont(size: 11, weight: .heavy, design: .rounded,
+                                             maxScale: 1.0, monospacedDigit: true)
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.7)
+                            }
+                            .foregroundColor(nudged ? MADTheme.Colors.madRed.opacity(0.7) : .orange)
+                            .padding(.horizontal, 4)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .padding(.bottom, NudgeButtonLabel.height)
                     if wavingId == friend.user_id {
                         NudgeWave(trigger: waveCount)
                             .allowsHitTesting(false)
                             .transition(.opacity)
-                    }
-                }
-                .overlay(alignment: .top) {
-                    if atRisk, let streak = friend.current_streak {
-                        TodayChip(text: riskChipText(friend, streak: streak), icon: "flame.fill",
-                                  style: nudged ? .riskQuiet : .risk)
                     }
                 }
                 .overlay(alignment: .bottom) {
@@ -1137,6 +1160,7 @@ extension View {
 private struct NudgeButtonLabel: View {
     let nudged: Bool
     let urgent: Bool
+    static let height: CGFloat = 24
 
     /// A band across the bottom of the tile, edge to edge INSIDE its clip
     /// (the tile's rounded corners round it off), so it can never stick out
@@ -1155,7 +1179,7 @@ private struct NudgeButtonLabel: View {
         .foregroundColor(nudged ? .white.opacity(0.6) : .white)
         .padding(.horizontal, 4)
         .frame(maxWidth: .infinity)
-        .frame(height: 24)
+        .frame(height: Self.height)
         .background(nudged ? Color.white.opacity(0.07)
                            : (urgent ? MADTheme.Colors.madRed : Color.white.opacity(0.16)))
         .contentTransition(.interpolate)
