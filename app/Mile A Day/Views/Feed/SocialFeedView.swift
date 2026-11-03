@@ -437,18 +437,18 @@ struct SocialFeedView: View {
                             },
                             onTapGroup: { viewerGroup = $0 },
                             onLockedStoryTap: { showMileHint = true },
-                            onTapLive: { friend in
-                                openFriendProfile(id: friend.userId, username: friend.username,
-                                                  firstName: friend.firstName, lastName: friend.lastName,
-                                                  imageURL: friend.profileImageUrl)
-                            },
                             onNudge: { friend in nudgeFromBoard(friend) },
                             onTapFriend: { friend in
                                 openFriendProfile(id: friend.user_id, username: friend.username,
                                                   firstName: friend.first_name, lastName: friend.last_name,
                                                   imageURL: friend.profile_image_url)
                             },
-                            refreshLive: { await buddy.refreshFriendsOutNow() }
+                            refreshLive: { await buddy.refreshFriendsOutNow() },
+                            onOpenLiveProfile: { friend in
+                                openFriendProfile(id: friend.userId, username: friend.username,
+                                                  firstName: friend.firstName, lastName: friend.lastName,
+                                                  imageURL: friend.profileImageUrl)
+                            }
                         )
                     }
                     // Its own node: the feed's other nodes already carry
