@@ -76,9 +76,6 @@ struct TodayBoardView: View {
     /// the wave on each nudge.
     @State private var wavingId: String?
     @State private var waveCount = 0
-    /// "Nudge all" asks first: one tap reaching several people should never
-    /// be an accident.
-    @State private var confirmNudgeAll = false
 
     // MARK: - Entries
 
@@ -308,10 +305,11 @@ struct TodayBoardView: View {
             .sorted { ($0.current_streak ?? 0) > ($1.current_streak ?? 0) }
     }
 
-    /// One row, only while a friend's streak ends tonight: how many, how
-    /// soon (the soonest of them, ticking each minute), and a "Nudge all"
-    /// for the ones you haven't nudged. The time used to sit on every red
-    /// tile, the same "34m" four times over.
+    /// One row, only while a friend's streak ends tonight: how many and how
+    /// soon (the soonest of them, ticking each minute). Information only:
+    /// nudges go one person at a time, from each tile's own Nudge button
+    /// (no "Nudge all"). The time used to sit on every red tile, the same
+    /// "34m" four times over.
     @ViewBuilder
     private var riskBar: some View {
         // Gated OUTSIDE the timeline: an empty TimelineView would still take
@@ -326,7 +324,6 @@ struct TodayBoardView: View {
             let now = context.date
             let friends = atRiskFriends(now: now)
             if !friends.isEmpty {
-                let pending = friends.filter { !nudgeStore.hasNudgedToday($0.user_id) }
                 let soonest = friends.compactMap { $0.minutesLeft(since: friendsTodayFetchedAt, now: now) }.min() ?? 0
                 HStack(spacing: 8) {
                     Image(systemName: "hourglass")
@@ -344,42 +341,7 @@ struct TodayBoardView: View {
                     }
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
-                    Spacer(minLength: 8)
-                    if pending.isEmpty {
-                        Label("All nudged", systemImage: "checkmark")
-                            .madFont(size: 12, weight: .bold, design: .rounded, maxScale: 1.2)
-                            .foregroundColor(.white.opacity(0.55))
-                            .fixedSize()
-                    } else {
-                        Button {
-                            MADHaptics.tap()
-                            if pending.count == 1, let only = pending.first {
-                                nudge(only)
-                            } else {
-                                confirmNudgeAll = true
-                            }
-                        } label: {
-                            Text(pending.count == 1 ? "👋 Nudge" : "👋 Nudge \(pending.count)")
-                                .madFont(size: 13, weight: .heavy, design: .rounded, maxScale: 1.2)
-                                .foregroundColor(.white)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 7)
-                                .background(Capsule().fill(MADTheme.Colors.madRed))
-                                .contentShape(Capsule())
-                                .fixedSize()
-                        }
-                        .buttonStyle(.plain)
-                        .confirmationDialog(
-                            "Nudge \(pending.count) friends whose streaks end tonight?",
-                            isPresented: $confirmNudgeAll,
-                            titleVisibility: .visible
-                        ) {
-                            Button("Nudge \(pending.count)") {
-                                for friend in pending { nudge(friend) }
-                            }
-                            Button("Cancel", role: .cancel) {}
-                        }
-                    }
+                    Spacer(minLength: 0)
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
@@ -388,7 +350,6 @@ struct TodayBoardView: View {
                         .fill(MADTheme.Colors.madRed.opacity(0.12))
                 )
                 .padding(.horizontal, FeedLayout.gutter)
-                .animation(.easeInOut(duration: 0.2), value: pending.count)
             }
         }
     }
@@ -504,9 +465,9 @@ struct TodayBoardView: View {
                 }
             }
         case .notYet(let friend, let nudged):
-            // Quiet by default: the face in colour and a small wave badge on
-            // it, no label. A "Nudge" pill on every tile made the row a wall
-            // of buttons; the badge says the same, and tapping still nudges.
+            // The face in colour with a labelled "Nudge" button along the
+            // bottom of the tile, so what a tap does is never a guess (a
+            // wave badge alone wasn't clear). It turns into "✓ Nudged".
             //
             // A streak ending tonight gets a red edge and its streak on top
             // ("🔥 17"), the number that's actually at stake. The time left
@@ -518,12 +479,11 @@ struct TodayBoardView: View {
             TodayTile(edge: atRisk ? (nudged ? .riskQuiet : .risk) : .none) {
                 ZStack {
                     TodayTileStyle.dimGround
-                    AvatarView(name: entry.name, imageURL: entry.imageURL, size: 46)
+                    // Smaller and lifted, so the streak chip on top and the
+                    // Nudge button along the bottom both clear the face.
+                    AvatarView(name: entry.name, imageURL: entry.imageURL, size: 40)
                         .opacity(nudged ? 0.75 : 0.9)
-                        .overlay(alignment: .bottomTrailing) {
-                            NudgeBadge(nudged: nudged)
-                                .offset(x: 5, y: 4)
-                        }
+                        .padding(.bottom, 12)
                     if wavingId == friend.user_id {
                         NudgeWave(trigger: waveCount)
                             .allowsHitTesting(false)
@@ -535,6 +495,10 @@ struct TodayBoardView: View {
                         TodayChip(text: riskChipText(friend, streak: streak), icon: "flame.fill",
                                   style: nudged ? .riskQuiet : .risk)
                     }
+                }
+                .overlay(alignment: .bottom) {
+                    NudgeButtonLabel(nudged: nudged, urgent: atRisk)
+                        .padding(.bottom, 7)
                 }
             }
             .animation(.spring(response: 0.35, dampingFraction: 0.7), value: nudged)
@@ -1124,27 +1088,30 @@ extension View {
     }
 }
 
-/// The small wave on a not-yet friend's face: "tap to nudge", and a green
-/// check once you have.
-private struct NudgeBadge: View {
+/// The bottom of a not-yet tile: a labelled "Nudge" button (red when their
+/// streak ends tonight), "✓ Nudged" once sent. The whole tile is the tap
+/// target; this says what the tap does.
+private struct NudgeButtonLabel: View {
     let nudged: Bool
+    let urgent: Bool
 
     var body: some View {
-        ZStack {
-            Circle()
-                .fill(nudged ? MADTheme.Colors.success : Color(red: 0.16, green: 0.11, blue: 0.13))
-            Circle()
-                .strokeBorder(Color.black.opacity(0.6), lineWidth: 2)
-            if nudged {
-                Image(systemName: "checkmark")
-                    .font(.system(size: 9, weight: .heavy))
-                    .foregroundColor(.white)
-            } else {
-                Text("👋").font(.system(size: 11))
-            }
+        HStack(spacing: 3) {
+            Image(systemName: nudged ? "checkmark" : "hand.wave.fill")
+                .font(.system(size: 9, weight: .bold))
+                .accessibilityHidden(true)
+            Text(nudged ? "Nudged" : "Nudge")
+                .madFont(size: 11, weight: .heavy, design: .rounded, maxScale: 1.1)
+                .lineLimit(1)
+                .fixedSize()
         }
-        .frame(width: 22, height: 22)
-        .transition(.scale.combined(with: .opacity))
-        .accessibilityHidden(true)
+        .foregroundColor(nudged ? .white.opacity(0.6) : .white)
+        .padding(.horizontal, 9)
+        .padding(.vertical, 4)
+        .background(
+            Capsule().fill(nudged ? Color.white.opacity(0.08)
+                                  : (urgent ? MADTheme.Colors.madRed : Color.white.opacity(0.18)))
+        )
+        .contentTransition(.interpolate)
     }
 }
