@@ -99,6 +99,14 @@ Service (`services/`) → controller (`controllers/`) → route (`routes/`) → 
 - When resolving EARLY (target/goal/duration hit, not a preset end_date), set `end_date` to the last COMPLETED interval (`lastCompletedIntervalEnd`), NOT the resolution day. Resolution scoring excludes the current interval, so stamping `end_date = todayStr` makes the live recompute fold that day back in once the calendar advances → phantom points/placement drift.
 
 ## Hypes & Posts
+
+- **Friend streak stakes.** `/friends/activity/today` serves `current_streak` and `minutes_left_today`, additively. `minutesLeftTodaySql(alias)` is the one rule for the minutes: time to the user's local midnight, from their latest workout's `timezone_offset`, the same day `userTodaySql` uses. `getStreakStakes(userId)` reads both for one user.
+- **Nudge copy.** The nudge push (`friendNudgeController`) words what's at stake via `nudgeCopy`:
+  - With a streak and ≤ `NUDGE_RISK_WINDOW_MINUTES` (180, the iOS `riskWindowMinutes`) left: "🔥 Your 17-day streak ends in 34m".
+  - With a streak and more time: "…keep your 17-day streak going".
+  - Otherwise: the old generic line.
+
+  It is the push the Today board's red tiles and "Nudge all" exist for. Type `friend_nudge` and `data` are unchanged, so every shipped build routes it as before. A failed stakes read falls back to the generic copy.
 - 'mile' hypes key on `<userId>:<localDate>` composites only (`canonicalizeMileContext` at send; migration 0012 collapsed legacy workout_id rows). Match via `mileHypeKeyMatchSql` — never hand-write the encoding.
 - `express.json` limit is 2mb because workout-sync bodies carry GPS routes. Don't shrink it.
 - `posts.is_auto` is tri-state at the API (`is_auto` absent = legacy client → upsert-in-place + auto-signature heuristic). A flagged user post may only replace an auto post; second user post → 409 `workout_already_posted`.

@@ -76,6 +76,9 @@ struct TodayBoardView: View {
     /// the wave on each nudge.
     @State private var wavingId: String?
     @State private var waveCount = 0
+    /// "Nudge all" asks first: one tap reaching several people should never
+    /// be an accident.
+    @State private var confirmNudgeAll = false
 
     // MARK: - Entries
 
@@ -91,6 +94,9 @@ struct TodayBoardView: View {
         let imageURL: String?
         let kind: Kind
         let rank: Int
+        /// Within a rank, lower first (at-risk friends: the longest streak
+        /// at stake leads). 0 keeps the server's order.
+        var tiebreak: Int = 0
     }
 
     private var myGroup: StoryGroup? {
@@ -126,21 +132,26 @@ struct TodayBoardView: View {
             seen.insert(friend.user_id)
             if friend.completed_today {
                 out.append(Entry(id: friend.user_id, name: friend.displayName,
-                                 imageURL: friend.profile_image_url, kind: .done(friend), rank: 3))
+                                 imageURL: friend.profile_image_url, kind: .done(friend), rank: 4))
             } else {
-                // A streak ending tonight leads the not-yet friends: that's
-                // the nudge that matters most right now.
+                // A streak ending tonight comes before the done friends: that's
+                // the nudge that matters most right now, longest streak first.
                 let atRisk = friend.streakAtRisk(since: friendsTodayFetchedAt)
                 out.append(Entry(id: friend.user_id, name: friend.displayName,
                                  imageURL: friend.profile_image_url,
                                  kind: .notYet(friend, nudged: nudgeStore.hasNudgedToday(friend.user_id)),
-                                 rank: atRisk ? 3 : 4))
+                                 rank: atRisk ? 3 : 5,
+                                 tiebreak: atRisk ? -(friend.current_streak ?? 0) : 0))
             }
         }
         // Stable within a rank: the server's own order (rail recency, live
         // start time, the friends list) is already meaningful.
         return out.enumerated()
-            .sorted { $0.element.rank != $1.element.rank ? $0.element.rank < $1.element.rank : $0.offset < $1.offset }
+            .sorted {
+                if $0.element.rank != $1.element.rank { return $0.element.rank < $1.element.rank }
+                if $0.element.tiebreak != $1.element.tiebreak { return $0.element.tiebreak < $1.element.tiebreak }
+                return $0.offset < $1.offset
+            }
             .map(\.element)
     }
 
@@ -162,6 +173,7 @@ struct TodayBoardView: View {
         let rows = entries
         VStack(alignment: .leading, spacing: 8) {
             header
+            riskBar
             ScrollViewReader { proxy in
                 ScrollView(.horizontal, showsIndicators: false) {
                     LazyHStack(alignment: .top, spacing: FeedLayout.storyGap) {
@@ -288,6 +300,110 @@ struct TodayBoardView: View {
         .padding(.horizontal, FeedLayout.gutter)
     }
 
+    // MARK: - Streaks ending tonight
+
+    private func atRiskFriends(now: Date) -> [FriendActivityItem] {
+        friendsToday
+            .filter { $0.streakAtRisk(since: friendsTodayFetchedAt, now: now) }
+            .sorted { ($0.current_streak ?? 0) > ($1.current_streak ?? 0) }
+    }
+
+    /// One row, only while a friend's streak ends tonight: how many, how
+    /// soon (the soonest of them, ticking each minute), and a "Nudge all"
+    /// for the ones you haven't nudged. The time used to sit on every red
+    /// tile, the same "34m" four times over.
+    @ViewBuilder
+    private var riskBar: some View {
+        // Gated OUTSIDE the timeline: an empty TimelineView would still take
+        // a slot (and the spacing) in the board's VStack.
+        if !atRiskFriends(now: Date()).isEmpty {
+            riskTimeline
+        }
+    }
+
+    private var riskTimeline: some View {
+        TimelineView(.periodic(from: .now, by: 60)) { context in
+            let now = context.date
+            let friends = atRiskFriends(now: now)
+            if !friends.isEmpty {
+                let pending = friends.filter { !nudgeStore.hasNudgedToday($0.user_id) }
+                let soonest = friends.compactMap { $0.minutesLeft(since: friendsTodayFetchedAt, now: now) }.min() ?? 0
+                HStack(spacing: 8) {
+                    Image(systemName: "hourglass")
+                        .madFont(size: 12, weight: .bold, maxScale: 1.2)
+                        .foregroundColor(MADTheme.Colors.madRed)
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(friends.count == 1 ? "1 streak ends tonight" : "\(friends.count) streaks end tonight")
+                            .madFont(size: 13, weight: .heavy, design: .rounded, maxScale: 1.2)
+                            .foregroundColor(.white)
+                        Text("\(Self.shortTime(soonest)) left")
+                            .madFont(size: 11, weight: .semibold, design: .rounded, maxScale: 1.2, monospacedDigit: true)
+                            .foregroundColor(MADTheme.Colors.madRed)
+                            .contentTransition(.numericText())
+                    }
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                    Spacer(minLength: 8)
+                    if pending.isEmpty {
+                        Label("All nudged", systemImage: "checkmark")
+                            .madFont(size: 12, weight: .bold, design: .rounded, maxScale: 1.2)
+                            .foregroundColor(.white.opacity(0.55))
+                            .fixedSize()
+                    } else {
+                        Button {
+                            MADHaptics.tap()
+                            if pending.count == 1, let only = pending.first {
+                                nudge(only)
+                            } else {
+                                confirmNudgeAll = true
+                            }
+                        } label: {
+                            Text(pending.count == 1 ? "👋 Nudge" : "👋 Nudge \(pending.count)")
+                                .madFont(size: 13, weight: .heavy, design: .rounded, maxScale: 1.2)
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 7)
+                                .background(Capsule().fill(MADTheme.Colors.madRed))
+                                .contentShape(Capsule())
+                                .fixedSize()
+                        }
+                        .buttonStyle(.plain)
+                        .confirmationDialog(
+                            "Nudge \(pending.count) friends whose streaks end tonight?",
+                            isPresented: $confirmNudgeAll,
+                            titleVisibility: .visible
+                        ) {
+                            Button("Nudge \(pending.count)") {
+                                for friend in pending { nudge(friend) }
+                            }
+                            Button("Cancel", role: .cancel) {}
+                        }
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(MADTheme.Colors.madRed.opacity(0.12))
+                )
+                .padding(.horizontal, FeedLayout.gutter)
+                .animation(.easeInOut(duration: 0.2), value: pending.count)
+            }
+        }
+    }
+
+    /// "17" — their streak at stake — plus their own time left only when
+    /// their midnight is 30+ minutes off yours (the bar's time is yours).
+    private func riskChipText(_ friend: FriendActivityItem, streak: Int) -> String {
+        guard let left = friend.minutesLeft(since: friendsTodayFetchedAt) else { return "\(streak)" }
+        let calendar = Calendar.current
+        let now = Date()
+        let midnight = calendar.startOfDay(for: now).addingTimeInterval(86_400)
+        let mine = Int(midnight.timeIntervalSince(now) / 60)
+        return abs(left - mine) >= 30 ? "\(streak) · \(Self.shortTime(left))" : "\(streak)"
+    }
+
     // MARK: - Tiles
 
     private func tile(for entry: Entry) -> some View {
@@ -388,23 +504,25 @@ struct TodayBoardView: View {
                 }
             }
         case .notYet(let friend, let nudged):
-            // In colour, a little quiet: a friend who hasn't walked yet is
-            // someone to wave at, not a greyed-out absence.
-            let left = friend.streakAtRisk(since: friendsTodayFetchedAt)
-                ? friend.minutesLeft(since: friendsTodayFetchedAt) : nil
-            TodayTile(edge: left != nil ? .risk : (nudged ? .quiet : .none)) {
+            // Quiet by default: the face in colour and a small wave badge on
+            // it, no label. A "Nudge" pill on every tile made the row a wall
+            // of buttons; the badge says the same, and tapping still nudges.
+            //
+            // A streak ending tonight gets a red edge and its streak on top
+            // ("🔥 17"), the number that's actually at stake. The time left
+            // is the SAME for everyone in your time zone, so it lives once,
+            // in the row above the board (`riskBar`); a tile shows its own
+            // time only when that friend's midnight is meaningfully
+            // different from yours.
+            let atRisk = friend.streakAtRisk(since: friendsTodayFetchedAt)
+            TodayTile(edge: atRisk ? (nudged ? .riskQuiet : .risk) : .none) {
                 ZStack {
                     TodayTileStyle.dimGround
                     AvatarView(name: entry.name, imageURL: entry.imageURL, size: 46)
-                        .opacity(nudged ? 0.9 : 0.7)
+                        .opacity(nudged ? 0.75 : 0.9)
                         .overlay(alignment: .bottomTrailing) {
-                            if nudged {
-                                Text("👋")
-                                    .font(.system(size: 15))
-                                    .offset(x: 6, y: 4)
-                                    .transition(.scale.combined(with: .opacity))
-                                    .accessibilityHidden(true)
-                            }
+                            NudgeBadge(nudged: nudged)
+                                .offset(x: 5, y: 4)
                         }
                     if wavingId == friend.user_id {
                         NudgeWave(trigger: waveCount)
@@ -413,26 +531,9 @@ struct TodayBoardView: View {
                     }
                 }
                 .overlay(alignment: .top) {
-                    if let left, !nudged {
-                        // Their streak ends at THEIR midnight: say how soon,
-                        // so the nudge goes now.
-                        TodayChip(text: Self.shortTime(left), icon: "hourglass", style: .risk)
-                    } else {
-                        TodayChip(text: nudged ? "Nudged" : "Nudge",
-                                  icon: nudged ? "checkmark" : nil,
-                                  style: nudged ? .nudged : .quiet)
-                            .contentTransition(.interpolate)
-                    }
-                }
-                .overlay(alignment: .bottom) {
-                    if left != nil, let streak = friend.current_streak {
-                        Text("\(streak)-day streak")
-                            .madFont(size: 9, weight: .heavy, design: .rounded, maxScale: 1.1, monospacedDigit: true)
-                            .foregroundColor(MADTheme.Colors.madRed)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.7)
-                            .padding(.horizontal, 4)
-                            .padding(.bottom, 6)
+                    if atRisk, let streak = friend.current_streak {
+                        TodayChip(text: riskChipText(friend, streak: streak), icon: "flame.fill",
+                                  style: nudged ? .riskQuiet : .risk)
                     }
                 }
             }
@@ -693,7 +794,7 @@ private enum TodayTileStyle {
 /// The board's tile: a tall rounded card with a 2.5pt edge whose colour IS
 /// the state, the way the ring was on the old circles.
 private struct TodayTile<Content: View>: View {
-    enum Edge { case story, live, done, quiet, none, risk }
+    enum Edge { case story, live, done, quiet, none, risk, riskQuiet }
 
     let edge: Edge
     @ViewBuilder let content: () -> Content
@@ -739,6 +840,7 @@ private struct TodayTile<Content: View>: View {
         case .live: return AnyShapeStyle(MADTheme.Colors.walkBlue.opacity(0.75))
         case .done: return AnyShapeStyle(Color.orange.opacity(0.55))
         case .risk: return AnyShapeStyle(MADTheme.Colors.madRed.opacity(0.85))
+        case .riskQuiet: return AnyShapeStyle(MADTheme.Colors.madRed.opacity(0.35))
         case .quiet: return AnyShapeStyle(Color.white.opacity(0.12))
         case .none: return AnyShapeStyle(Color.white.opacity(0.06))
         }
@@ -747,7 +849,7 @@ private struct TodayTile<Content: View>: View {
 
 /// The small label riding a tile's top edge: live distance, Done, Nudge.
 private struct TodayChip: View {
-    enum Style { case live, done, quiet, nudged, risk }
+    enum Style { case live, done, quiet, nudged, risk, riskQuiet }
     let text: String
     let icon: String?
     let style: Style
@@ -779,6 +881,7 @@ private struct TodayChip: View {
         case .quiet: return .white.opacity(0.75)
         case .nudged: return Color(red: 0.10, green: 0.05, blue: 0.07)
         case .risk: return .white
+        case .riskQuiet: return MADTheme.Colors.madRed
         }
     }
 
@@ -789,6 +892,7 @@ private struct TodayChip: View {
         case .quiet: return .white.opacity(0.12)
         case .nudged: return .white.opacity(0.9)
         case .risk: return MADTheme.Colors.madRed
+        case .riskQuiet: return .black.opacity(0.55)
         }
     }
 }
@@ -1017,5 +1121,30 @@ extension View {
         } else {
             self
         }
+    }
+}
+
+/// The small wave on a not-yet friend's face: "tap to nudge", and a green
+/// check once you have.
+private struct NudgeBadge: View {
+    let nudged: Bool
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(nudged ? MADTheme.Colors.success : Color(red: 0.16, green: 0.11, blue: 0.13))
+            Circle()
+                .strokeBorder(Color.black.opacity(0.6), lineWidth: 2)
+            if nudged {
+                Image(systemName: "checkmark")
+                    .font(.system(size: 9, weight: .heavy))
+                    .foregroundColor(.white)
+            } else {
+                Text("👋").font(.system(size: 11))
+            }
+        }
+        .frame(width: 22, height: 22)
+        .transition(.scale.combined(with: .opacity))
+        .accessibilityHidden(true)
     }
 }
