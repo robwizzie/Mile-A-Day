@@ -817,7 +817,7 @@ struct HeroClosetButton: View {
     }
 
     var body: some View {
-        FlameyClosetPill(hasNews: hasNews, name: FlameyFacts.displayName) {
+        FlameyClosetPill(hasNews: hasNews, name: FlameyFacts.displayName, iconOnly: true) {
             MADHaptics.action()
             FlameyClosetLink.shared.open()
         }

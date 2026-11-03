@@ -310,12 +310,22 @@ struct RecentWorkoutsPreviewCard: View {
     @State private var routesByWorkout: [String: [CLLocationCoordinate2D]] = [:]
     @State private var postsByWorkout: [String: PostItem] = [:]
 
-    private var preview: [HKWorkout] { Array(healthManager.recentWorkouts.prefix(3)) }
+    /// The LATEST workout only. Three, each with a full-width map or photo,
+    /// made this the longest card on the dashboard; the rest are one tap
+    /// away ("N more this week", "See all").
+    private var preview: [HKWorkout] { Array(healthManager.recentWorkouts.prefix(1)) }
 
-    /// Shorter than the full screen's 150: three maps stacked on a dashboard
-    /// that already carries the hero, the day's cards and the medals is a lot
-    /// of scroll, and this is a peek rather than the history.
-    private static let mapHeight: CGFloat = 120
+    /// The other workouts since Sunday, for the footer link.
+    private var moreThisWeek: Int {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        let daysFromSunday = calendar.component(.weekday, from: today) - 1
+        guard let startOfWeek = calendar.date(byAdding: .day, value: -daysFromSunday, to: today) else { return 0 }
+        return healthManager.recentWorkouts.dropFirst().filter { $0.startDate >= startOfWeek }.count
+    }
+
+    /// The full screen's height: with one workout there's room for it.
+    private static let mapHeight: CGFloat = 150
 
     var body: some View {
         // ONE surface. It was a glass card holding three boxed rows, each with
@@ -400,9 +410,26 @@ struct RecentWorkoutsPreviewCard: View {
                 .padding(.vertical, MADTheme.Spacing.sm)
             }
         } else {
-            VStack(spacing: 18) {
+            VStack(alignment: .leading, spacing: 12) {
                 ForEach(preview, id: \.uuid) { workout in
                     row(workout)
+                }
+                if moreThisWeek > 0 {
+                    Button {
+                        showWorkouts = true
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text(moreThisWeek == 1 ? "1 more this week" : "\(moreThisWeek) more this week")
+                                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 10, weight: .bold))
+                                .accessibilityHidden(true)
+                        }
+                        .foregroundColor(.white.opacity(0.55))
+                        .padding(.vertical, 2)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
                 }
             }
         }

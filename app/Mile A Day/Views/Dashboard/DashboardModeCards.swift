@@ -378,6 +378,14 @@ private struct ModernHeroCard: View {
     /// column's steps line (the Steps tile that was its door is gone).
     @State private var showSteps = false
 
+    /// This week's counted miles so far: the same per-day numbers the week
+    /// chart draws (`WeekDataProvider`), summed.
+    private var weekMilesSoFar: Double {
+        WeekDataProvider.weekDays(healthManager: healthManager, goalDistance: goalDistance)
+            .filter { !$0.isFuture }
+            .reduce(0) { $0 + $1.distance }
+    }
+
     @State private var showTokens = false
     @State private var timeRemainingText = ""
     @State private var timer: Timer?
@@ -512,7 +520,8 @@ private struct ModernHeroCard: View {
                         statusColor: statusColor,
                         todaySteps: todaySteps,
                         stepGoalMet: stepGoalMet,
-                        onOpenSteps: { showSteps = true }
+                        onOpenSteps: { showSteps = true },
+                        weekMiles: weekMilesSoFar
                     )
                 }
                 .frame(maxWidth: .infinity)
@@ -853,6 +862,10 @@ private struct HeroStatColumn: View {
     /// Opens the Steps screen (the Steps tile that used to be its door is
     /// gone: it repeated the goal bars' step count).
     var onOpenSteps: (() -> Void)? = nil
+    /// Miles so far this week (Sun → today, counted miles). Once the day is
+    /// done it leads the column: today's best pace was a number that barely
+    /// moves and sits on the workout row anyway; the week moves every day.
+    var weekMiles: Double? = nil
 
     private var goal: Double { max(goalMiles, 0.01) }
     private var milesDone: Bool { ProgressCalculator.isGoalCompleted(current: currentDistance, goal: goal) }
@@ -916,7 +929,15 @@ private struct HeroStatColumn: View {
 
     @ViewBuilder
     private var middleLine: some View {
-        if !dayDone {
+        if dayDone, let weekMiles {
+            ModernHeroStatLine(
+                icon: "calendar",
+                value: weekMiles.distanceText,
+                unit: DistanceUnits.current.abbreviation,
+                label: "this week",
+                tint: MADTheme.Colors.walkBlue
+            )
+        } else if !dayDone {
             ModernHeroStatLine(
                 icon: "flag.checkered",
                 value: max(goal - currentDistance, 0).distanceToGoText,
@@ -1548,6 +1569,14 @@ private struct FlameBuddyHeroCard: View {
     /// column's steps line (the Steps tile that was its door is gone).
     @State private var showSteps = false
 
+    /// This week's counted miles so far: the same per-day numbers the week
+    /// chart draws (`WeekDataProvider`), summed.
+    private var weekMilesSoFar: Double {
+        WeekDataProvider.weekDays(healthManager: healthManager, goalDistance: goalDistance)
+            .filter { !$0.isFuture }
+            .reduce(0) { $0 + $1.distance }
+    }
+
     @State private var timeRemainingText = ""
     @State private var timer: Timer?
     @State private var showShareSheet = false
@@ -2134,7 +2163,8 @@ private struct FlameBuddyHeroCard: View {
                 statusColor: statusColor,
                 todaySteps: todaySteps,
                 stepGoalMet: stepGoalMet,
-                onOpenSteps: { showSteps = true }
+                onOpenSteps: { showSteps = true },
+                weekMiles: weekMilesSoFar
             )
 
             RecordGhostRow(
