@@ -555,8 +555,7 @@ struct StreakTokensCard: View {
                         ) { showDonateSheet = true }
                     }
                 }
-                .padding(.horizontal, 18)
-                .padding(.vertical, 18)
+                .padding(DashboardCardSurface.padding)
             .background(tokenCardBackground(readyCount: readyCount(for: payload)))
             .contentShape(Rectangle())
             }

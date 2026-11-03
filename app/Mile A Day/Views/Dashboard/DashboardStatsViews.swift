@@ -456,7 +456,8 @@ struct RecentWorkoutsPreviewCard: View {
                     coordinates: coords,
                     photoURL: photo,
                     onOpen: open,
-                    height: Self.mapHeight
+                    height: Self.mapHeight,
+                    fitsPhoto: true
                 )
             }
         }

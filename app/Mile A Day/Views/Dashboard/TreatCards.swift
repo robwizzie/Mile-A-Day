@@ -129,8 +129,8 @@ struct TreatLineCard: View {
                     .foregroundColor(.white.opacity(0.3))
                     .accessibilityHidden(true)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
+            .padding(.horizontal, DashboardCardSurface.padding)
+            .padding(.vertical, 12)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(DashboardCardSurface(style: .fun))
             .contentShape(Rectangle())

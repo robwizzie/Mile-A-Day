@@ -95,6 +95,10 @@ struct WorkoutMediaPreviewCard: View {
     /// row, and a dead map under a live row reads as a broken card.
     var onOpen: (() -> Void)? = nil
     var height: CGFloat = 150
+    /// The photo face takes the photo's own shape (clamped 4:5 … 16:9)
+    /// instead of a fixed-height strip, so a portrait selfie isn't cropped to
+    /// a letterbox of foreheads. The map face keeps `height`.
+    var fitsPhoto: Bool = false
 
     /// Item-based, per the fullScreenCover rule in ios.md.
     @State private var flyoverLaunch: FlyoverLaunch?
@@ -221,10 +225,29 @@ struct WorkoutMediaPreviewCard: View {
         .accessibilityLabel(showingPhoto ? "Show route map" : "Show photo")
     }
 
+    /// Width ÷ height for the photo face: the loaded bitmap's, clamped, or
+    /// 4:3 until it arrives.
+    private var photoRatio: CGFloat {
+        guard let photo, photo.size.height > 0 else { return 4.0 / 3.0 }
+        return min(max(photo.size.width / photo.size.height, 0.8), 16.0 / 9.0)
+    }
+
+    @ViewBuilder
+    private var photoFrame: some View {
+        if fitsPhoto {
+            Color.clear
+                .aspectRatio(photoRatio, contentMode: .fit)
+                .frame(maxWidth: .infinity)
+                .overlay(FeedImageView(url: photoURL, loadedImage: $photo))
+        } else {
+            FeedImageView(url: photoURL, loadedImage: $photo)
+                .frame(height: height)
+                .frame(maxWidth: .infinity)
+        }
+    }
+
     private var photoFace: some View {
-        FeedImageView(url: photoURL, loadedImage: $photo)
-            .frame(height: height)
-            .frame(maxWidth: .infinity)
+        photoFrame
             .clipped()
             .clipShape(shape)
             .overlay(shape.strokeBorder(Color.white.opacity(0.08), lineWidth: 1))

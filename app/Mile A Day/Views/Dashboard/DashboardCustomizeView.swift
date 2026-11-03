@@ -246,6 +246,9 @@ struct DashboardCardSurface: View {
     let style: DashboardStyle
 
     static let radius: CGFloat = 18
+    /// The one inset content takes inside the surface. Cards drifted to 14,
+    /// 16 and 18, which read as uneven edges down the page.
+    static let padding: CGFloat = 16
 
     var body: some View {
         RoundedRectangle(cornerRadius: Self.radius, style: .continuous)
@@ -285,8 +288,8 @@ struct DashboardCustomizeRow: View {
                     .font(.system(size: 11, weight: .bold))
                     .foregroundColor(.white.opacity(0.35))
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
+            .padding(.horizontal, DashboardCardSurface.padding)
+            .padding(.vertical, 13)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -323,8 +326,8 @@ struct DashboardInsightsRow: View {
                     .font(.system(size: 11, weight: .bold))
                     .foregroundColor(.white.opacity(0.35))
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
+            .padding(.horizontal, DashboardCardSurface.padding)
+            .padding(.vertical, 13)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

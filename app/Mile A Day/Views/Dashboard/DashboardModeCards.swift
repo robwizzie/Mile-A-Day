@@ -319,9 +319,13 @@ struct FunDashboardBody: View {
             )
             // Mile A Day+ at the moment it would have helped: hides itself
             // unless the streak is at risk or Plus would already hold a Save.
-            PlusStreakCard(streak: userManager.currentUser.streak)
-
-            NextMedalCard(userManager: userManager, style: .fun)
+            // Its body is an always-present (empty) stack, so it shares a
+            // ZERO-spacing stack with the medal card and brings its own gap:
+            // as its own item here it left a doubled gap under the hero.
+            VStack(spacing: 0) {
+                PlusStreakCard(streak: userManager.currentUser.streak, bottomSpacing: 18)
+                NextMedalCard(userManager: userManager, style: .fun)
+            }
 
             // Everything below the day's cards is the user's to arrange
             // (DashboardCards): default here is just the daily challenge.
@@ -1301,7 +1305,7 @@ private struct NextMedalCard: View {
                     .foregroundColor(.white.opacity(0.3))
                     .accessibilityHidden(true)
             }
-            .padding(14)
+            .padding(DashboardCardSurface.padding)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(DashboardCardSurface(style: style))
             .contentShape(Rectangle())
@@ -1903,11 +1907,10 @@ private struct FlameBuddyHeroCard: View {
 
                     funStatRows
                         // Moves down with him, so the stats stay level with
-                        // his body. Nothing sits in the top corner any more
-                        // (savers live in the streak box, Share under his
-                        // feet), so the column starts right at the top band.
-                        .padding(.top, 6 + top)
-                        .frame(width: rightWidth, height: geo.size.height, alignment: .top)
+                        // his body, and CENTRED in his frame: hung from the
+                        // top it left a tall empty band under the steps.
+                        .padding(.top, top)
+                        .frame(width: rightWidth, height: geo.size.height, alignment: .center)
                 }
                 .onAppear { heroFrameWidth = geo.size.width }
                 .onChange(of: geo.size.width) { _, width in heroFrameWidth = width }
@@ -1998,18 +2001,31 @@ private struct FlameBuddyHeroCard: View {
         // The number, what it is, and ONE status line under it — no box. It
         // was a gold-rimmed capsule holding the number, a divider, and three
         // tracked-capital lines (DAY STREAK / BEST EVER / 3 SAVERS) at 9pt.
+        // The number and what it is on ONE line ("539 day streak"); on its
+        // own line under the number "day streak" read as a separate fact.
+        // Narrower columns (or a 4-digit streak) fall back to "days", then
+        // to the stacked form.
         return VStack(alignment: .leading, spacing: 1) {
-            Text("\(heroStreakValue)")
-                .madFont(size: 46, weight: .black, design: .rounded, monospacedDigit: true)
-                .foregroundColor(.white)
-                .lineLimit(1)
-                .minimumScaleFactor(0.55)
-
-            Text("day streak")
-                .madFont(size: 14, weight: .heavy, design: .rounded)
-                .foregroundColor(.orange)
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    streakNumber
+                    streakUnit("day streak")
+                }
+                HStack(alignment: .firstTextBaseline, spacing: 5) {
+                    streakNumber
+                    streakUnit("days")
+                }
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("\(heroStreakValue)")
+                        .madFont(size: 46, weight: .black, design: .rounded, monospacedDigit: true)
+                        .foregroundColor(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.55)
+                    streakUnit("day streak")
+                }
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("\(heroStreakValue) day streak")
 
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 8) {
@@ -2024,6 +2040,22 @@ private struct FlameBuddyHeroCard: View {
             .padding(.top, 5)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var streakNumber: some View {
+        Text("\(heroStreakValue)")
+            .madFont(size: 46, weight: .black, design: .rounded, monospacedDigit: true)
+            .foregroundColor(.white)
+            .lineLimit(1)
+            .fixedSize()
+    }
+
+    private func streakUnit(_ text: String) -> some View {
+        Text(text)
+            .madFont(size: 15, weight: .heavy, design: .rounded)
+            .foregroundColor(.orange)
+            .lineLimit(1)
+            .fixedSize()
     }
 
     /// The crown on a record run, unless the day is urgent ("Syncing",
