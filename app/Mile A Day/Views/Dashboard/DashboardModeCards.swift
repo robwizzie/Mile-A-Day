@@ -1932,8 +1932,6 @@ private struct FlameBuddyHeroCard: View {
                 )
             }
 
-            DashboardMilestoneBar(streak: userManager.currentUser.streak)
-                .padding(.horizontal, 2)
         }
         .padding(18)
         .padding(.top, 18)
@@ -2187,12 +2185,15 @@ private struct FlameBuddyHeroCard: View {
                 .padding(.bottom, 8)
             }
 
-            // The streak heads the column, level with the room kept above
-            // him for a hat and his bubble; the day's lines sit at the
-            // bottom, level with his feet. Centred as one block they left an
-            // empty band across the top of the card whenever he wasn't
-            // talking.
-            Spacer(minLength: 6)
+            // The column spans his whole frame: the streak at the top (level
+            // with the room kept above him for a hat and his bubble), its
+            // next rung in the middle, the day's lines down by his feet.
+            // With only the streak and the day's lines, either the top or
+            // the middle was an empty band; the milestone belongs with the
+            // streak anyway, and moving it here takes a row off the card.
+            Spacer(minLength: 10)
+            DashboardMilestoneBar(streak: userManager.currentUser.streak)
+            Spacer(minLength: 10)
 
             HeroStatColumn(
                 currentDistance: currentDistance,
