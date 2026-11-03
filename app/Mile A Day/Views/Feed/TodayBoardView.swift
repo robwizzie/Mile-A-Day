@@ -76,6 +76,8 @@ struct TodayBoardView: View {
     /// the wave on each nudge.
     @State private var wavingId: String?
     @State private var waveCount = 0
+    /// The "streaks end tonight" card's sheet: who's at risk.
+    @State private var showAtRisk = false
 
     // MARK: - Entries
 
@@ -305,17 +307,25 @@ struct TodayBoardView: View {
             .sorted { ($0.current_streak ?? 0) > ($1.current_streak ?? 0) }
     }
 
-    /// One row, only while a friend's streak ends tonight: how many and how
-    /// soon (the soonest of them, ticking each minute). Information only:
-    /// nudges go one person at a time, from each tile's own Nudge button
-    /// (no "Nudge all"). The time used to sit on every red tile, the same
-    /// "34m" four times over.
+    /// One card, only while a friend's streak ends tonight: their faces, how
+    /// many, how soon (the soonest of them, ticking each minute). Tapping it
+    /// opens `AtRiskSheet`: who exactly, each streak, each time left, and a
+    /// Nudge per person (never a "Nudge all"). The time used to sit on every
+    /// red tile, the same "34m" four times over.
     @ViewBuilder
     private var riskBar: some View {
         // Gated OUTSIDE the timeline: an empty TimelineView would still take
         // a slot (and the spacing) in the board's VStack.
         if !atRiskFriends(now: Date()).isEmpty {
             riskTimeline
+                // Its own node: the board's root already presents sheets.
+                .sheet(isPresented: $showAtRisk) {
+                    AtRiskSheet(
+                        friends: { atRiskFriends(now: $0) },
+                        fetchedAt: friendsTodayFetchedAt,
+                        onNudge: { nudge($0) }
+                    )
+                }
         }
     }
 
@@ -325,31 +335,65 @@ struct TodayBoardView: View {
             let friends = atRiskFriends(now: now)
             if !friends.isEmpty {
                 let soonest = friends.compactMap { $0.minutesLeft(since: friendsTodayFetchedAt, now: now) }.min() ?? 0
-                HStack(spacing: 8) {
-                    Image(systemName: "hourglass")
-                        .madFont(size: 12, weight: .bold, maxScale: 1.2)
-                        .foregroundColor(MADTheme.Colors.madRed)
+                let pending = friends.filter { !nudgeStore.hasNudgedToday($0.user_id) }.count
+                Button {
+                    MADHaptics.tap()
+                    showAtRisk = true
+                } label: {
+                    HStack(spacing: 12) {
+                        // Who, before the words: up to three faces, overlapped.
+                        HStack(spacing: -10) {
+                            ForEach(Array(friends.prefix(3).enumerated()), id: \.element.user_id) { index, friend in
+                                AvatarView(name: friend.displayName, imageURL: friend.profile_image_url, size: 30)
+                                    .overlay(Circle().strokeBorder(Color(red: 0.16, green: 0.06, blue: 0.08), lineWidth: 2))
+                                    .zIndex(Double(3 - index))
+                            }
+                        }
                         .accessibilityHidden(true)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(friends.count == 1 ? "1 streak ends tonight" : "\(friends.count) streaks end tonight")
-                            .madFont(size: 13, weight: .heavy, design: .rounded, maxScale: 1.2)
-                            .foregroundColor(.white)
-                        Text("\(Self.shortTime(soonest)) left")
-                            .madFont(size: 11, weight: .semibold, design: .rounded, maxScale: 1.2, monospacedDigit: true)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(friends.count == 1 ? "1 streak ends tonight" : "\(friends.count) streaks end tonight")
+                                .madFont(size: 14, weight: .heavy, design: .rounded, maxScale: 1.2)
+                                .foregroundColor(.white)
+                            HStack(spacing: 4) {
+                                Image(systemName: "hourglass")
+                                    .font(.system(size: 9, weight: .bold))
+                                    .accessibilityHidden(true)
+                                Text("\(Self.shortTime(soonest)) left")
+                                    .contentTransition(.numericText())
+                                if pending > 0 {
+                                    Text("· \(pending) to nudge")
+                                        .foregroundColor(.white.opacity(0.55))
+                                }
+                            }
+                            .madFont(size: 12, weight: .bold, design: .rounded, maxScale: 1.2, monospacedDigit: true)
                             .foregroundColor(MADTheme.Colors.madRed)
-                            .contentTransition(.numericText())
+                        }
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                        Spacer(minLength: 4)
+                        Image(systemName: "chevron.right")
+                            .madFont(size: 12, weight: .bold, maxScale: 1.2)
+                            .foregroundColor(.white.opacity(0.4))
+                            .accessibilityHidden(true)
                     }
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-                    Spacer(minLength: 0)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .background(
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .fill(LinearGradient(colors: [MADTheme.Colors.madRed.opacity(0.22),
+                                                          MADTheme.Colors.madRed.opacity(0.08)],
+                                                 startPoint: .leading, endPoint: .trailing))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .strokeBorder(MADTheme.Colors.madRed.opacity(0.3), lineWidth: 1)
+                    )
+                    .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(MADTheme.Colors.madRed.opacity(0.12))
-                )
+                .buttonStyle(.plain)
                 .padding(.horizontal, FeedLayout.gutter)
+                .accessibilityLabel("\(friends.count) friends' streaks end tonight, \(Self.shortTime(soonest)) left")
+                .accessibilityHint("Shows who, with a nudge for each")
             }
         }
     }
@@ -498,7 +542,6 @@ struct TodayBoardView: View {
                 }
                 .overlay(alignment: .bottom) {
                     NudgeButtonLabel(nudged: nudged, urgent: atRisk)
-                        .padding(.bottom, 7)
                 }
             }
             .animation(.spring(response: 0.35, dampingFraction: 0.7), value: nudged)
@@ -1095,23 +1138,130 @@ private struct NudgeButtonLabel: View {
     let nudged: Bool
     let urgent: Bool
 
+    /// A band across the bottom of the tile, edge to edge INSIDE its clip
+    /// (the tile's rounded corners round it off), so it can never stick out
+    /// past the tile however large the text is: it scales down instead. A
+    /// floating pill was wider than the tile at larger text sizes.
     var body: some View {
         HStack(spacing: 3) {
             Image(systemName: nudged ? "checkmark" : "hand.wave.fill")
                 .font(.system(size: 9, weight: .bold))
                 .accessibilityHidden(true)
             Text(nudged ? "Nudged" : "Nudge")
-                .madFont(size: 11, weight: .heavy, design: .rounded, maxScale: 1.1)
+                .madFont(size: 11, weight: .heavy, design: .rounded, maxScale: 1.0)
                 .lineLimit(1)
-                .fixedSize()
+                .minimumScaleFactor(0.7)
         }
         .foregroundColor(nudged ? .white.opacity(0.6) : .white)
-        .padding(.horizontal, 9)
-        .padding(.vertical, 4)
-        .background(
-            Capsule().fill(nudged ? Color.white.opacity(0.08)
-                                  : (urgent ? MADTheme.Colors.madRed : Color.white.opacity(0.18)))
-        )
+        .padding(.horizontal, 4)
+        .frame(maxWidth: .infinity)
+        .frame(height: 24)
+        .background(nudged ? Color.white.opacity(0.07)
+                           : (urgent ? MADTheme.Colors.madRed : Color.white.opacity(0.16)))
         .contentTransition(.interpolate)
+    }
+}
+
+/// Who's streak ends tonight, opened from the board's "streaks end tonight"
+/// card: one row per friend, longest streak first, with their streak, their
+/// own time left and a labelled Nudge (one person at a time).
+private struct AtRiskSheet: View {
+    /// Re-read on each tick, so the list and times stay current while open.
+    let friends: (Date) -> [FriendActivityItem]
+    let fetchedAt: Date
+    let onNudge: (FriendActivityItem) -> Void
+
+    @ObservedObject private var nudgeStore = NudgeStatusStore.shared
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 60)) { context in
+            let list = friends(context.date)
+            VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Streaks ending tonight")
+                        .madFont(size: 22, weight: .heavy, design: .rounded)
+                        .foregroundColor(.white)
+                    Text("A nudge sends them one reminder, with how long they have left.")
+                        .madFont(size: 13, weight: .medium, design: .rounded)
+                        .foregroundColor(.white.opacity(0.55))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 24)
+
+                ScrollView {
+                    VStack(spacing: 8) {
+                        ForEach(list, id: \.user_id) { friend in
+                            row(friend, now: context.date)
+                        }
+                        if list.isEmpty {
+                            Text("Everyone's safe now.")
+                                .madFont(size: 15, weight: .semibold, design: .rounded)
+                                .foregroundColor(.white.opacity(0.5))
+                                .frame(maxWidth: .infinity)
+                                .padding(.top, 30)
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 20)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .background(Color(red: 0.09, green: 0.05, blue: 0.07).ignoresSafeArea())
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+        .madTypeCap(.madCardCap)
+    }
+
+    private func row(_ friend: FriendActivityItem, now: Date) -> some View {
+        let nudged = nudgeStore.hasNudgedToday(friend.user_id)
+        let left = friend.minutesLeft(since: fetchedAt, now: now)
+        return HStack(spacing: 12) {
+            AvatarView(name: friend.displayName, imageURL: friend.profile_image_url, size: 44)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(friend.displayName)
+                    .madFont(size: 16, weight: .heavy, design: .rounded)
+                    .foregroundColor(.white)
+                HStack(spacing: 6) {
+                    if let streak = friend.current_streak {
+                        Label("\(streak)-day streak", systemImage: "flame.fill")
+                            .foregroundColor(.orange)
+                    }
+                    if let left {
+                        Text("· \(TodayBoardView.shortTime(left)) left")
+                            .foregroundColor(MADTheme.Colors.madRed)
+                    }
+                }
+                .madFont(size: 12, weight: .bold, design: .rounded, monospacedDigit: true)
+            }
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
+            Spacer(minLength: 8)
+            Button {
+                guard !nudged else { return }
+                onNudge(friend)
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: nudged ? "checkmark" : "hand.wave.fill")
+                        .font(.system(size: 12, weight: .bold))
+                    Text(nudged ? "Nudged" : "Nudge")
+                        .madFont(size: 14, weight: .heavy, design: .rounded, maxScale: 1.2)
+                        .lineLimit(1)
+                }
+                .foregroundColor(nudged ? .white.opacity(0.6) : .white)
+                .padding(.horizontal, 14)
+                .frame(minHeight: 36)
+                .background(Capsule().fill(nudged ? Color.white.opacity(0.08) : MADTheme.Colors.madRed))
+                .contentShape(Capsule())
+                .fixedSize()
+            }
+            .buttonStyle(.plain)
+            .disabled(nudged)
+            .animation(.easeInOut(duration: 0.2), value: nudged)
+            .accessibilityLabel(nudged ? "\(friend.displayName) nudged" : "Nudge \(friend.displayName)")
+        }
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Color.white.opacity(0.045)))
     }
 }
