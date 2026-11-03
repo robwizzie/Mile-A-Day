@@ -113,6 +113,9 @@ struct WeekMileDaysRow: View {
     @ObservedObject var healthManager: HealthKitManager
     let statusColor: Color
     var showLabels: Bool = true
+    /// The hero's stat column (~150pt): small dots, no labels row, no
+    /// checkmarks. Seven 34pt circles need ~240pt.
+    var compact: Bool = false
 
     private static let narrowDayFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -143,6 +146,44 @@ struct WeekMileDaysRow: View {
     }
 
     var body: some View {
+        if compact {
+            compactRow
+        } else {
+            fullRow
+        }
+    }
+
+    /// S M T W T F S over seven dots: filled for a done day, today ringed.
+    private var compactRow: some View {
+        HStack(spacing: 0) {
+            ForEach(weekDays, id: \.self) { date in
+                let calendar = Calendar.current
+                let completed = isDone(date)
+                let isToday = calendar.isDateInToday(date)
+                let isFuture = calendar.startOfDay(for: date) > calendar.startOfDay(for: Date())
+                VStack(spacing: 4) {
+                    Text(Self.narrowDayFormatter.string(from: date))
+                        .madFont(size: 9, weight: .bold, design: .rounded, maxScale: 1.2)
+                        .foregroundColor(.white.opacity(isToday ? 0.8 : 0.42))
+                    Circle()
+                        .fill(completed ? Color.orange : Color.white.opacity(isFuture ? 0.06 : 0.14))
+                        .frame(width: 12, height: 12)
+                        .overlay {
+                            if isToday {
+                                Circle().stroke(completed ? Color.white.opacity(0.85) : statusColor, lineWidth: 1.5)
+                                    .frame(width: 17, height: 17)
+                            }
+                        }
+                        .frame(width: 17, height: 17)
+                }
+                .frame(maxWidth: .infinity)
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(completedCount) of 7 goal days this week")
+    }
+
+    private var fullRow: some View {
         VStack(spacing: 12) {
             if showLabels {
                 HStack {
@@ -826,7 +867,7 @@ private struct ModernHeroStatLine: View {
                     .minimumScaleFactor(0.75)
             }
         }
-        .frame(maxWidth: .infinity, minHeight: 50, alignment: .leading)
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
     }
 }
 
@@ -1553,7 +1594,12 @@ private struct FlameBuddyHeroCard: View {
     /// xxLarge, which is about what the column's content measures out to).
     /// The buddy and its ground are anchored to the TOP and stay put, so the
     /// extra height lands under the stats, where the text needs it.
-    @MADScaledMetric(relativeTo: .largeTitle) private var statFrameHeight: CGFloat = 258
+    @MADScaledMetric(relativeTo: .largeTitle) private var statFrameHeight: CGFloat = 246
+    /// Flamey, his ground and the Closet button drawn at 90%: the whole
+    /// hero is shorter and the stat column fits its contents. One scale on
+    /// the column keeps every internal offset (ground under feet, button
+    /// under ground) as it was.
+    private static let flameyScale: CGFloat = 0.9
 
     @ObservedObject var healthManager: HealthKitManager
     @ObservedObject var userManager: UserManager
@@ -1903,19 +1949,20 @@ private struct FlameBuddyHeroCard: View {
                                 .offset(y: Self.groundBaseline + top + 32)
                         }
                     }
+                    .scaleEffect(Self.flameyScale, anchor: .top)
                     .frame(width: leftWidth, height: geo.size.height, alignment: .top)
 
                     funStatRows
                         // Spread over his whole frame (see `funStatRows`): the
                         // streak at the top, the day's lines down by his feet.
                         .padding(.top, 2)
-                        .padding(.bottom, 14)
+                        .padding(.bottom, 4)
                         .frame(width: rightWidth, height: geo.size.height, alignment: .top)
                 }
                 .onAppear { heroFrameWidth = geo.size.width }
                 .onChange(of: geo.size.width) { _, width in heroFrameWidth = width }
             }
-            .frame(height: statFrameHeight + top)
+            .frame(height: statFrameHeight + top * Self.flameyScale)
 
             if !injuryPause.isPaused {
                 DailyGoalBars(
@@ -2191,9 +2238,9 @@ private struct FlameBuddyHeroCard: View {
             // With only the streak and the day's lines, either the top or
             // the middle was an empty band; the milestone belongs with the
             // streak anyway, and moving it here takes a row off the card.
-            Spacer(minLength: 10)
+            Spacer(minLength: 4)
             DashboardMilestoneBar(streak: userManager.currentUser.streak)
-            Spacer(minLength: 10)
+            Spacer(minLength: 4)
 
             HeroStatColumn(
                 currentDistance: currentDistance,
@@ -2206,6 +2253,12 @@ private struct FlameBuddyHeroCard: View {
                 onOpenSteps: { showSteps = true },
                 weekMiles: weekMilesSoFar
             )
+
+            // The week at a glance, under the day's numbers: a dot per day,
+            // filled for a goal day. Fills the last of the column with
+            // something to look at instead of space.
+            WeekMileDaysRow(healthManager: healthManager, statusColor: statusColor, compact: true)
+                .padding(.top, 8)
 
             RecordGhostRow(
                 streak: userManager.currentUser.streak,

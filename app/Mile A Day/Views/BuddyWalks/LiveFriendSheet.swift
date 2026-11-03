@@ -26,7 +26,10 @@ struct LiveFriendSheet: View {
 
     @ObservedObject private var buddy = BuddySessionService.shared
     @Environment(\.dismiss) private var dismiss
-    @State private var hyped = false
+    /// App-wide "hyped today" (`HypeLedger`): one hype per friend's day,
+    /// whichever screen sent it.
+    @ObservedObject private var hypeLedger = HypeLedger.shared
+    private var hyped: Bool { hypeLedger.hasHypedToday(friendId) }
     @State private var hypeBusy = false
     @State private var joinBusy = false
     @State private var asked = false
@@ -225,7 +228,7 @@ struct LiveFriendSheet: View {
 
     private func hype(_ f: FriendOutNow) async {
         guard !hyped, !hypeBusy else { return }
-        hyped = true
+        hypeLedger.markHyped(f.userId)
         hypeBusy = true
         errorText = nil
         MADHaptics.success()
@@ -244,10 +247,9 @@ struct LiveFriendSheet: View {
                 _ = try await HypeService.sendHype(targetUserId: f.userId)
             }
         } catch APIError.conflict {
-            // Already hyped today: keep it locked.
-            hyped = true
+            // Already hyped today: the mark stands.
         } catch {
-            hyped = false
+            hypeLedger.unmark(f.userId)
             MADHaptics.error()
             errorText = (error as? LocalizedError)?.errorDescription ?? "Couldn't send that hype."
         }

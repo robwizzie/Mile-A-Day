@@ -44,16 +44,14 @@ struct TodayBoardView: View {
     /// Zoom source for the story viewer (iOS 18): a story opens out of its
     /// tile and shrinks back into it, Instagram-style.
     var storyZoom: Namespace.ID? = nil
-    /// Friends asked for a photo from this board this session.
-    var askedPhotoIds: Set<String> = []
+    /// When `friendsToday` was fetched: a friend's "minutes left" ages from it.
+    var friendsTodayFetchedAt: Date = Date()
     var isGroupViewable: (StoryGroup) -> Bool = { _ in true }
     var isGroupUnviewed: (StoryGroup) -> Bool = { $0.has_unviewed }
     let onTapAdd: () -> Void
     let onTapGroup: (StoryGroup) -> Void
     var onLockedStoryTap: () -> Void = {}
     let onNudge: (FriendActivityItem) -> Void
-    /// "Show us your walk": a friend who's done but hasn't posted.
-    var onAskPhoto: (FriendActivityItem) -> Void = { _ in }
     /// A done-today friend with nothing to watch: their profile.
     let onTapFriend: (FriendActivityItem) -> Void
     /// Re-reads who's out; the board polls it while it is on screen.
@@ -125,9 +123,13 @@ struct TodayBoardView: View {
                 out.append(Entry(id: friend.user_id, name: friend.displayName,
                                  imageURL: friend.profile_image_url, kind: .done(friend), rank: 3))
             } else {
+                // A streak ending tonight leads the not-yet friends: that's
+                // the nudge that matters most right now.
+                let atRisk = friend.streakAtRisk(since: friendsTodayFetchedAt)
                 out.append(Entry(id: friend.user_id, name: friend.displayName,
                                  imageURL: friend.profile_image_url,
-                                 kind: .notYet(friend, nudged: nudgeStore.hasNudgedToday(friend.user_id)), rank: 4))
+                                 kind: .notYet(friend, nudged: nudgeStore.hasNudgedToday(friend.user_id)),
+                                 rank: atRisk ? 3 : 4))
             }
         }
         // Stable within a rank: the server's own order (rail recency, live
@@ -138,6 +140,12 @@ struct TodayBoardView: View {
     }
 
     private var doneCount: Int { friendsToday.filter(\.completed_today).count }
+
+    /// Most of your friends are done and you aren't: your own tile says so
+    /// ("12 of 15 done") instead of your distance, with a red edge.
+    private var youreNext: Bool {
+        !mileDone && friendsToday.count >= 3 && doneCount * 2 >= friendsToday.count
+    }
 
     private var lockedStoryCount: Int {
         groups.filter { $0.user_id != currentUserId && !isGroupViewable($0) }.count
@@ -166,15 +174,13 @@ struct TodayBoardView: View {
             .sheet(item: $dayFriend) { friend in
                 FriendDaySheet(
                     friend: friend,
-                    askedPhoto: askedPhotoIds.contains(friend.user_id),
-                    onAskPhoto: { onAskPhoto(friend) },
                     onNudge: { nudge(friend) },
                     onOpenProfile: {
                         dayFriend = nil
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { onTapFriend(friend) }
                     }
                 )
-                .presentationDetents([.medium])
+                // The sheet sizes itself to its content (see FriendDaySheet).
                 .presentationDragIndicator(.visible)
             }
             if !mileDone, lockedStoryCount > 0 {
@@ -357,30 +363,22 @@ struct TodayBoardView: View {
                 .overlay(alignment: .top) { liveChip(friend) }
                 .overlay(alignment: .bottom) { liveLabel(friend) }
             }
-        case .done(let friend):
+        case .done:
             TodayTile(edge: .done) {
                 ZStack {
                     TodayTileStyle.ground
                     AvatarView(name: entry.name, imageURL: entry.imageURL, size: 46)
                 }
                 .overlay(alignment: .top) {
-                    // Done but nothing shared: the tile offers to ask for the
-                    // view. Otherwise it just says they're done.
-                    if friend.canAskForPhoto {
-                        if askedPhotoIds.contains(friend.user_id) {
-                            TodayChip(text: "Asked", icon: "checkmark", style: .nudged)
-                        } else {
-                            TodayChip(text: "Ask", icon: "camera.fill", style: .quiet)
-                        }
-                    } else {
-                        TodayChip(text: "Done", icon: "flame.fill", style: .done)
-                    }
+                    TodayChip(text: "Done", icon: "flame.fill", style: .done)
                 }
             }
         case .notYet(let friend, let nudged):
             // In colour, a little quiet: a friend who hasn't walked yet is
             // someone to wave at, not a greyed-out absence.
-            TodayTile(edge: nudged ? .quiet : .none) {
+            let left = friend.streakAtRisk(since: friendsTodayFetchedAt)
+                ? friend.minutesLeft(since: friendsTodayFetchedAt) : nil
+            TodayTile(edge: left != nil ? .risk : (nudged ? .quiet : .none)) {
                 ZStack {
                     TodayTileStyle.dimGround
                     AvatarView(name: entry.name, imageURL: entry.imageURL, size: 46)
@@ -401,14 +399,37 @@ struct TodayBoardView: View {
                     }
                 }
                 .overlay(alignment: .top) {
-                    TodayChip(text: nudged ? "Nudged" : "Nudge",
-                              icon: nudged ? "checkmark" : nil,
-                              style: nudged ? .nudged : .quiet)
-                        .contentTransition(.interpolate)
+                    if let left, !nudged {
+                        // Their streak ends at THEIR midnight: say how soon,
+                        // so the nudge goes now.
+                        TodayChip(text: Self.shortTime(left), icon: "hourglass", style: .risk)
+                    } else {
+                        TodayChip(text: nudged ? "Nudged" : "Nudge",
+                                  icon: nudged ? "checkmark" : nil,
+                                  style: nudged ? .nudged : .quiet)
+                            .contentTransition(.interpolate)
+                    }
+                }
+                .overlay(alignment: .bottom) {
+                    if left != nil, let streak = friend.current_streak {
+                        Text("\(streak)-day streak")
+                            .madFont(size: 9, weight: .heavy, design: .rounded, maxScale: 1.1, monospacedDigit: true)
+                            .foregroundColor(MADTheme.Colors.madRed)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.7)
+                            .padding(.horizontal, 4)
+                            .padding(.bottom, 6)
+                    }
                 }
             }
             .animation(.spring(response: 0.35, dampingFraction: 0.7), value: nudged)
         }
+    }
+
+    /// "2h 10m" / "45m".
+    static func shortTime(_ minutes: Int) -> String {
+        let h = minutes / 60, m = minutes % 60
+        return h > 0 ? "\(h)h \(m)m" : "\(m)m"
     }
 
     private func liveChip(_ friend: FriendOutNow) -> some View {
@@ -482,15 +503,15 @@ struct TodayBoardView: View {
             return s
         case .walking(let f):
             return "\(entry.name), walking now" + (f.distanceMiles.map { ", \($0.distanceFormatted)" } ?? "")
-        case .done(let friend):
-            if friend.canAskForPhoto {
-                return askedPhotoIds.contains(friend.user_id)
-                    ? "\(entry.name), done today, asked for a photo"
-                    : "\(entry.name), done today, no photo yet"
-            }
+        case .done:
             return "\(entry.name), done today, double tap for their day"
-        case .notYet(_, let nudged):
-            return "\(entry.name), not done yet, " + (nudged ? "nudged, double tap for their day" : "double tap to nudge")
+        case .notYet(let friend, let nudged):
+            var s = "\(entry.name), not done yet"
+            if friend.streakAtRisk(since: friendsTodayFetchedAt),
+               let left = friend.minutesLeft(since: friendsTodayFetchedAt) {
+                s += ", streak ends in \(Self.shortTime(left))"
+            }
+            return s + (nudged ? ", nudged, double tap for their day" : ", double tap to nudge")
         }
     }
 
@@ -513,7 +534,7 @@ struct TodayBoardView: View {
             if let myGroup { onTapGroup(myGroup) } else { onTapAdd() }
         } label: {
             VStack(spacing: 6) {
-                TodayTile(edge: mileDone ? .done : .quiet) {
+                TodayTile(edge: mileDone ? .done : (youreNext ? .risk : .quiet)) {
                     ZStack {
                         if let url = myGroup?.previewURL {
                             TodayPreviewImage(url: url)
@@ -544,7 +565,7 @@ struct TodayBoardView: View {
                         .padding(.bottom, 8)
                     }
                     .overlay(alignment: .bottom) {
-                        Text(mileDone ? "Done" : myMiles.distanceFormatted)
+                        Text(mileDone ? "Done" : (youreNext ? "\(doneCount) of \(friendsToday.count) done" : myMiles.distanceFormatted))
                             .madFont(size: 10, weight: .heavy, design: .rounded, maxScale: 1.1, monospacedDigit: true)
                             .foregroundColor(.white.opacity(0.9))
                             .lineLimit(1)
@@ -571,7 +592,9 @@ struct TodayBoardView: View {
             .frame(width: TodayTileStyle.width)
         }
         .buttonStyle(TodayTileButtonStyle())
-        .accessibilityLabel(mileDone ? "Your day, mile done" : "Your day, \(myMiles.distanceFormatted) so far")
+        .accessibilityLabel(mileDone ? "Your day, mile done"
+                            : youreNext ? "Your day, \(myMiles.distanceFormatted) so far. \(doneCount) of \(friendsToday.count) friends are done, you're next"
+                            : "Your day, \(myMiles.distanceFormatted) so far")
     }
 
     // MARK: - Unlock
@@ -635,7 +658,7 @@ private enum TodayTileStyle {
 /// The board's tile: a tall rounded card with a 2.5pt edge whose colour IS
 /// the state, the way the ring was on the old circles.
 private struct TodayTile<Content: View>: View {
-    enum Edge { case story, live, done, quiet, none }
+    enum Edge { case story, live, done, quiet, none, risk }
 
     let edge: Edge
     @ViewBuilder let content: () -> Content
@@ -680,6 +703,7 @@ private struct TodayTile<Content: View>: View {
                 center: .center))
         case .live: return AnyShapeStyle(MADTheme.Colors.walkBlue)
         case .done: return AnyShapeStyle(Color.orange.opacity(0.55))
+        case .risk: return AnyShapeStyle(MADTheme.Colors.madRed.opacity(0.85))
         case .quiet: return AnyShapeStyle(Color.white.opacity(0.12))
         case .none: return AnyShapeStyle(Color.white.opacity(0.06))
         }
@@ -688,7 +712,7 @@ private struct TodayTile<Content: View>: View {
 
 /// The small label riding a tile's top edge: live distance, Done, Nudge.
 private struct TodayChip: View {
-    enum Style { case live, done, quiet, nudged }
+    enum Style { case live, done, quiet, nudged, risk }
     let text: String
     let icon: String?
     let style: Style
@@ -719,6 +743,7 @@ private struct TodayChip: View {
         case .done: return .orange
         case .quiet: return .white.opacity(0.75)
         case .nudged: return Color(red: 0.10, green: 0.05, blue: 0.07)
+        case .risk: return .white
         }
     }
 
@@ -728,6 +753,7 @@ private struct TodayChip: View {
         case .done: return .black.opacity(0.55)
         case .quiet: return .white.opacity(0.12)
         case .nudged: return .white.opacity(0.9)
+        case .risk: return MADTheme.Colors.madRed
         }
     }
 }

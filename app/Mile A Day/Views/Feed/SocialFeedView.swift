@@ -60,10 +60,10 @@ struct SocialFeedView: View {
     @ObservedObject private var buddy = BuddySessionService.shared
     /// Every friend's miles + done flag today, for the Today board.
     @State private var friendsToday: [FriendActivityItem] = []
+    /// When `friendsToday` arrived: a friend's "minutes left" ages from it.
+    @State private var friendsTodayFetchedAt = Date()
     /// The story viewer zooms out of (and back into) the tapped tile.
     @Namespace private var storyZoom
-    /// Friends asked "show us your walk" from the board this session.
-    @State private var askedPhotoFriendIds: Set<String> = []
     /// The opt-in "add today's finish to your story" sheet (your Today tile).
     @State private var showFinishStorySheet = false
 
@@ -424,7 +424,7 @@ struct SocialFeedView: View {
                             windowOpen: freshWindow.isCameraOpen,
                             windowOpenedAt: freshWindow.windowOpenedAt,
                             storyZoom: storyZoom,
-                            askedPhotoIds: askedPhotoFriendIds,
+                            friendsTodayFetchedAt: friendsTodayFetchedAt,
                             isGroupViewable: { canViewStories(of: $0) },
                             isGroupUnviewed: { isGroupUnviewed(of: $0) },
                             onTapAdd: {
@@ -440,7 +440,6 @@ struct SocialFeedView: View {
                             onTapGroup: { viewerGroup = $0 },
                             onLockedStoryTap: { showMileHint = true },
                             onNudge: { friend in nudgeFromBoard(friend) },
-                            onAskPhoto: { friend in askPhotoFromBoard(friend) },
                             onTapFriend: { friend in
                                 openFriendProfile(id: friend.user_id, username: friend.username,
                                                   firstName: friend.first_name, lastName: friend.last_name,
@@ -634,6 +633,7 @@ struct SocialFeedView: View {
                 _ = await (feedLoad, hypeLoad, windowLoad)
             }
         }
+        .onReceive(HypeLedger.shared.$hypedToday) { syncHypes(with: $0) }
         .fullScreenCover(item: $viewerGroup) { group in
             // The whole viewable rail rides along so the viewer can cube
             // between authors Instagram-style, starting at the tapped one.
@@ -1259,6 +1259,7 @@ struct SocialFeedView: View {
                     }
                 }
                 feed = feedResponse.items
+                syncHypes(with: HypeLedger.shared.hypedToday)
                 rebuildFeedSectionHeaders()
                 nextBefore = feedResponse.next_before
                 loadMoreFailed = false
@@ -1298,7 +1299,10 @@ struct SocialFeedView: View {
         let today = try? await profileFriendService.fetchFriendsActivityToday()
         _ = await live
         await MainActor.run {
-            if let today { friendsToday = today }
+            if let today {
+                friendsToday = today
+                friendsTodayFetchedAt = Date()
+            }
         }
         // Who I've already nudged today, from the server, so a nudge sent on
         // another screen (or another phone) reads "Nudged" here too.
@@ -1314,18 +1318,6 @@ struct SocialFeedView: View {
     /// server refuses (already done, or the daily nudge spent elsewhere).
     private func nudgeFromBoard(_ friend: FriendActivityItem) {
         Task { try? await profileFriendService.nudgeFriend(friend.user_id) }
-    }
-
-    private func askPhotoFromBoard(_ friend: FriendActivityItem) {
-        askedPhotoFriendIds.insert(friend.user_id)
-        Task {
-            do {
-                try await profileFriendService.askFriendForPhoto(friend.user_id)
-            } catch {
-                // Asked already today, or they posted meanwhile: don't claim it.
-                await MainActor.run { _ = askedPhotoFriendIds.remove(friend.user_id) }
-            }
-        }
     }
 
     private func openFriendProfile(id: String, username: String?, firstName: String?,
@@ -1436,6 +1428,7 @@ struct SocialFeedView: View {
                 await MainActor.run {
                     hypesRemaining = response.hypes_remaining
                     hypesUnlimited = response.unlimited ?? hypesUnlimited
+                    if isToday(entry) { HypeLedger.shared.unmark(entry.user_id) }
                     MADHaptics.tap()
                 }
             } catch {
@@ -1476,6 +1469,7 @@ struct SocialFeedView: View {
             await MainActor.run {
                 hypesRemaining = response.hypes_remaining
                 hypesUnlimited = response.unlimited ?? hypesUnlimited
+                if isToday(entry) { HypeLedger.shared.markHyped(entry.user_id) }
                 MADHaptics.success()
             }
         } catch APIError.rateLimited {
@@ -1495,6 +1489,7 @@ struct SocialFeedView: View {
             }
         } catch APIError.conflict {
             // Already hyped server-side — the optimistic state is the truth.
+            if isToday(entry) { await MainActor.run { HypeLedger.shared.markHyped(entry.user_id) } }
         } catch {
             // Network/server failure — undo quietly; the user can re-tap.
             await MainActor.run { revert() }
@@ -1627,6 +1622,30 @@ struct SocialFeedView: View {
             try await PostService.setPostIncludeRoute(postId: entry.entryId, includeRoute: include)
         } catch {
             await MainActor.run { updateEntry(entry.id) { $0.include_route = !include } }
+        }
+    }
+
+    /// A card from today (the viewer's day), the only kind `HypeLedger`
+    /// speaks for: it records "hyped this friend's day", not a whole history.
+    private func isToday(_ entry: FeedEntry) -> Bool {
+        RelativeTime.date(from: entry.sort_ts).map(Calendar.current.isDateInToday) ?? false
+    }
+
+    /// A hype sent from anywhere else (their board sheet, live sheet, the
+    /// inbox) flips their card from today too, with the tally the server
+    /// already counted. And the other way: a hyped card from today tells
+    /// every other surface.
+    private func syncHypes(with hypedToday: Set<String>) {
+        let ledger = HypeLedger.shared
+        for entry in feed where isToday(entry) {
+            if entry.is_hyped {
+                ledger.markHyped(entry.user_id)
+            } else if hypedToday.contains(entry.user_id) {
+                updateEntry(entry.id) { e in
+                    e.is_hyped = true
+                    e.hype_count = (e.hype_count ?? 0) + 1
+                }
+            }
         }
     }
 
