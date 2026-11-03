@@ -64,6 +64,10 @@ struct SocialFeedView: View {
     @State private var friendsTodayFetchedAt = Date()
     /// The story viewer zooms out of (and back into) the tapped tile.
     @Namespace private var storyZoom
+    /// The author the story viewer is showing. Seeded with the tapped one and
+    /// updated as the viewer cubes between authors, so closing zooms back
+    /// into THAT author's tile, not the one you started from.
+    @State private var storyZoomId: String?
     /// The opt-in "add today's finish to your story" sheet (your Today tile).
     @State private var showFinishStorySheet = false
 
@@ -424,6 +428,7 @@ struct SocialFeedView: View {
                             windowOpen: freshWindow.isCameraOpen,
                             windowOpenedAt: freshWindow.windowOpenedAt,
                             storyZoom: storyZoom,
+                            focusedStoryId: viewerGroup == nil ? nil : storyZoomId,
                             friendsTodayFetchedAt: friendsTodayFetchedAt,
                             isGroupViewable: { canViewStories(of: $0) },
                             isGroupUnviewed: { isGroupUnviewed(of: $0) },
@@ -634,6 +639,11 @@ struct SocialFeedView: View {
             }
         }
         .onReceive(HypeLedger.shared.$hypedToday) { syncHypes(with: $0) }
+        // Only on open: clearing it on close would point the closing zoom
+        // back at nothing mid-dismissal.
+        .onChange(of: viewerGroup?.user_id) { _, id in
+            if let id { storyZoomId = id }
+        }
         .fullScreenCover(item: $viewerGroup) { group in
             // The whole viewable rail rides along so the viewer can cube
             // between authors Instagram-style, starting at the tapped one.
@@ -642,7 +652,8 @@ struct SocialFeedView: View {
                 initialGroupId: group.user_id,
                 currentUserId: currentUserId,
                 allowedDaysFor: { allowedStoryDays(for: $0) },
-                zoomsBack: StoryZoom.isAvailable
+                zoomsBack: StoryZoom.isAvailable,
+                onCurrentGroupChange: { storyZoomId = $0 }
             ) { changed in
                 viewerGroup = nil
                 if changed {
@@ -656,7 +667,7 @@ struct SocialFeedView: View {
             .presentationBackground(.clear)
             // Instagram-style: out of the tapped tile, back into it (iOS 18).
             // The viewer's own swipe-down stays the dismiss gesture.
-            .storyZoomTransition(id: group.user_id, in: storyZoom)
+            .storyZoomTransition(id: storyZoomId ?? group.user_id, in: storyZoom)
             .interactiveDismissDisabled()
         }
         .sheet(item: $reportingPost) { post in
