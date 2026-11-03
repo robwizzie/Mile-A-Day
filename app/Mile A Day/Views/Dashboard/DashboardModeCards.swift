@@ -116,6 +116,10 @@ struct WeekMileDaysRow: View {
     /// The hero's stat column (~150pt): small dots, no labels row, no
     /// checkmarks. Seven 34pt circles need ~240pt.
     var compact: Bool = false
+    /// Seven 6pt dots, no letters: sits in a stat line's label row, before
+    /// "this week". A lettered strip of its own under the hero's stats read
+    /// as a loose extra row.
+    var inline: Bool = false
 
     private static let narrowDayFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -146,11 +150,28 @@ struct WeekMileDaysRow: View {
     }
 
     var body: some View {
-        if compact {
+        if inline {
+            inlineDots
+        } else if compact {
             compactRow
         } else {
             fullRow
         }
+    }
+
+    private var inlineDots: some View {
+        HStack(spacing: 3) {
+            ForEach(weekDays, id: \.self) { date in
+                let calendar = Calendar.current
+                let isFuture = calendar.startOfDay(for: date) > calendar.startOfDay(for: Date())
+                Circle()
+                    .fill(isDone(date) ? Color.orange : Color.white.opacity(isFuture ? 0.1 : 0.22))
+                    .frame(width: 6, height: 6)
+            }
+        }
+        .fixedSize()
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(completedCount) of 7 goal days")
     }
 
     /// S M T W T F S over seven dots: filled for a done day, today ringed.
@@ -838,6 +859,8 @@ private struct ModernHeroStatLine: View {
     let unit: String
     let label: String
     let tint: Color
+    /// Drawn in place of the icon (the week line's seven day dots).
+    var accessory: AnyView? = nil
 
     var body: some View {
         // The number leads; what it means sits under it in plain words, with
@@ -855,11 +878,15 @@ private struct ModernHeroStatLine: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
             }
-            HStack(spacing: 4) {
-                Image(systemName: icon)
-                    .madFont(size: 10, weight: .bold, maxScale: 1.3)
-                    .foregroundColor(tint)
-                    .accessibilityHidden(true)
+            HStack(spacing: 5) {
+                if let accessory {
+                    accessory
+                } else {
+                    Image(systemName: icon)
+                        .madFont(size: 10, weight: .bold, maxScale: 1.3)
+                        .foregroundColor(tint)
+                        .accessibilityHidden(true)
+                }
                 Text(label)
                     .madFont(size: 12, weight: .semibold, design: .rounded)
                     .foregroundColor(.white.opacity(0.5))
@@ -911,6 +938,9 @@ private struct HeroStatColumn: View {
     /// done it leads the column: today's best pace was a number that barely
     /// moves and sits on the workout row anyway; the week moves every day.
     var weekMiles: Double? = nil
+    /// Seven day dots drawn under the week's miles (`WeekMileDaysRow`
+    /// `.inline`): which days counted, beside how far the week has gone.
+    var weekDots: AnyView? = nil
 
     private var goal: Double { max(goalMiles, 0.01) }
     private var milesDone: Bool { ProgressCalculator.isGoalCompleted(current: currentDistance, goal: goal) }
@@ -980,7 +1010,8 @@ private struct HeroStatColumn: View {
                 value: weekMiles.distanceText,
                 unit: DistanceUnits.current.abbreviation,
                 label: "this week",
-                tint: MADTheme.Colors.walkBlue
+                tint: MADTheme.Colors.walkBlue,
+                accessory: weekDots
             )
         } else if !dayDone {
             ModernHeroStatLine(
@@ -1038,6 +1069,9 @@ private struct DailyGoalBars: View {
     /// Fun only (Modern keeps its Start button): an extra walk, small.
     var onGoAgain: (() -> Void)? = nil
     var goAgainTitle: String = "Go again"
+    /// Fun only: a full-width Share button under the done line. Sharing was
+    /// a tap on the hero card itself, which nothing on screen pointed to.
+    var onShare: (() -> Void)? = nil
     /// Opens the Steps screen from the steps half.
     var onOpenSteps: (() -> Void)? = nil
 
@@ -1069,6 +1103,43 @@ private struct DailyGoalBars: View {
     /// part-way, which read as unfinished business) said nothing once either
     /// path was done.
     private var doneLine: some View {
+        VStack(spacing: 10) {
+            doneRow
+            if let onShare {
+                Button {
+                    MADHaptics.action()
+                    onShare()
+                } label: {
+                    HStack(spacing: 7) {
+                        Image(systemName: "square.and.arrow.up")
+                            .madFont(size: 14, weight: .heavy, maxScale: 1.3)
+                            .accessibilityHidden(true)
+                        Text("Share your streak")
+                            .madFont(size: 15, weight: .heavy, design: .rounded, maxScale: 1.3)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                    }
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .background(
+                        Capsule().fill(LinearGradient(colors: [.orange, MADTheme.Colors.madRed],
+                                                      startPoint: .leading, endPoint: .trailing))
+                    )
+                    .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .padding(.bottom, onShare == nil ? 0 : 3)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color.white.opacity(0.045))
+        )
+    }
+
+    private var doneRow: some View {
         HStack(spacing: 8) {
             Image(systemName: "checkmark.circle.fill")
                 .madFont(size: 15, weight: .bold, maxScale: 1.3)
@@ -1085,12 +1156,6 @@ private struct DailyGoalBars: View {
                 HStack(spacing: 6) { doneActions(labels: false) }
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 9)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color.white.opacity(0.045))
-        )
     }
 
     @ViewBuilder
@@ -1975,6 +2040,7 @@ private struct FlameBuddyHeroCard: View {
                     // took its place), so the extra walk lives here.
                     onGoAgain: goAgainAction,
                     goAgainTitle: hasActiveWorkout ? "Resume" : "Go again",
+                    onShare: { showShareSheet = true },
                     onOpenSteps: { showSteps = true }
                 )
             }
@@ -2251,14 +2317,11 @@ private struct FlameBuddyHeroCard: View {
                 todaySteps: todaySteps,
                 stepGoalMet: stepGoalMet,
                 onOpenSteps: { showSteps = true },
-                weekMiles: weekMilesSoFar
+                weekMiles: weekMilesSoFar,
+                // The week's days ride on its miles line. A lettered strip
+                // under the stats was a loose extra row.
+                weekDots: AnyView(WeekMileDaysRow(healthManager: healthManager, statusColor: statusColor, inline: true))
             )
-
-            // The week at a glance, under the day's numbers: a dot per day,
-            // filled for a goal day. Fills the last of the column with
-            // something to look at instead of space.
-            WeekMileDaysRow(healthManager: healthManager, statusColor: statusColor, compact: true)
-                .padding(.top, 8)
 
             RecordGhostRow(
                 streak: userManager.currentUser.streak,
