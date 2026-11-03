@@ -399,8 +399,25 @@ struct StreakTokensCard: View {
     /// Drives the slow breathing pulse on earned medallions.
     @State private var pulse = false
 
+    /// Worth a card: something needs the user (a token is holding today, a
+    /// Save is pending, the streak is at risk, an Assist can be asked for or
+    /// given), or a token is still being earned. Three full tokens and
+    /// nothing to do was three glowing tiles each saying "Available", next
+    /// to a hero that already says "3 savers" (and opens this screen).
+    private func isWorthShowing(_ payload: StreakFeaturesPayload) -> Bool {
+        if payload.today_covered != nil || payload.pending_save != nil
+            || payload.streak_at_risk || payload.my_savable_day != nil {
+            return true
+        }
+        if (tokensState.donationBudget?.remaining ?? 0) > 0,
+           tokensState.assistableFriends.contains(where: { !$0.alreadyOffered }) {
+            return true
+        }
+        return readyCount(for: payload) < 3
+    }
+
     var body: some View {
-        if let payload = tokensState.payload {
+        if let payload = tokensState.payload, isWorthShowing(payload) {
             Button {
                 MADHaptics.tap()
                 showDetail = true

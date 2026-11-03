@@ -1,26 +1,23 @@
 import SwiftUI
 import HealthKit
 
-/// The home page AFTER the mile.
+/// The home page AFTER the mile, when today's walk hasn't been shared.
 ///
 /// The day's card used to keep offering "Start your mile" all day, so the
 /// screen's one big action was wrong for everyone who had already done it.
-/// Once the day is done this takes its place: what you did, and the one thing
-/// worth doing next, sharing it, without anything happening on its own.
+/// Once the day is done this takes its place, and it is ONLY the share
+/// prompt: the hero's done line already says the mile is in (with Replay and
+/// Go again beside it), so a card that said it again was a second "done".
 ///
 /// - **Not posted yet**: today's photo theme, then **Post a photo** (the one
 ///   photo prompt every door uses, `PhotoPromptView` via the celebration
 ///   queue), **Add to story** (the opt-in finish frame) and the **Flamey
 ///   card** (the share studio). "Not today" folds it away until tomorrow.
-/// - **Posted** (or folded): one quiet "done" line.
-///
-/// "Go again" stays, small: an extra walk is a real thing people do, but it
-/// is no longer the headline once the day is won.
+/// - **Posted, folded, or nothing to share** (a steps-only day): nothing.
+///   It used to stay as a whole card saying "Shared. Nice one."
 struct DoneTodayCard: View {
     @ObservedObject var healthManager: HealthKitManager
     @ObservedObject var userManager: UserManager
-    let hasActiveWorkout: Bool
-    @Binding var showWorkoutView: Bool
 
     @AppStorage("doneCardFoldedDayV1") private var foldedDay = ""
     @State private var showStorySheet = false
@@ -54,42 +51,35 @@ struct DoneTodayCard: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 10) {
-                Image(systemName: "checkmark.circle.fill")
-                    .madFont(size: 22, weight: .bold)
-                    .foregroundColor(MADTheme.Colors.success)
-                    .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("Today's mile is done")
-                        .madFont(size: 17, weight: .heavy, design: .rounded)
-                        .foregroundColor(.white)
-                    Text(posted ? "Shared. Nice one." : "\(healthManager.todaysDistance.distanceFormatted) today")
-                        .madFont(size: 13, weight: .medium, design: .rounded, monospacedDigit: true)
-                        .foregroundColor(.white.opacity(0.55))
+        if canShare && !posted && !folded {
+            card
+        }
+    }
+
+    private var card: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Share today's walk")
+                    .madFont(size: 17, weight: .heavy, design: .rounded)
+                    .foregroundColor(.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                Spacer(minLength: 8)
+                Button {
+                    MADHaptics.tap()
+                    withAnimation(.easeInOut(duration: 0.25)) { foldedDay = Self.todayStamp() }
+                } label: {
+                    Text("Not today")
+                        .madFont(size: 13, weight: .semibold, design: .rounded)
+                        .foregroundColor(.white.opacity(0.45))
+                        .padding(.vertical, 4)
+                        .contentShape(Rectangle())
                 }
-                Spacer(minLength: 0)
+                .buttonStyle(.plain)
+                .fixedSize()
             }
 
-            if canShare && !posted && !folded {
-                shareSection
-            }
-
-            Button {
-                MADHaptics.tap()
-                showWorkoutView = true
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: hasActiveWorkout ? "play.circle.fill" : "plus.circle")
-                        .accessibilityHidden(true)
-                    Text(hasActiveWorkout ? "Resume workout" : "Go again")
-                }
-                .madFont(size: 14, weight: .bold, design: .rounded)
-                .foregroundColor(.white.opacity(0.7))
-                .padding(.vertical, 4)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
+            shareSection
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -169,19 +159,6 @@ struct DoneTodayCard: View {
                     showShareCard = true
                 }
             }
-
-            Button {
-                MADHaptics.tap()
-                withAnimation(.easeInOut(duration: 0.25)) { foldedDay = Self.todayStamp() }
-            } label: {
-                Text("Not today")
-                    .madFont(size: 13, weight: .semibold, design: .rounded)
-                    .foregroundColor(.white.opacity(0.45))
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 2)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
         }
     }
 

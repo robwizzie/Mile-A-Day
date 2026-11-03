@@ -18,8 +18,10 @@ struct DashboardCardsBlock: View {
 
     private var raw: String { style == .fun ? funRaw : modernRaw }
 
+    private var cards: [DashboardCard] { DashboardCards.ordered(in: raw, for: style) }
+
     var body: some View {
-        ForEach(DashboardCards.ordered(in: raw, for: style)) { card in
+        ForEach(cards) { card in
             switch card {
             case .dailyChallenge:
                 NavigationLink {
@@ -37,11 +39,15 @@ struct DashboardCardsBlock: View {
             case .friendActivity:
                 FriendActivityStripView(friendService: friendService)
             case .treats:
-                TreatsCard(healthManager: healthManager)
+                TreatsCard(healthManager: healthManager, compact: true)
             case .weekChart:
                 WeeklyMileChartView(healthManager: healthManager, userManager: userManager)
             case .recentWorkouts:
-                RecentWorkoutsPreviewCard(healthManager: healthManager, showWorkouts: $showWorkouts)
+                RecentWorkoutsPreviewCard(
+                    healthManager: healthManager,
+                    showWorkouts: $showWorkouts,
+                    showsRoutesLink: cards.contains(.routeMap)
+                )
                     .navigationDestination(isPresented: $showWorkouts) {
                         WorkoutsView(healthManager: healthManager)
                     }
@@ -52,7 +58,11 @@ struct DashboardCardsBlock: View {
             case .streakHistory:
                 HallOfStreaksSection(userId: userManager.currentUser.backendUserId, isSelf: true)
             case .routeMap:
-                RouteMapCard(style: style)
+                // With Recent workouts on too, the routes map is a "Routes"
+                // link in its header instead of a whole card for one door.
+                if !cards.contains(.recentWorkouts) {
+                    RouteMapCard(style: style)
+                }
             case .monthlyFlame:
                 MonthlyFlameCard()
             }
@@ -145,15 +155,12 @@ struct DashboardQuietCard: View {
     var chevron: Bool = false
 
     var body: some View {
-        HStack(spacing: MADTheme.Spacing.md) {
-            ZStack {
-                Circle()
-                    .fill(tint.opacity(0.15))
-                    .frame(width: 36, height: 36)
-                Image(systemName: icon)
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundColor(tint)
-            }
+        HStack(alignment: .firstTextBaseline, spacing: MADTheme.Spacing.sm) {
+            // The glyph alone, tinted: no disc behind it.
+            Image(systemName: icon)
+                .font(.system(size: 15, weight: .bold))
+                .foregroundColor(tint)
+                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                     .font(.system(size: 15, weight: .bold, design: .rounded))

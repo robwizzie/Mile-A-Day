@@ -573,7 +573,6 @@ struct CalendarPreviewCard: View {
 // MARK: - Daily Challenge Card
 
 struct DailyChallengeCard: View {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ObservedObject var healthManager: HealthKitManager
     @ObservedObject var userManager: UserManager
     @Environment(\.colorScheme) var colorScheme
@@ -587,7 +586,6 @@ struct DailyChallengeCard: View {
     @State private var challengesCompletedCount: Int = 0
     @State private var challengeStreak: Int = 0
     @State private var opponent: ChallengeOpponent?
-    @State private var iconPulse: Bool = false
 
     private var primaryColor: Color {
         todaysChallenge?.gradient.first ?? MADTheme.Colors.madRed
@@ -620,21 +618,6 @@ struct DailyChallengeCard: View {
             // Pick up any cached challenge state immediately (the service restores
             // today's snapshot from UserDefaults) instead of waiting on the network.
             refreshFromService()
-            // Subtle pulse on the icon when not completed — draws the eye
-            // without being annoying. Next turn, own transaction: a
-            // repeatForever handed in via `.animation(_:value:)` leaks into
-            // whatever else moves in that update (a card moving into place).
-            guard !reduceMotion, !iconPulse else { return }
-            DispatchQueue.main.async {
-                withAnimation(.easeInOut(duration: 1.8).repeatForever(autoreverses: true)) {
-                    iconPulse = true
-                }
-            }
-        }
-        .onDisappear {
-            var reset = Transaction()
-            reset.disablesAnimations = true
-            withTransaction(reset) { iconPulse = false }
         }
     }
 
@@ -643,16 +626,8 @@ struct DailyChallengeCard: View {
     @ViewBuilder
     private var placeholderCard: some View {
         HStack(spacing: 14) {
-            ZStack {
-                Circle()
-                    .fill(Color.white.opacity(0.08))
-                    .frame(width: 54, height: 54)
-                Image(systemName: "trophy.fill")
-                    .madFont(size: 21, weight: .semibold, maxScale: 1.3)
-                    .foregroundColor(MADTheme.Colors.madRed.opacity(0.7))
-            }
             VStack(alignment: .leading, spacing: 7) {
-                Text("Daily Challenge")
+                Text("Daily challenge")
                     .madFont(size: 12, weight: .semibold, design: .rounded)
                     .foregroundColor(MADTheme.Colors.madRed)
                 Text("Loading today's challenge…")
@@ -674,13 +649,17 @@ struct DailyChallengeCard: View {
     @ViewBuilder
     private func challengeCard(_ challenge: DailyChallenge) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            // Top row: icon + title + reward chip
+            // Label, title, what to do. The challenge's glyph rides in the
+            // label line; it used to sit in a gradient disc inside a pulsing
+            // halo, an icon circle the rest of the dashboard dropped.
             HStack(spacing: 14) {
-                challengeIcon(challenge)
-
                 VStack(alignment: .leading, spacing: 5) {
                     HStack(spacing: 6) {
-                        Text("Daily Challenge")
+                        Image(systemName: isCompleted ? "checkmark.circle.fill" : challenge.icon)
+                            .madFont(size: 12, weight: .bold, maxScale: 1.3)
+                            .foregroundColor(accentColor)
+                            .accessibilityHidden(true)
+                        Text("Daily challenge")
                             .madFont(size: 12, weight: .semibold, design: .rounded)
                             .foregroundColor(accentColor)
 
@@ -716,7 +695,7 @@ struct DailyChallengeCard: View {
                         }
                     }
 
-                    Text(isCompleted ? "\(challenge.title) — Complete!" : challenge.title)
+                    Text(challenge.title)
                         .madFont(size: 18, weight: .heavy, design: .rounded)
                         .foregroundColor(.primary)
                         .lineLimit(1)
@@ -750,40 +729,6 @@ struct DailyChallengeCard: View {
     }
 
     @ViewBuilder
-    private func challengeIcon(_ challenge: DailyChallenge) -> some View {
-        ZStack {
-            // Outer halo
-            Circle()
-                .fill(
-                    LinearGradient(
-                        colors: isCompleted ? [.green.opacity(0.35), .green.opacity(0.0)] : [primaryColor.opacity(0.35), primaryColor.opacity(0.0)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-                .frame(width: 58, height: 58)
-                .scaleEffect(iconPulse && !isCompleted && !reduceMotion ? 1.05 : 1.0)
-
-            Circle()
-                .fill(
-                    LinearGradient(
-                        colors: isCompleted ? [.green, Color(red: 0.18, green: 0.78, blue: 0.42)] : challenge.gradient,
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-                .frame(width: 46, height: 46)
-                .overlay(
-                    Circle().stroke(Color.white.opacity(0.25), lineWidth: 1)
-                )
-
-            Image(systemName: isCompleted ? "checkmark" : challenge.icon)
-                .madFont(size: 19, weight: .bold)
-                .foregroundColor(.white)
-        }
-    }
-
-    @ViewBuilder
     private func progressRow(_ challenge: DailyChallenge) -> some View {
         let progress = challengeProgressValue
             VStack(alignment: .leading, spacing: 6) {
@@ -805,52 +750,26 @@ struct DailyChallengeCard: View {
                 }
             }
             .frame(height: 8)
-            HStack {
-                Text(isCompleted ? "Locked in" : progressLabel(progress))
-                    .madFont(size: 12, weight: .bold, design: .rounded)
-                    .foregroundColor(accentColor)
-                Spacer()
-                Text(ProgressCalculator.formatProgress(min(progress, 1.0)))
-                    .madFont(size: 12, weight: .heavy, design: .rounded)
-                    .foregroundColor(.primary.opacity(0.7))
-                    .contentTransition(.numericText())
-            }
+            // One line: how far, in words. It was a pep-talk label
+            // ("Closing in") on the left and the same progress as a
+            // percentage on the right.
+            Text(isCompleted ? "Done today" : progressLabel(progress))
+                .madFont(size: 12, weight: .bold, design: .rounded, monospacedDigit: true)
+                .foregroundColor(isCompleted ? .green : .primary.opacity(0.7))
+                .contentTransition(.numericText())
         }
     }
 
     @ViewBuilder
     private func footerRow(_ challenge: DailyChallenge) -> some View {
-        // Tomorrow preview is shown in every state — completed or not — so users always
-        // know what's coming and can plan ahead.
-        if let tomorrow = tomorrowsChallenge {
-            HStack(spacing: 8) {
-                Image(systemName: "calendar")
-                    .madFont(size: 11, weight: .bold)
-                    .foregroundColor(.secondary)
-                Text("Tomorrow:")
-                    .madFont(size: 12, weight: .semibold, design: .rounded)
-                    .foregroundColor(.secondary)
-                HStack(spacing: 5) {
-                    Image(systemName: tomorrow.icon)
-                        .madFont(size: 11, weight: .bold)
-                    Text(tomorrow.title)
-                        .madFont(size: 12, weight: .heavy, design: .rounded)
-                        .lineLimit(1)
-                }
-                .foregroundColor(tomorrow.gradient.first ?? .primary)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 3)
-                .background(
-                    Capsule().fill((tomorrow.gradient.first ?? .gray).opacity(0.12))
-                )
-                Spacer(minLength: 0)
-                if isCompleted {
-                    Image(systemName: "sparkles")
-                        .madFont(size: 11, weight: .bold)
-                        .foregroundColor(.yellow)
-                }
-            }
-            .padding(.top, 2)
+        // Tomorrow's challenge once today's is done, as a plain line: before
+        // that it was a coloured chip competing with the challenge you're on.
+        if isCompleted, let tomorrow = tomorrowsChallenge {
+            Text("Tomorrow: \(tomorrow.title)")
+                .madFont(size: 12, weight: .semibold, design: .rounded)
+                .foregroundColor(.secondary)
+                .lineLimit(1)
+                .padding(.top, 2)
         } else if isCompleted {
             HStack(spacing: 8) {
                 Image(systemName: "sparkles")
@@ -875,10 +794,8 @@ struct DailyChallengeCard: View {
     }
 
     private func progressLabel(_ value: Double) -> String {
-        if value <= 0 { return "Let's go — start your mile" }
-        if value < 0.5 { return "Off the line — keep building" }
-        if value < 0.85 { return "Closing in" }
-        return "So close — finish strong"
+        if value <= 0 { return "Not started" }
+        return "\(ProgressCalculator.formatProgress(min(value, 1.0))) there"
     }
 
     /// Read the server-backed state from `ChallengeService.shared` (a `RemoteChallengeService`).
@@ -2214,30 +2131,6 @@ struct LiquidGlassCardModifier: ViewModifier {
 extension View {
     func liquidGlassCard(accentColor: Color = Color(red: 217/255, green: 64/255, blue: 63/255)) -> some View {
         modifier(LiquidGlassCardModifier(accentColor: accentColor))
-    }
-}
-
-// MARK: - Hero share button
-
-/// Share, under Flamey's feet beside his Closet pill — same quiet capsule,
-/// so the two read as his two actions. Icon-first to fit his column, and
-/// LABELLED for VoiceOver.
-struct HeroShareIconButton: View {
-    var action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Image(systemName: "square.and.arrow.up")
-                .madFont(size: 11, weight: .bold, maxScale: 1.3)
-                .foregroundColor(.white.opacity(0.9))
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(Capsule().fill(Color.white.opacity(0.10)))
-                .overlay(Capsule().strokeBorder(Color.white.opacity(0.16), lineWidth: 1))
-                .contentShape(Capsule())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Share")
     }
 }
 

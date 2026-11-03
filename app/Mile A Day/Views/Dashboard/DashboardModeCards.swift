@@ -82,12 +82,9 @@ struct DashboardMilestoneBar: View {
                         .foregroundColor(.white.opacity(0.72))
                         .lineLimit(1)
                         .minimumScaleFactor(0.75)
+                    // No "Day N" on the right: the streak number sits right
+                    // above this row on both heroes.
                     Spacer(minLength: 0)
-                    Text("Day \(streak)")
-                        .madFont(size: 12, weight: .semibold, design: .rounded, monospacedDigit: true)
-                        .foregroundColor(.white.opacity(0.42))
-                        .lineLimit(1)
-                        .fixedSize()
                 }
 
                 HStack(spacing: 3) {
@@ -206,6 +203,8 @@ struct ModernDashboardBody: View {
     @Binding var showWorkoutView: Bool
     /// Opens the manual-entry sheet DashboardView hosts.
     let onLogPastWorkout: () -> Void
+    /// Replays today's celebration; nil until it has played today.
+    var onReplay: (() -> Void)? = nil
 
     private var state: (distance: Double, goal: Double, progress: Double, completed: Bool) {
         let distance = healthManager.todaysDistance
@@ -231,7 +230,8 @@ struct ModernDashboardBody: View {
                 stepGoalMet: StepGoalDayStore.isTodayMet(),
                 hasActiveWorkout: hasActiveWorkout,
                 distanceIsFresh: healthManager.hasFreshTodaysDistance,
-                showWorkoutView: $showWorkoutView
+                showWorkoutView: $showWorkoutView,
+                onReplay: onReplay
             )
             // Fixed flame box beside a ~130pt stat column: the hero's text
             // grows only as far as that column honestly holds.
@@ -244,13 +244,7 @@ struct ModernDashboardBody: View {
 
             BuddyWalkPill(hasActiveWorkout: hasActiveWorkout)
 
-            HStack(alignment: .top, spacing: 12) {
-                ModernStepsTile(healthManager: healthManager, userManager: userManager)
-                ModernBadgesTile(userManager: userManager, healthManager: healthManager)
-            }
-            // Half-width tiles: their height scales (tileHeight), their width
-            // can't.
-            .madTypeCap(.madFixedChromeCap)
+            NextMedalCard(userManager: userManager, style: .modern)
 
             // Everything below the day's cards is the user's to arrange
             // (DashboardCards): default here is just the daily challenge.
@@ -276,6 +270,8 @@ struct FunDashboardBody: View {
     @Binding var showWorkoutView: Bool
     /// Opens the manual-entry sheet DashboardView hosts.
     let onLogPastWorkout: () -> Void
+    /// Replays today's celebration; nil until it has played today.
+    var onReplay: (() -> Void)? = nil
 
     private var state: (distance: Double, goal: Double, progress: Double, completed: Bool) {
         let distance = healthManager.todaysDistance
@@ -301,7 +297,8 @@ struct FunDashboardBody: View {
                 stepGoalMet: StepGoalDayStore.isTodayMet(),
                 hasActiveWorkout: hasActiveWorkout,
                 distanceIsFresh: healthManager.hasFreshTodaysDistance,
-                showWorkoutView: $showWorkoutView
+                showWorkoutView: $showWorkoutView,
+                onReplay: onReplay
             )
             // The stat frame grows with its text (statFrameHeight), but the
             // column beside Flamey is ~155pt wide, so it caps here.
@@ -323,13 +320,7 @@ struct FunDashboardBody: View {
                 PlusStreakCard(streak: userManager.currentUser.streak, topSpacing: 18)
             }
 
-            HStack(alignment: .top, spacing: 12) {
-                ModernStepsTile(healthManager: healthManager, userManager: userManager)
-                ModernBadgesTile(userManager: userManager, healthManager: healthManager)
-            }
-            // Half-width tiles: their height scales (tileHeight), their width
-            // can't.
-            .madTypeCap(.madFixedChromeCap)
+            NextMedalCard(userManager: userManager, style: .fun)
 
             // Everything below the day's cards is the user's to arrange
             // (DashboardCards): default here is just the daily challenge.
@@ -381,6 +372,10 @@ private struct ModernHeroCard: View {
     let hasActiveWorkout: Bool
     let distanceIsFresh: Bool
     @Binding var showWorkoutView: Bool
+    var onReplay: (() -> Void)? = nil
+    /// The Steps screen, opened from the goal bars' steps half or the
+    /// column's steps line (the Steps tile that was its door is gone).
+    @State private var showSteps = false
 
     @State private var showTokens = false
     @State private var timeRemainingText = ""
@@ -515,7 +510,8 @@ private struct ModernHeroCard: View {
                         timeLeftText: formattedTimeOnly,
                         statusColor: statusColor,
                         todaySteps: todaySteps,
-                        stepGoalMet: stepGoalMet
+                        stepGoalMet: stepGoalMet,
+                        onOpenSteps: { showSteps = true }
                     )
                 }
                 .frame(maxWidth: .infinity)
@@ -535,7 +531,9 @@ private struct ModernHeroCard: View {
                     miles: currentDistance,
                     goalMiles: userManager.currentUser.goalMiles,
                     steps: todaySteps,
-                    stepGoalMet: stepGoalMet
+                    stepGoalMet: stepGoalMet,
+                    onReplay: onReplay,
+                    onOpenSteps: { showSteps = true }
                 )
             }
 
@@ -551,6 +549,9 @@ private struct ModernHeroCard: View {
         .background(heroBackground)
         .sheet(isPresented: $showTokens) {
             StreakTokensDetailView()
+        }
+        .navigationDestination(isPresented: $showSteps) {
+            StepsView(healthManager: healthManager, userManager: userManager)
         }
         .onAppear {
             updateTimeRemaining()
@@ -848,37 +849,73 @@ private struct HeroStatColumn: View {
     /// answers "how far to go?" with "Done", not miles still owed.
     let todaySteps: Int
     let stepGoalMet: Bool
+    /// Opens the Steps screen (the Steps tile that used to be its door is
+    /// gone: it repeated the goal bars' step count).
+    var onOpenSteps: (() -> Void)? = nil
+
+    private var goal: Double { max(goalMiles, 0.01) }
+    private var milesDone: Bool { ProgressCalculator.isGoalCompleted(current: currentDistance, goal: goal) }
+    private var dayDone: Bool { milesDone || stepGoalMet }
 
     var body: some View {
         // Two lines, not three: today's distance is the first number in the
         // "either one" goal bars directly under this column, and saying it
-        // twice in one screenful read as clutter (the same rule that keeps
-        // steps out of here).
+        // twice in one screenful read as clutter.
+        //
+        // Once the day is done the bars fold to one "Done" line and the time
+        // left stops mattering, so the column takes over the facts the bars
+        // no longer show: today's best pace, and the steps (or, on a day the
+        // steps finished, the distance).
         VStack(spacing: 0) {
             middleLine
             ModernHeroDivider()
+            if dayDone {
+                doneSecondLine
+            } else {
+                ModernHeroStatLine(
+                    icon: "clock.fill",
+                    value: timeLeftText.isEmpty ? "--" : timeLeftText,
+                    unit: "",
+                    label: "left today",
+                    tint: statusColor
+                )
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var doneSecondLine: some View {
+        if milesDone {
+            Button {
+                MADHaptics.tap()
+                onOpenSteps?()
+            } label: {
+                ModernHeroStatLine(
+                    icon: "shoeprints.fill",
+                    value: todaySteps.formatted(),
+                    unit: "steps",
+                    label: "today",
+                    tint: .orange
+                )
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(onOpenSteps == nil)
+            .accessibilityHint("Opens your steps")
+        } else {
             ModernHeroStatLine(
-                icon: "clock.fill",
-                value: timeLeftText.isEmpty ? "--" : timeLeftText,
-                unit: "left",
-                label: "left today",
-                tint: statusColor
+                icon: "figure.walk",
+                value: currentDistance.distanceText,
+                unit: DistanceUnits.current.abbreviation,
+                label: "today",
+                tint: MADTheme.Colors.walkBlue
             )
         }
     }
 
     @ViewBuilder
     private var middleLine: some View {
-        let goal = max(goalMiles, 0.01)
-        if stepGoalMet && !ProgressCalculator.isGoalCompleted(current: currentDistance, goal: goal) {
-            ModernHeroStatLine(
-                icon: "checkmark.circle.fill",
-                value: "Done",
-                unit: "",
-                label: "\(todaySteps.formatted()) steps",
-                tint: MADTheme.Colors.success
-            )
-        } else if !ProgressCalculator.isGoalCompleted(current: currentDistance, goal: goal) {
+        if !dayDone {
             ModernHeroStatLine(
                 icon: "flag.checkered",
                 value: max(goal - currentDistance, 0).distanceToGoText,
@@ -927,6 +964,15 @@ private struct DailyGoalBars: View {
     let goalMiles: Double
     let steps: Int
     let stepGoalMet: Bool
+    /// Set once today's celebration has played: the done line offers it
+    /// again (it was a gold-rimmed banner above the hero, a third "you're
+    /// done" on one screen).
+    var onReplay: (() -> Void)? = nil
+    /// Fun only (Modern keeps its Start button): an extra walk, small.
+    var onGoAgain: (() -> Void)? = nil
+    var goAgainTitle: String = "Go again"
+    /// Opens the Steps screen from the steps half.
+    var onOpenSteps: (() -> Void)? = nil
 
     private var goal: Double { max(goalMiles, 0.01) }
     private var milesDone: Bool { ProgressCalculator.isGoalCompleted(current: miles, goal: goal) }
@@ -945,6 +991,78 @@ private struct DailyGoalBars: View {
     }
 
     var body: some View {
+        if done {
+            doneLine
+        } else {
+            bars
+        }
+    }
+
+    /// The finished day in one line. The two bars (and the steps one stuck
+    /// part-way, which read as unfinished business) said nothing once either
+    /// path was done.
+    private var doneLine: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "checkmark.circle.fill")
+                .madFont(size: 15, weight: .bold, maxScale: 1.3)
+                .foregroundColor(MADTheme.Colors.success)
+                .accessibilityHidden(true)
+            Text(milesDone ? "Done · \(miles.distanceFormatted)" : "Done · \(steps.formatted()) steps")
+                .madFont(size: 14, weight: .heavy, design: .rounded, monospacedDigit: true)
+                .foregroundColor(.white)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+            Spacer(minLength: 4)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 6) { doneActions(labels: true) }
+                HStack(spacing: 6) { doneActions(labels: false) }
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color.white.opacity(0.045))
+        )
+    }
+
+    @ViewBuilder
+    private func doneActions(labels: Bool) -> some View {
+        if let onReplay {
+            doneAction("Replay", icon: "sparkles", labels: labels, action: onReplay)
+        }
+        if let onGoAgain {
+            doneAction(goAgainTitle, icon: "plus", labels: labels, action: onGoAgain)
+        }
+    }
+
+    private func doneAction(_ title: String, icon: String, labels: Bool, action: @escaping () -> Void) -> some View {
+        Button {
+            MADHaptics.tap()
+            action()
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: icon)
+                    .madFont(size: 11, weight: .bold, maxScale: 1.3)
+                    .accessibilityHidden(true)
+                if labels {
+                    Text(title)
+                        .madFont(size: 12, weight: .bold, design: .rounded)
+                        .lineLimit(1)
+                }
+            }
+            .foregroundColor(.white.opacity(0.85))
+            .padding(.horizontal, labels ? 10 : 9)
+            .frame(minHeight: 30)
+            .background(Capsule().fill(Color.white.opacity(0.08)))
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .fixedSize()
+        .accessibilityLabel(title)
+    }
+
+    private var bars: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
                 Text("Today · either one counts")
@@ -952,19 +1070,7 @@ private struct DailyGoalBars: View {
                     .foregroundColor(.white.opacity(0.55))
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
-                Spacer(minLength: 4)
-                if done {
-                    HStack(spacing: 3) {
-                        Image(systemName: "checkmark")
-                            .madFont(size: 9, weight: .black)
-                            .accessibilityHidden(true)
-                        Text("Done")
-                            .madFont(size: 12, weight: .bold, design: .rounded)
-                    }
-                    .foregroundColor(MADTheme.Colors.success)
-                    .lineLimit(1)
-                    .fixedSize()
-                }
+                Spacer(minLength: 0)
             }
 
             HStack(alignment: .bottom, spacing: 8) {
@@ -982,13 +1088,21 @@ private struct DailyGoalBars: View {
                     .fixedSize()
                     .padding(.bottom, 1)
                     .accessibilityHidden(true)
-                path(
-                    icon: "shoeprints.fill",
-                    value: steps.formatted(),
-                    target: "/ 10k",
-                    progress: stepsProgress,
-                    tint: stepGoalMet ? MADTheme.Colors.success : .orange
-                )
+                Button {
+                    MADHaptics.tap()
+                    onOpenSteps?()
+                } label: {
+                    path(
+                        icon: "shoeprints.fill",
+                        value: steps.formatted(),
+                        target: "/ 10k",
+                        progress: stepsProgress,
+                        tint: stepGoalMet ? MADTheme.Colors.success : .orange
+                    )
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(onOpenSteps == nil)
             }
         }
         .padding(.horizontal, 12)
@@ -999,6 +1113,7 @@ private struct DailyGoalBars: View {
         )
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityText)
+        .accessibilityAction(named: "Open steps") { onOpenSteps?() }
     }
 
     private func path(icon: String, value: String, target: String, progress: Double, tint: Color) -> some View {
@@ -1072,177 +1187,114 @@ private struct ModernMetricPill: View {
     }
 }
 
-private struct ModernStepsTile: View {
-    @ObservedObject var healthManager: HealthKitManager
+/// The medal you're closest to, in place of the old Medals tile.
+///
+/// That tile said one number three ways ("84/105", "80% unlocked", "21 left
+/// to collect") under three random recent medals. A collection count doesn't
+/// move day to day; the next medal does, and it says what today's walk is
+/// for. The count stays, small, on the right. Uses `MedalProgress` — the
+/// same measure the medal grid and its detail screen use — so the three
+/// can't disagree. The Steps tile that sat beside it is gone: it repeated
+/// the goal bars' step count (they open the Steps screen now).
+private struct NextMedalCard: View {
     @ObservedObject var userManager: UserManager
-    /// The tile's fixed height, grown with the text inside it. 168 exactly
-    /// at the default text size; `.title2` because that's the style of the
-    /// value that dominates the tile. BOTH tiles declare it identically so the
-    /// pair in the dashboard's HStack stays level.
-    @MADScaledMetric(relativeTo: .title2) private var tileHeight: CGFloat = 168
+    let style: DashboardStyle
 
-    private var steps: Int { healthManager.todaysSteps }
-    private var goal: Int { ProgressCalculator.dailyStepGoal }
-    private var progress: Double { min(Double(steps) / Double(goal), 1) }
-    private var tint: Color { steps >= goal ? .green : .orange }
-    /// Short on purpose: at 320pt (Display Zoom on an SE) the tile's text
-    /// column is ~110pt. The hero's "either one" bars carry the rule itself.
-    private var subtitle: String {
-        // The day-keyed store, not `steps`: the count can be yesterday's
-        // until the first read after midnight.
-        StepGoalDayStore.isTodayMet() ? "Counts for streak" : "\(ProgressCalculator.formatProgress(progress)) of 10k"
+    private struct Summary {
+        let next: Badge?
+        let progress: MedalProgress?
+        let latest: Badge?
+        let earned: Int
+        let total: Int
     }
 
-    var body: some View {
-        NavigationLink {
-            StepsView(healthManager: healthManager, userManager: userManager)
-        } label: {
-            ModernTile(icon: "shoeprints.fill", title: "Steps", value: steps.formatted(), subtitle: subtitle, tint: tint) {
-                Capsule()
-                    .fill(Color.white.opacity(0.10))
-                    .frame(height: 5)
-                    .overlay(alignment: .leading) {
-                        GeometryReader { geo in
-                            Capsule()
-                                .fill(tint)
-                                .frame(width: max(5, geo.size.width * progress), height: 5)
-                        }
-                    }
-            }
-            .frame(height: tileHeight, alignment: .topLeading)
+    /// `getAllBadges()` builds and sorts the whole catalogue; the answer only
+    /// moves when the shelf or one of the measures does.
+    private static var cache: (key: String, value: Summary)?
+
+    private var summary: Summary {
+        let user = userManager.currentUser
+        let earnedBadges = user.badges.filter { !$0.isLocked }
+        let key = "\(user.badges.count)|\(earnedBadges.count)|\(user.streak)|\(user.totalMiles)|\(user.mostMilesInOneDay)"
+        if let cached = Self.cache, cached.key == key { return cached.value }
+        let all = user.getAllBadges()
+        var best: (badge: Badge, progress: MedalProgress)?
+        for badge in all where badge.isLocked {
+            guard let progress = MedalProgress.forLocked(badge, user: user) else { continue }
+            if progress.fraction > (best?.progress.fraction ?? -1) { best = (badge, progress) }
         }
-        .buttonStyle(.plain)
-    }
-}
-
-private struct ModernBadgesTile: View {
-    @ObservedObject var userManager: UserManager
-    /// Not observed: nothing here reads it, and observing it redrew the tile
-    /// (and re-sorted the medal catalogue) on every HealthKit publish.
-    let healthManager: HealthKitManager
-    /// The tile's fixed height, grown with the text inside it. 168 exactly
-    /// at the default text size; `.title2` because that's the style of the
-    /// value that dominates the tile. BOTH tiles declare it identically so the
-    /// pair in the dashboard's HStack stays level.
-    @MADScaledMetric(relativeTo: .title2) private var tileHeight: CGFloat = 168
-
-    private var earned: Int {
-        userManager.currentUser.badges.filter { !$0.isLocked }.count
-    }
-
-    /// `getAllBadges()` builds and sorts the whole catalogue, and `total` is
-    /// read three times a pass. The count only moves when the shelf does.
-    private static var totalCache: (shelf: Int, total: Int)?
-
-    private var total: Int {
-        let shelf = userManager.currentUser.badges.count
-        if let cached = Self.totalCache, cached.shelf == shelf { return cached.total }
-        let value = userManager.currentUser.getAllBadges().count
-        Self.totalCache = (shelf, value)
+        let value = Summary(
+            next: best?.badge,
+            progress: best?.progress,
+            latest: earnedBadges.max { $0.dateAwarded < $1.dateAwarded },
+            earned: earnedBadges.count,
+            total: all.count
+        )
+        Self.cache = (key, value)
         return value
     }
 
-    private var progress: Double {
-        total > 0 ? Double(earned) / Double(total) : 0
-    }
-
-    private var remaining: Int {
-        max(total - earned, 0)
-    }
-
-    private var recentUnlocked: [Badge] {
-        userManager.currentUser.badges
-            .filter { !$0.isLocked }
-            .sorted { $0.dateAwarded > $1.dateAwarded }
-            .prefix(3)
-            .map { $0 }
-    }
-
     var body: some View {
+        let info = summary
         NavigationLink {
             BadgesView(userManager: userManager, initialBadge: nil)
         } label: {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    medalPreviewStrip
-                    Spacer()
-                    Image(systemName: "chevron.right")
-                        .madFont(size: 10, weight: .bold)
-                        .foregroundColor(.white.opacity(0.28))
+            HStack(spacing: 14) {
+                if let badge = info.next ?? info.latest {
+                    MedalView(badge: badge, size: 52, showShimmer: false)
+                        .frame(width: 52, height: 52)
+                        .accessibilityHidden(true)
                 }
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Medals")
-                        .madFont(size: 11, weight: .bold, design: .rounded)
-                        .foregroundColor(.white.opacity(0.48))
-                    Text("\(earned)/\(total)")
-                        .madFont(size: 25, weight: .black, design: .rounded, monospacedDigit: true)
-                        .foregroundColor(.white)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.7)
-                    Text("\(ProgressCalculator.formatProgress(progress)) unlocked")
-                        .madFont(size: 11, weight: .heavy, design: .rounded)
-                        .foregroundColor(.yellow)
-                        .lineLimit(1)
-                }
-
                 VStack(alignment: .leading, spacing: 4) {
-                    GeometryReader { geo in
-                        ZStack(alignment: .leading) {
-                            Capsule()
-                                .fill(Color.white.opacity(0.10))
-                            Capsule()
-                                .fill(
-                                    LinearGradient(
-                                        colors: [
-                                            Color(red: 1.0, green: 0.84, blue: 0.22),
-                                            Color(red: 1.0, green: 0.55, blue: 0.08)
-                                        ],
-                                        startPoint: .leading,
-                                        endPoint: .trailing
-                                    )
-                                )
-                                .frame(width: max(6, geo.size.width * progress))
-                        }
+                    Text(info.next == nil ? "Medals" : "Next medal")
+                        .madFont(size: 12, weight: .semibold, design: .rounded)
+                        .foregroundColor(.white.opacity(0.5))
+                    if let next = info.next, let progress = info.progress {
+                        Text(next.name)
+                            .madFont(size: 16, weight: .heavy, design: .rounded)
+                            .foregroundColor(.white)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.75)
+                        MedalProgressBar(fraction: progress.fraction, tint: next.rarity.color)
+                            .padding(.vertical, 2)
+                        Text(progress.label)
+                            .madFont(size: 12, weight: .semibold, design: .rounded, monospacedDigit: true)
+                            .foregroundColor(.white.opacity(0.55))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.75)
+                    } else {
+                        Text(info.earned >= info.total && info.total > 0
+                             ? "All \(info.total) collected"
+                             : "\(info.earned) of \(info.total) collected")
+                            .madFont(size: 16, weight: .heavy, design: .rounded, monospacedDigit: true)
+                            .foregroundColor(.white)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.75)
                     }
-                    .frame(height: 6)
-
-                    Text(remaining == 0 ? "Collection complete" : "\(remaining) left to collect")
-                        .madFont(size: 10, weight: .bold, design: .rounded)
-                        .foregroundColor(.white.opacity(0.46))
-                    .lineLimit(1)
+                }
+                Spacer(minLength: 8)
+                HStack(spacing: 6) {
+                    if info.next != nil {
+                        Text("\(info.earned)/\(info.total)")
+                            .madFont(size: 13, weight: .bold, design: .rounded, monospacedDigit: true)
+                            .foregroundColor(.white.opacity(0.45))
+                            .lineLimit(1)
+                            .fixedSize()
+                    }
+                    Image(systemName: "chevron.right")
+                        .madFont(size: 11, weight: .bold)
+                        .foregroundColor(.white.opacity(0.3))
+                        .accessibilityHidden(true)
                 }
             }
             .padding(14)
-            .frame(maxWidth: .infinity, minHeight: tileHeight, maxHeight: tileHeight, alignment: .topLeading)
-            .background(
-                // Same surface as `ModernTile`, so the pair stays twins.
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(Color.white.opacity(0.045))
-            )
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(DashboardCardSurface(style: style))
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-    }
-
-    private var medalPreviewStrip: some View {
-        HStack(spacing: -6) {
-            if recentUnlocked.isEmpty {
-                ForEach(0..<3, id: \.self) { _ in
-                    Circle()
-                        .fill(Color.white.opacity(0.07))
-                        .frame(width: 34, height: 34)
-                        .overlay(Circle().strokeBorder(Color.white.opacity(0.10), lineWidth: 1))
-                }
-            } else {
-                ForEach(Array(recentUnlocked.enumerated()), id: \.element.id) { index, badge in
-                    MedalView(badge: badge, size: 38, showShimmer: index == 0)
-                        .frame(width: 38, height: 38)
-                        .zIndex(Double(3 - index))
-                }
-            }
-        }
-        .frame(height: 40)
-        .accessibilityLabel(recentUnlocked.isEmpty ? "No medals unlocked yet" : "Recent unlocked medals")
+        .accessibilityElement(children: .combine)
+        .accessibilityHint("Opens your medals")
     }
 }
 
@@ -1257,59 +1309,6 @@ private struct ModernMilestoneCard: View {
                     .fill(Color(red: 0.075, green: 0.075, blue: 0.085))
                     .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(Color.white.opacity(0.09), lineWidth: 1))
             )
-    }
-}
-
-private struct ModernTile<Accessory: View>: View {
-    let icon: String
-    let title: String
-    let value: String
-    let subtitle: String
-    let tint: Color
-    @ViewBuilder let accessory: () -> Accessory
-    /// The tile's fixed height, grown with the text inside it. 168 exactly
-    /// at the default text size; `.title2` because that's the style of the
-    /// value that dominates the tile. BOTH tiles declare it identically so the
-    /// pair in the dashboard's HStack stays level.
-    @MADScaledMetric(relativeTo: .title2) private var tileHeight: CGFloat = 168
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Image(systemName: icon)
-                    .madFont(size: 17, weight: .bold, maxScale: 1.3)
-                    .foregroundColor(tint)
-                    .frame(height: 30)
-                    .accessibilityHidden(true)
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .madFont(size: 10, weight: .bold)
-                    .foregroundColor(.white.opacity(0.28))
-            }
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .madFont(size: 11, weight: .bold, design: .rounded)
-                    .foregroundColor(.white.opacity(0.48))
-                Text(value)
-                    .madFont(size: 23, weight: .black, design: .rounded, monospacedDigit: true)
-                    .foregroundColor(.white)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
-                Text(subtitle)
-                    .madFont(size: 11, weight: .semibold, design: .rounded)
-                    .foregroundColor(tint)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.75)
-            }
-            accessory()
-        }
-        .padding(14)
-        .frame(maxWidth: .infinity, minHeight: tileHeight, maxHeight: tileHeight, alignment: .topLeading)
-        .background(
-            // The dashboard's one card surface: a soft fill, no rim.
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(Color.white.opacity(0.045))
-        )
     }
 }
 
@@ -1551,6 +1550,10 @@ private struct FlameBuddyHeroCard: View {
     let hasActiveWorkout: Bool
     let distanceIsFresh: Bool
     @Binding var showWorkoutView: Bool
+    var onReplay: (() -> Void)? = nil
+    /// The Steps screen, opened from the goal bars' steps half or the
+    /// column's steps line (the Steps tile that was its door is gone).
+    @State private var showSteps = false
 
     @State private var timeRemainingText = ""
     @State private var timer: Timer?
@@ -1578,6 +1581,12 @@ private struct FlameBuddyHeroCard: View {
     @State private var memory: FlameyMemory?
 
     private var trustedDone: Bool { (isGoalCompleted && distanceIsFresh) || stepGoalMet }
+    /// Only on a TRUSTED done day: until then the Start button is still
+    /// under the hero, and two ways to start a walk is one too many.
+    private var goAgainAction: (() -> Void)? {
+        guard trustedDone else { return nil }
+        return { showWorkoutView = true }
+    }
     /// The flame reads the DAY: a mile or 10k steps (see ModernHeroCard).
     private var dayCompleted: Bool { isGoalCompleted || stepGoalMet }
     private var dayFresh: Bool { distanceIsFresh || stepGoalMet }
@@ -1858,17 +1867,15 @@ private struct FlameBuddyHeroCard: View {
                         // holds savers + Share. Below the ground, clear of the
                         // rocket boots' jets and of his hit area (the frame
                         // ends ~208pt down).
-                        // Share rides beside it: the card is about HIM, and
-                        // "share him" belongs with "dress him", not in a
-                        // corner row of chips competing with the streak.
-                        HStack(spacing: 6) {
-                            if !injuryPause.isPaused { HeroClosetButton() }
-                            HeroShareIconButton {
-                                MADHaptics.action()
-                                showShareSheet = true
-                            }
+                        // Closet only. A Share icon rode beside it, a third
+                        // way to share on a card whose own tap already opens
+                        // the share sheet (and the done card has the Flamey
+                        // card), so it went: two pills under him competed
+                        // with the stats.
+                        if !injuryPause.isPaused {
+                            HeroClosetButton()
+                                .offset(y: Self.groundBaseline + top + 32)
                         }
-                        .offset(y: Self.groundBaseline + top + 32)
                     }
                     .frame(width: leftWidth, height: geo.size.height, alignment: .top)
 
@@ -1890,7 +1897,13 @@ private struct FlameBuddyHeroCard: View {
                     miles: currentDistance,
                     goalMiles: userManager.currentUser.goalMiles,
                     steps: todaySteps,
-                    stepGoalMet: stepGoalMet
+                    stepGoalMet: stepGoalMet,
+                    onReplay: onReplay,
+                    // Fun's done day has no Start button (DoneTodayCard
+                    // took its place), so the extra walk lives here.
+                    onGoAgain: goAgainAction,
+                    goAgainTitle: hasActiveWorkout ? "Resume" : "Go again",
+                    onOpenSteps: { showSteps = true }
                 )
             }
 
@@ -1919,6 +1932,9 @@ private struct FlameBuddyHeroCard: View {
         }
         .sheet(isPresented: $showTokens) {
             StreakTokensDetailView()
+        }
+        .navigationDestination(isPresented: $showSteps) {
+            StepsView(healthManager: healthManager, userManager: userManager)
         }
         .task(id: memoryKey) { await refreshMemory() }
         .onAppear {
@@ -2124,7 +2140,8 @@ private struct FlameBuddyHeroCard: View {
                 timeLeftText: formattedTimeOnly,
                 statusColor: statusColor,
                 todaySteps: todaySteps,
-                stepGoalMet: stepGoalMet
+                stepGoalMet: stepGoalMet,
+                onOpenSteps: { showSteps = true }
             )
 
             RecordGhostRow(
@@ -2339,13 +2356,11 @@ private struct FunStartCard: View {
     var body: some View {
         VStack(spacing: 10) {
             if trustedDone {
-                // The day is won: share it (or don't), and "Go again" is a
-                // small link, not the headline. See `DoneTodayCard`.
+                // The day is won: share it (or don't). "Go again" lives on
+                // the hero's done line. See `DoneTodayCard`.
                 DoneTodayCard(
                     healthManager: healthManager,
-                    userManager: userManager,
-                    hasActiveWorkout: hasActiveWorkout,
-                    showWorkoutView: $showWorkoutView
+                    userManager: userManager
                 )
             } else {
                 VStack(spacing: 6) {

@@ -5,11 +5,18 @@ import SwiftUI
 /// style, so Insights matches whichever dashboard the user chose.
 struct TreatsCard: View {
     @ObservedObject var healthManager: HealthKitManager
+    /// The dashboard's slot: on Fun, one line (Flamey, the count, the
+    /// period) instead of the big scene. Insights keeps the scene.
+    var compact: Bool = false
     @AppStorage(DashboardStylePreference.key) private var dashboardStyleRaw = DashboardStylePreference.defaultStyle.rawValue
 
     var body: some View {
         if DashboardStyle(rawValue: dashboardStyleRaw) == .fun {
-            TreatSceneCard(healthManager: healthManager)
+            if compact {
+                TreatLineCard(healthManager: healthManager)
+            } else {
+                TreatSceneCard(healthManager: healthManager)
+            }
         } else {
             ModernTreatsCard(healthManager: healthManager)
         }
@@ -73,6 +80,63 @@ struct TreatSceneCard: View {
         .buttonStyle(.plain)
         .animation(.snappy, value: model.count)
         .animation(.easeInOut(duration: 0.25), value: model.sceneKey)
+        .treatRefresh(model: model, healthManager: healthManager)
+        .sheet(isPresented: $showDetail) {
+            CalorieEquivalentsView(healthManager: healthManager, model: model)
+        }
+    }
+}
+
+/// Fun's dashboard face: one row. The scene card was a 40pt number, a unit
+/// line and a two-line footnote about Apple Health for one fun fact; the
+/// footnote now lives in the screen this opens.
+struct TreatLineCard: View {
+    @ObservedObject var healthManager: HealthKitManager
+    @State private var model = TreatCounterModel()
+    @State private var showDetail = false
+
+    var body: some View {
+        Button {
+            MADHaptics.tap()
+            showDetail = true
+        } label: {
+            HStack(spacing: 12) {
+                // Sizes itself (≈ 1.3 × 1.16 of `size`).
+                TreatFlameBuddyView(size: 42, treat: model.treat, count: model.count, look: FlameyFacts.look())
+                    .id(model.sceneKey)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(alignment: .firstTextBaseline, spacing: 5) {
+                        Text(TreatFormat.count(model.count))
+                            .font(.system(size: 20, weight: .black, design: .rounded))
+                            .monospacedDigit()
+                            .foregroundColor(.white)
+                            .contentTransition(.numericText())
+                        Text(model.treat.unitName(count: model.count))
+                            .font(.system(size: 15, weight: .bold, design: .rounded))
+                            .foregroundColor(.white.opacity(0.9))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                    }
+                    Text("\(CalorieTreat.featureName) · \(model.period.title.lowercased())")
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .foregroundColor(.white.opacity(0.5))
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 4)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundColor(.white.opacity(0.3))
+                    .accessibilityHidden(true)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(DashboardCardSurface(style: .fun))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .animation(.snappy, value: model.count)
         .treatRefresh(model: model, healthManager: healthManager)
         .sheet(isPresented: $showDetail) {
             CalorieEquivalentsView(healthManager: healthManager, model: model)
