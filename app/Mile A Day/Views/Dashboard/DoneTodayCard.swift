@@ -23,12 +23,16 @@ struct DoneTodayCard: View {
     @State private var showStorySheet = false
     @State private var showShareCard = false
 
-    private static func todayStamp() -> String {
+    private static let stampFormatter: DateFormatter = {
         let f = DateFormatter()
         f.calendar = Calendar(identifier: .gregorian)
         f.locale = Locale(identifier: "en_US_POSIX")
         f.dateFormat = "yyyy-MM-dd"
-        return f.string(from: Date())
+        return f
+    }()
+
+    private static func todayStamp() -> String {
+        stampFormatter.string(from: Date())
     }
 
     private var workoutId: String? { RunPostService.dailyMileWorkoutId() }

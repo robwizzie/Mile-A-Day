@@ -452,7 +452,10 @@ class HealthKitManager: ObservableObject {
     var lastIOSSnapshotAt: Date?
     #endif
 
-    func log(_ message: String) {}
+    /// A no-op, but its argument used to be built every call (string
+    /// interpolation, some calling `activeStreak()` over the whole index).
+    /// `@autoclosure` means it never is.
+    func log(_ message: @autoclosure () -> String) {}
     
     // Current streak caching properties.
     // cachedCurrentStreakStats is read from views; the others are internal cache.

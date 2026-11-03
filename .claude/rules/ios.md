@@ -146,6 +146,13 @@ Details: docs/conventions/ios.md § Key Patterns
 - `BuddyRecapView` hangs every presentation on an always-mounted node, never inside the `isLoading`/`recap` branch; `.task` reloads spinner-free once loaded.
 - Shoes are private (never on friend profiles/posts/shares); defaults per `ShoeActivity`; pickers pass the activity.
 
+## Performance
+
+- Keep UserDefaults-backed sets in memory (`DeletedWorkoutRegistry`, `StepGoalDayStore` caches; `save`/`markDeleted` keep them in step); never rebuild one per item in a loop or per dot in `body`.
+- Write `@Published` HealthKitManager/UserManager state only when it changed (`todaysSteps`, `updateUserWithHealthKitData` skips unchanged); `HealthKitManager.log` is `@autoclosure`.
+- `cachedWorkouts(onLocalDay:)` skips workouts 3+ days from the target before any calendar work; formatters are `static let`, never built in `body`.
+- Fast ticks drive a small observed child, not the page: story progress lives in `StoryClock` → `StoryProgressBars`.
+
 ## Mile A Day+
 Details: docs/conventions/ios.md § Mile A Day+
 - Entitlement is the server's (`PlusStore.status`); never unlock from a local StoreKit check; `finish()` a transaction only after the server's `results[i]` says ok or `retryable: false`.

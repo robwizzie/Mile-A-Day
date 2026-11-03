@@ -24,6 +24,12 @@ struct DayData: Identifiable {
 // MARK: - Shared Week Data Provider
 
 enum WeekDataProvider {
+    private static let dayFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "EEE"
+        return f
+    }()
+
     static func weekDays(healthManager: HealthKitManager, goalDistance: Double) -> [DayData] {
         let calendar = Calendar.current
         let today = Date()
@@ -33,8 +39,7 @@ enum WeekDataProvider {
             return []
         }
 
-        let dayFormatter = DateFormatter()
-        dayFormatter.dateFormat = "EEE"
+        let dayFormatter = Self.dayFormatter
 
         return (0..<7).compactMap { offset -> DayData? in
             guard let date = calendar.date(byAdding: .day, value: offset, to: startOfWeek) else { return nil }

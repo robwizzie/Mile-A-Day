@@ -40,9 +40,25 @@ enum StepGoalDayStore {
         return Calendar.current.date(from: DateComponents(year: parts[0], month: parts[1], day: parts[2]))
     }
 
+    /// The keys in memory. The array goes back to 2014 (thousands of keys)
+    /// and the hero read it per dot per render; building a Set from
+    /// UserDefaults each time was measurable main-thread work. `save` is the
+    /// only writer, so it keeps this in step. Guarded by `lock`.
+    nonisolated(unsafe) private static var cache: Set<String>?
+
+    /// Call with `lock` held.
+    private static func keysLocked() -> Set<String> {
+        if let cache { return cache }
+        let loaded = Set(UserDefaults.standard.stringArray(forKey: daysKey) ?? [])
+        cache = loaded
+        return loaded
+    }
+
     /// Goal-met local days.
     static var goalDayKeys: Set<String> {
-        Set(UserDefaults.standard.stringArray(forKey: daysKey) ?? [])
+        lock.lock()
+        defer { lock.unlock() }
+        return keysLocked()
     }
 
     /// Goal-met days as start-of-day Dates, for the walks keyed by Date.
@@ -71,7 +87,7 @@ enum StepGoalDayStore {
         guard steps >= ProgressCalculator.dailyStepGoal else { return false }
         let key = dayKey(for: date)
         lock.lock()
-        var keys = goalDayKeys
+        var keys = keysLocked()
         let inserted = keys.insert(key).inserted
         if inserted { save(keys) }
         lock.unlock()
@@ -84,7 +100,7 @@ enum StepGoalDayStore {
     @discardableResult
     static func merge(history: [Date: Int]) -> Set<String> {
         lock.lock()
-        var keys = goalDayKeys
+        var keys = keysLocked()
         var added: Set<String> = []
         for (day, steps) in history where steps >= ProgressCalculator.dailyStepGoal {
             let key = dayKey(for: day)
@@ -112,7 +128,9 @@ enum StepGoalDayStore {
         if key == dayKey(for: Date()) { WidgetDataStore.saveStepGoalMetToday() }
     }
 
+    /// Call with `lock` held.
     private static func save(_ keys: Set<String>) {
+        cache = keys
         UserDefaults.standard.set(Array(keys).sorted(), forKey: daysKey)
     }
 }

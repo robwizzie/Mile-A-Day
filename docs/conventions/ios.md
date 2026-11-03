@@ -196,6 +196,34 @@ A friend's day can be hyped from their feed card, their Today-board sheet (`Frie
 ### Story finish frame is opt-in (`AddFinishStorySheet`, Nov 2026)
 Stories on other apps hold only what the user chose to put there, and ours must too. The finish frame (route tracing itself, distance rolling in, streak) is a story-only auto card with no picture, created ONLY when the user taps "Add to my story" in the sheet their own Today tile opens after the mile. There is no automatic path: `autoPostMile` still writes feed cards only, behind its own `autoPostWithoutPhoto` preference. The viewer draws a photo-less auto story as `StoryFinishFrame` (no load, so the timer runs at once); a later photo story for the same walk replaces it in place (story slot upsert, auto rows only). Builds without `storyFinishCardV1` never receive such a frame, because their viewer would show an empty photo.
 
+## Performance
+
+The app felt slow and the console showed "Gesture: System gesture gate timed out" (the main thread was busy when a touch began). An audit found:
+
+- **The dashboard hero re-scanned the whole workout history 7 times per render.** `weekMilesSoFar` → `WeekDataProvider.weekDays` → `countedMiles(onLocalDay:)` × 7 → `cachedWorkouts(onLocalDay:)`, which loops over every cached workout. Inside that loop, `DeletedWorkoutRegistry.contains` rebuilt a Set from UserDefaults per workout. It ran on every HealthKitManager publish, the hero's 60s timer and every tab return. Fixes:
+  - The registry is cached in memory, behind a lock. `markDeleted` is its only writer.
+  - The loop reads the deleted set once.
+  - It skips any workout 3+ days from the target day before the calendar maths. A local day is `startOfDay(startDate)`, so nothing that far out can belong, unless the index lists it.
+- **`StepGoalDayStore.goalDayKeys` rebuilt a Set from UserDefaults on every access.** The set holds thousands of keys, back to 2014. `WeekMileDaysRow` read it 14 times per render, and `isTodayMet()` is read in several bodies. It is now cached in memory under the existing lock, and `save` keeps the cache current.
+- **Redundant publishes.** Each `@Published` write redraws every observer, and the tab root observes HealthKitManager and UserManager.
+  - `fetchTodaysSteps` now writes only a changed count or day.
+  - `updateUserWithHealthKitData` returns early when streak, total, fastest pace, most-in-a-day and the completion DAY are unchanged. It used to re-stamp `lastCompletionDate` to "now" on every call, so it always published and JSON-encoded the user and friends on the main thread.
+- **`HealthKitManager.log` was a no-op whose argument was still built.** Some calls ran `activeStreak()` over the whole index. It now takes `@autoclosure`.
+- **Stories redrew the whole page 20 times a second.** The 0.05s timer wrote `@State progress`. Progress now lives in `StoryClock`, a class held in `@State` but not observed by the page. Only `StoryProgressBars` observes it.
+- **Formatters built per call** in `WeekDataProvider` and `DoneTodayCard.todayStamp` are now `static let`.
+
+These are not problems, so leave them alone:
+- `InProgressWorkoutStore.load()` is memory-cached.
+- The feed is a `LazyVStack` with off-main downsampled images.
+
+Larger follow-ups, not done yet:
+- Decode `WorkoutIndex` off main at launch.
+- Stop `MainTabView` observing HealthKitManager directly.
+- Cache `FlameyFacts.look()` per day, mood and closet change.
+- Encode `InProgressWorkoutStore.save` off main.
+
+The other console lines are Apple's own and harmless: `Conversion error! {{0, 932}, {430, 0}}` (UIKit converting a zero-height rect through the zoom transition's scaled view), `nw_path_necp_check_for_updates`, and `cannot add handler to 0 from 0`.
+
 ## Mile A Day+
 - `PlusStore` (Services/PlusStore.swift, `@MainActor` singleton started in `AppDelegate`) owns StoreKit 2: products, purchases (`appAccountToken` = the backend user id as a UUID, so a server notification for a purchase the app never posted still finds the account), `Transaction.updates`, `Transaction.unfinished` on every `refresh()` (launch, foreground, sign-in), and Restore (`AppStore.sync()` + `currentEntitlements`). It never decides entitlement itself — it posts Apple's JWS to `POST /plus/transactions` and adopts the server's `PlusStatus`. A transaction is finished only when the server has it (or says it never will): a consumable gift finished early is gone from the device before the code exists.
 - Onboarding shows the paywall ONCE as `AppState.plusOffer`, after Health access; setup is already complete when it appears, so quitting there resumes into the app and it never shows again. Founding Runners (already Plus) skip it. "Not now" is always visible — a hard paywall in onboarding is a 3.1.2/5.6 rejection risk.

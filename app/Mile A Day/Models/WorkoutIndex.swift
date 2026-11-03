@@ -86,9 +86,19 @@ struct ManualWorkoutRegistry {
 struct DeletedWorkoutRegistry {
     private static let key = "com.mileaday.deletedWorkoutIds"
 
+    /// In memory after the first read: `contains` runs once per cached
+    /// workout per day the dashboard totals (7 × the whole history per hero
+    /// render), and each call used to rebuild this Set from UserDefaults.
+    /// `markDeleted` is the only writer. Guarded by `lock`.
+    nonisolated(unsafe) private static var cache: Set<String>?
+    private static let lock = NSLock()
+
     static func markDeleted(_ workoutId: String) {
-        var ids = all
+        lock.lock()
+        defer { lock.unlock() }
+        var ids = allLocked()
         ids.insert(workoutId)
+        cache = ids
         UserDefaults.standard.set(Array(ids), forKey: key)
     }
 
@@ -97,7 +107,16 @@ struct DeletedWorkoutRegistry {
     }
 
     static var all: Set<String> {
-        Set(UserDefaults.standard.stringArray(forKey: key) ?? [])
+        lock.lock()
+        defer { lock.unlock() }
+        return allLocked()
+    }
+
+    private static func allLocked() -> Set<String> {
+        if let cache { return cache }
+        let loaded = Set(UserDefaults.standard.stringArray(forKey: key) ?? [])
+        cache = loaded
+        return loaded
     }
 }
 
