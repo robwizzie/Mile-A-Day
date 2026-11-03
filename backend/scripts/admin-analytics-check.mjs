@@ -111,7 +111,19 @@ const ET_DAY = new Intl.DateTimeFormat("en-CA", {
   month: "2-digit",
   day: "2-digit",
 });
-const dayOffset = (n) => ET_DAY.format(new Date(Date.now() - n * 86_400_000));
+// Calendar days back from TODAY's ET date, not n × 24h back from now: across
+// a DST change two 24h steps can land on the same ET date (at 23:03 EST on
+// Nov 2, "2 days ago" was Nov 1 00:03 EDT, the same day as "1 day ago"),
+// which merged two seeded days into one and failed the day counts for the
+// last hour of every ET day for a month after each clock change.
+const dayOffset = (n) => {
+  const [y, m, d] = ET_DAY.format(new Date()).split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d - n)).toISOString().slice(0, 10);
+};
+// Noon ET on that calendar day, for signup times: "days since signup" is
+// counted in ET dates, so a `NOW() - INTERVAL` signup drifted a day against
+// `dayOffset` workouts across the same DST change.
+const etNoon = (n, s = 0) => `${dayOffset(n)} 12:00:${String(s).padStart(2, "0")}`;
 
 async function cleanup() {
   // Children first. `users` cascades to most of this, but the columns that
@@ -162,13 +174,15 @@ async function seed() {
     [ERIN, 8],
     [FRANK, 0],
   ];
-  for (const [id, streak] of users) {
+  for (const [i, [id, streak]] of users.entries()) {
     await db.query(
       `INSERT INTO users (user_id, username, apple_sub, email, current_streak, created_at,
                           streak_features_at, goal_miles)
-       VALUES ($1, $2, $3, $4, $5, NOW() - INTERVAL '40 days',
-               NOW() - INTERVAL '40 days', 1.0)`,
-      [id, id, id, `${id}@example.com`, streak],
+       VALUES ($1, $2, $3, $4, $5, $6::timestamp AT TIME ZONE 'America/New_York',
+               $6::timestamp AT TIME ZONE 'America/New_York', 1.0)`,
+      // A second apart, in seed order, like the NOW()s they replace: the
+      // referral list orders by signup time and must not tie.
+      [id, id, id, `${id}@example.com`, streak, etNoon(40, i)],
     );
   }
   const refer = (who, typed) =>
@@ -214,8 +228,8 @@ async function seed() {
   await addWorkout(CAROL, 40, { source: "manual" });
   await db.query(
     `INSERT INTO users (user_id, username, apple_sub, email, current_streak, created_at, goal_miles)
-     VALUES ($1, $2, $3, $4, 0, NOW() - INTERVAL '70 days', 1.0)`,
-    [RET, RET, RET, `${RET}@example.com`],
+     VALUES ($1, $2, $3, $4, 0, $5::timestamp AT TIME ZONE 'America/New_York', 1.0)`,
+    [RET, RET, RET, `${RET}@example.com`, etNoon(70)],
   );
   // Days since signup 1, 7 and 30 (signup was 70 days ago).
   await addWorkout(RET, 69);
