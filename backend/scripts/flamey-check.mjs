@@ -38,6 +38,8 @@ import {
 } from "../dist/services/holidays.js";
 import { revokeUnearnedBadges, seedExtraBadges } from "../dist/services/badgeService.js";
 import { runHolidayMedalBackfill } from "../dist/db/backfillHolidayMedals.js";
+import { nudgeCopy } from "../dist/controllers/friendNudgeController.js";
+import { getStreakStakes } from "../dist/services/friendshipService.js";
 import { runBadgeDateRepair } from "../dist/db/repairBadgeEarnedDates.js";
 
 const db = PostgresService.getInstance();
@@ -343,8 +345,17 @@ try {
   }
 
   // ── 6. The Flamey poke.
-  const nudgeInbox = async (u) =>
-    db.query(`SELECT title, body, data FROM in_app_notifications WHERE user_id = $1 AND type = 'friend_nudge' ORDER BY created_at`, [u]);
+  // sendPush writes the inbox row WITHOUT awaiting it on the no-device-token
+  // path (`storeInbox().catch(...)`), so the request can answer before the
+  // row lands. Poll briefly for it instead of reading once and racing.
+  const nudgeInbox = async (u) => {
+    for (let i = 0; i < 40; i++) {
+      const rows = await db.query(`SELECT title, body, data FROM in_app_notifications WHERE user_id = $1 AND type = 'friend_nudge' ORDER BY created_at`, [u]);
+      if (rows.length > 0) return rows;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    return [];
+  };
   r = await call("POST", `/friends/${MODERN}/nudge`, FUN_A, { source: "flamey" });
   console.log("      sample flamey poke to a Modern friend:", r.status, JSON.stringify(r.json));
   check("recipient Modern → 403 flamey_unavailable", [r.status, r.json], [403, { error: "flamey_unavailable" }]);
@@ -373,7 +384,14 @@ try {
   r = await call("POST", `/friends/${MODERN}/nudge`, FUN_A);
   check("plain nudge to Modern → 200", [r.status, r.json], [200, { message: "Nudge sent" }]);
   const plain = await nudgeInbox(MODERN);
-  check("…old copy + data, no source", [plain[0]?.title, plain[0]?.data], ["Time to lace up!", { user_id: FUN_A }]);
+  // The words depend on what's at stake for the recipient right now
+  // (`nudgeCopy`: their streak, minutes left in their day), so compare with
+  // what the server would say; the type and data are the old ones exactly.
+  // The time in an at-risk title ("ends in 34m") can tick between the send
+  // and this read, so it is masked on both sides.
+  const expected = nudgeCopy(FUN_A, await getStreakStakes(MODERN));
+  const maskTime = (t) => t?.replace(/\d+h \d+m|\d+m\b/, "<time>");
+  check("…plain copy + old data, no source", [maskTime(plain[0]?.title), plain[0]?.body, plain[0]?.data], [maskTime(expected.title), expected.body, { user_id: FUN_A }]);
 } catch (err) {
   failures++;
   console.error("FAIL  threw:", err);
