@@ -185,6 +185,12 @@ A friend's day can be hyped from their feed card, their Today-board sheet (`Frie
 - Photos (4:5 with the sticker baked in) are shown whole, full width, right under the progress bars and author row, over a blurred copy. Centred in the screen, they left a dead band above and ran the caption over their bottom edge.
 - Follow-ups. The photo is centred in the room between the author row and the footer's MEASURED height (`onGeometryChange` → `footerHeight`), and the footer's bottom padding went from 20 to 6. A fixed 190pt reserve plus 20pt of padding had left a dead band under the reactions.
 - `AsyncImage` doesn't cache, so every tap to the next story showed a spinner. `StoryPhotoView` reads `FeedImageCache` at init (a cached photo shows on its first frame), loads through `FeedImageLoader`, and `prefetchUpcoming` warms the next two stories on load and on every step. Steps crossfade (`.transition(.opacity)` + `withAnimation` on `index`).
+- The closing zoom lands in the tile of the author you are LOOKING at, not the one you opened. `StoryViewerView(onCurrentGroupChange:)` reports each cube, auto-advance or skip. `SocialFeedView.storyZoomId` feeds it to `storyZoomTransition`; it is set on open and never cleared on close, since clearing it would point the closing zoom at nothing. `TodayBoardView(focusedStoryId:)` scrolls that tile into view behind the viewer, because the lazy row doesn't mount offscreen tiles.
+- Opening: while a group loads, the player shows `group.previewURL` laid out as a story, so the zoom grows the tile's photo rather than a black card with a spinner.
+- Cube between authors:
+  - A finger-driven turn is a critically damped spring (stiffness 260, damping 32.2) seeded with the drag velocity. It doesn't overshoot, because a bouncing cube shows the back of the next face.
+  - A finger-less turn (a story ran out) eases in and out over 0.42s. The old 0.24s ease-out snapped.
+  - Turning faces darken with their angle, as on a lit cube.
 - With `zoomsBack`, a committed swipe-down calls `close()` from where the finger let go. Easing `dragY` back to 0 first made the story jump up and then shrink.
 
 ### Story finish frame is opt-in (`AddFinishStorySheet`, Nov 2026)

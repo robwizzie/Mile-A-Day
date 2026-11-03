@@ -68,7 +68,13 @@ const ET_DAY = new Intl.DateTimeFormat("en-CA", {
   month: "2-digit",
   day: "2-digit",
 });
-const dayOffset = (n) => ET_DAY.format(new Date(Date.now() - n * 86_400_000));
+// Calendar days back from today's ET date, not n × 24h back from now: across
+// a DST change two 24h steps can land on the same ET date (see
+// admin-analytics-check.mjs).
+const dayOffset = (n) => {
+  const [y, m, d] = ET_DAY.format(new Date()).split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d - n)).toISOString().slice(0, 10);
+};
 const round2 = (n) => Math.round(n * 100) / 100;
 
 async function cleanup() {
