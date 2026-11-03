@@ -405,9 +405,12 @@ struct PhotoPromptView: View {
         }
         if let note = crew?.note { return note }
         if crew != nil { return "One post for the whole walk, with everyone's routes on it." }
+        // Today's photo theme (`DailyPhotoTheme`): the same light prompt the
+        // home page's done card shows, so a reason to shoot is right here.
+        let theme = DailyPhotoTheme.today
         return cameraOpen
-            ? "Your photo leads the post. Your route and stats ride along."
-            : "Any photo you took on this \(noun) can still go up today."
+            ? "Today's theme: \(theme.emoji) \(theme.title). Your route and stats ride along."
+            : "Today's theme: \(theme.emoji) \(theme.title). Any photo from this \(noun) can still go up today."
     }
 
     // MARK: - Hero: the post, as friends will see it
