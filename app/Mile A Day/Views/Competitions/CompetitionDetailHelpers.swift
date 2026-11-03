@@ -279,6 +279,10 @@ struct FlexNudgeTracker {
         UserDefaults.standard.set(true, forKey: friendNudgePrefix + friendId + "_" + todayKey())
     }
 
+    static func clearFriendNudgeSent(friendId: String) {
+        UserDefaults.standard.removeObject(forKey: friendNudgePrefix + friendId + "_" + todayKey())
+    }
+
     private static let dateKeyFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM-dd"

@@ -21,6 +21,10 @@ struct StoryViewerView: View {
     /// changed (a story deleted/expired, an author blocked) so the parent can
     /// refresh the rail.
     let onClose: (_ changed: Bool) -> Void
+    /// Presented with the iOS 18 zoom transition: a committed swipe-down
+    /// closes AT ONCE so the system shrinks the story back into its tile,
+    /// instead of sliding the deck off the bottom first.
+    var zoomsBack: Bool = false
 
     @State private var currentIndex: Int
     /// Live horizontal drag translation (also driven programmatically for the
@@ -50,8 +54,10 @@ struct StoryViewerView: View {
         initialGroupId: String,
         currentUserId: String?,
         allowedDaysFor: @escaping (StoryGroup) -> Set<String>?,
+        zoomsBack: Bool = false,
         onClose: @escaping (_ changed: Bool) -> Void
     ) {
+        self.zoomsBack = zoomsBack
         self.groups = groups
         self.currentUserId = currentUserId
         self.allowedDaysFor = allowedDaysFor
@@ -225,7 +231,7 @@ struct StoryViewerView: View {
     }
 
     private func deckOpacity(height: CGFloat) -> Double {
-        isClosing ? Double(max(0, 1 - dismissProgress(height: height))) : 1
+        isClosing && !zoomsBack ? Double(max(0, 1 - dismissProgress(height: height))) : 1
     }
 
     // MARK: - Navigation
@@ -298,6 +304,13 @@ struct StoryViewerView: View {
         guard !isClosing else { return }
         isClosing = true
         MADHaptics.tap()
+        if zoomsBack {
+            // Settle the drag as the zoom takes over, so the story shrinks
+            // into its tile from where it is rather than from off-screen.
+            withAnimation(.easeOut(duration: 0.18)) { dragY = 0 }
+            close()
+            return
+        }
         withAnimation(
             .easeOut(duration: 0.2),
             completionCriteria: .logicallyComplete
@@ -519,45 +532,56 @@ private struct StoryGroupPlayerView: View {
 
     // MARK: - Pieces
 
+    /// Room the chrome takes above the photo (progress bars + author row)
+    /// and the least room left under it (caption, Race, reactions).
+    private static let mediaTop: CGFloat = 64
+    private static let mediaBottom: CGFloat = 190
+
     private func storyImage(_ post: PostItem) -> some View {
         // The media is composed at 4:5 with the stats sticker baked in, so it
-        // must be shown WHOLE — fit within the screen (never fill-crop; that
-        // cut off the sticker/edges on tall phones) over a blurred, dimmed
-        // edge-to-edge copy that fills the letterbox space. Both layers are
-        // sized EXPLICITLY from the screen geometry so no proposal quirk can
-        // ever regress this into a crop.
-        GeometryReader { geo in
-            AsyncImage(url: post.mediaURL) { phase in
-                switch phase {
-                case .success(let image):
-                    ZStack {
-                        image.resizable()
-                            .aspectRatio(contentMode: .fill)
-                            .frame(width: geo.size.width, height: geo.size.height)
-                            .clipped()
-                            .blur(radius: 40, opaque: true)
-                            .opacity(0.55)
+        // is shown WHOLE (fit, never fill-crop: that cut the sticker on tall
+        // phones). It sits full width right under the author row, Instagram
+        // style, over a blurred, dimmed copy filling the screen. It used to be
+        // centred in the whole screen, which left a dead band above it and
+        // ran the caption over its bottom.
+        AsyncImage(url: post.mediaURL) { phase in
+            switch phase {
+            case .success(let image):
+                ZStack(alignment: .top) {
+                    Color.clear
+                        .overlay(
+                            image.resizable()
+                                .aspectRatio(contentMode: .fill)
+                                .blur(radius: 40, opaque: true)
+                                .opacity(0.55)
+                        )
+                        .clipped()
+                        .ignoresSafeArea()
+                    GeometryReader { geo in
+                        let maxHeight = max(geo.size.height - Self.mediaTop - Self.mediaBottom,
+                                            geo.size.height * 0.55)
                         image.resizable()
                             .aspectRatio(contentMode: .fit)
-                            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                            .frame(width: geo.size.width, height: geo.size.height)
+                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            .frame(maxWidth: geo.size.width, maxHeight: maxHeight)
+                            .frame(width: geo.size.width)
+                            .padding(.top, Self.mediaTop)
                     }
-                    .onAppear { imageReady = true }
-                case .failure:
-                    Image(systemName: "photo")
-                        .font(.largeTitle)
-                        .foregroundColor(.white.opacity(0.3))
-                        .frame(width: geo.size.width, height: geo.size.height)
-                        .onAppear { imageReady = true }
-                default:
-                    ProgressView().tint(.white)
-                        .frame(width: geo.size.width, height: geo.size.height)
                 }
+                .onAppear { imageReady = true }
+            case .failure:
+                Image(systemName: "photo")
+                    .font(.largeTitle)
+                    .foregroundColor(.white.opacity(0.3))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .onAppear { imageReady = true }
+            default:
+                ProgressView().tint(.white)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            // Re-identify per story so the readiness onAppear refires every step.
-            .id(post.post_id)
         }
-        .ignoresSafeArea()
+        // Re-identify per story so the readiness onAppear refires every step.
+        .id(post.post_id)
     }
 
     private var tapZones: some View {

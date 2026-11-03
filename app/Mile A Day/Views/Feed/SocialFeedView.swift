@@ -60,9 +60,8 @@ struct SocialFeedView: View {
     @ObservedObject private var buddy = BuddySessionService.shared
     /// Every friend's miles + done flag today, for the Today board.
     @State private var friendsToday: [FriendActivityItem] = []
-    /// Friends nudged from the board this session (the server allows one a
-    /// day), so the tile flips to "Nudged" without a round trip.
-    @State private var nudgedFriendIds: Set<String> = []
+    /// The story viewer zooms out of (and back into) the tapped tile.
+    @Namespace private var storyZoom
     /// Friends asked "show us your walk" from the board this session.
     @State private var askedPhotoFriendIds: Set<String> = []
     /// The opt-in "add today's finish to your story" sheet (your Today tile).
@@ -424,7 +423,7 @@ struct SocialFeedView: View {
                             // itself outlives it, so the "+" stays unlocked.
                             windowOpen: freshWindow.isCameraOpen,
                             windowOpenedAt: freshWindow.windowOpenedAt,
-                            nudgedIds: nudgedFriendIds,
+                            storyZoom: storyZoom,
                             askedPhotoIds: askedPhotoFriendIds,
                             isGroupViewable: { canViewStories(of: $0) },
                             isGroupUnviewed: { isGroupUnviewed(of: $0) },
@@ -642,7 +641,8 @@ struct SocialFeedView: View {
                 groups: stories.filter { canViewStories(of: $0) },
                 initialGroupId: group.user_id,
                 currentUserId: currentUserId,
-                allowedDaysFor: { allowedStoryDays(for: $0) }
+                allowedDaysFor: { allowedStoryDays(for: $0) },
+                zoomsBack: StoryZoom.isAvailable
             ) { changed in
                 viewerGroup = nil
                 if changed {
@@ -654,6 +654,10 @@ struct SocialFeedView: View {
                 }
             }
             .presentationBackground(.clear)
+            // Instagram-style: out of the tapped tile, back into it (iOS 18).
+            // The viewer's own swipe-down stays the dismiss gesture.
+            .storyZoomTransition(id: group.user_id, in: storyZoom)
+            .interactiveDismissDisabled()
         }
         .sheet(item: $reportingPost) { post in
             ReportPostSheet(postId: post.post_id) { reportingPost = nil }
@@ -1296,19 +1300,20 @@ struct SocialFeedView: View {
         await MainActor.run {
             if let today { friendsToday = today }
         }
+        // Who I've already nudged today, from the server, so a nudge sent on
+        // another screen (or another phone) reads "Nudged" here too.
+        let notDone = (today ?? []).filter { !$0.completed_today }.map(\.user_id)
+        if !notDone.isEmpty,
+           let statuses = try? await profileFriendService.checkNudgeStatusBatch(friendIds: notDone) {
+            await MainActor.run { NudgeStatusStore.shared.merge(statuses) }
+        }
     }
 
+    /// `nudgeFriend` marks the app-wide `NudgeStatusStore` at once (so the
+    /// Friends tab and their profile flip too) and rolls it back if the
+    /// server refuses (already done, or the daily nudge spent elsewhere).
     private func nudgeFromBoard(_ friend: FriendActivityItem) {
-        nudgedFriendIds.insert(friend.user_id)
-        Task {
-            do {
-                try await profileFriendService.nudgeFriend(friend.user_id)
-            } catch {
-                // Already done today, or the daily nudge was spent elsewhere:
-                // either way the tile shouldn't claim a nudge went out.
-                await MainActor.run { _ = nudgedFriendIds.remove(friend.user_id) }
-            }
-        }
+        Task { try? await profileFriendService.nudgeFriend(friend.user_id) }
     }
 
     private func askPhotoFromBoard(_ friend: FriendActivityItem) {

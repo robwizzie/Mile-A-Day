@@ -1023,24 +1023,8 @@ struct FriendsListView: View {
                 try await friendService.nudgeFriend(friend.user_id)
                 await MainActor.run {
                     nudgingFriendId = nil
-                    FlexNudgeTracker.markFriendNudgeSent(friendId: friend.user_id)
-                    // Optimistic update on the shared service state — preserve existing miles/completion.
-                    // Unlimited nudgers keep can_nudge so "Nudge again" stays available.
-                    let existing = friendService.nudgeStatuses[friend.user_id]
-                    let unlimited = existing?.unlimitedNudges ?? false
-                    friendService.nudgeStatuses[friend.user_id] = NudgeStatusResponse(
-                        can_nudge: unlimited,
-                        has_completed_mile: existing?.has_completed_mile ?? false,
-                        already_nudged_today: !unlimited,
-                        today_miles: existing?.today_miles,
-                        current_streak: existing?.current_streak,
-                        has_nudged_today: true,
-                        unlimited_nudges: existing?.unlimited_nudges,
-                        // Nudging doesn't un-cover their day — carry it, or
-                        // the row snaps back to "0.00 / 1 mi · 0%" the
-                        // instant the bell is tapped.
-                        today_covered: existing?.today_covered
-                    )
+                    // `nudgeFriend` already marked the shared store (every
+                    // surface flips together); nothing to patch here.
                     MADHaptics.success()
                     showNudgeFeedback(NudgeFeedback(
                         icon: "bell.badge.fill",
