@@ -174,7 +174,7 @@ struct TodayBoardView: View {
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { onTapFriend(friend) }
                     }
                 )
-                .presentationDetents([.medium])
+                // The sheet sizes itself to its content (see FriendDaySheet).
                 .presentationDragIndicator(.visible)
             }
             if !mileDone, lockedStoryCount > 0 {
