@@ -1906,11 +1906,11 @@ private struct FlameBuddyHeroCard: View {
                     .frame(width: leftWidth, height: geo.size.height, alignment: .top)
 
                     funStatRows
-                        // Moves down with him, so the stats stay level with
-                        // his body, and CENTRED in his frame: hung from the
-                        // top it left a tall empty band under the steps.
-                        .padding(.top, top)
-                        .frame(width: rightWidth, height: geo.size.height, alignment: .center)
+                        // Spread over his whole frame (see `funStatRows`): the
+                        // streak at the top, the day's lines down by his feet.
+                        .padding(.top, 2)
+                        .padding(.bottom, 14)
+                        .frame(width: rightWidth, height: geo.size.height, alignment: .top)
                 }
                 .onAppear { heroFrameWidth = geo.size.width }
                 .onChange(of: geo.size.width) { _, width in heroFrameWidth = width }
@@ -2044,7 +2044,7 @@ private struct FlameBuddyHeroCard: View {
 
     private var streakNumber: some View {
         Text("\(heroStreakValue)")
-            .madFont(size: 46, weight: .black, design: .rounded, monospacedDigit: true)
+            .madFont(size: 54, weight: .black, design: .rounded, monospacedDigit: true)
             .foregroundColor(.white)
             .lineLimit(1)
             .fixedSize()
@@ -2186,6 +2186,13 @@ private struct FlameBuddyHeroCard: View {
                 }
                 .padding(.bottom, 8)
             }
+
+            // The streak heads the column, level with the room kept above
+            // him for a hat and his bubble; the day's lines sit at the
+            // bottom, level with his feet. Centred as one block they left an
+            // empty band across the top of the card whenever he wasn't
+            // talking.
+            Spacer(minLength: 6)
 
             HeroStatColumn(
                 currentDistance: currentDistance,
