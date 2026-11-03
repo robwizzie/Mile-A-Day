@@ -261,7 +261,7 @@ struct ProfilePostsGridView: View {
                     Label(option.title, systemImage: option.icon).tag(option)
                 }
             }
-            Picker("Size", selection: layoutBinding) {
+            Picker("Layout", selection: layoutBinding) {
                 ForEach(PostGridLayout.allCases) { option in
                     Label(option.title, systemImage: option.icon).tag(option)
                 }
@@ -364,12 +364,16 @@ struct ProfilePostsGridView: View {
                     pinnedSection
                 }
                 if !posts.isEmpty {
-                    LazyVGrid(columns: columns, spacing: 4) {
-                        ForEach(posts) { post in
-                            gridThumbnail(post) { openReader(.posts, post) }
-                                .onAppear {
-                                    if post.id == posts.last?.id { Task { await loadMore() } }
-                                }
+                    if layout == .calendar {
+                        calendarGrid
+                    } else {
+                        LazyVGrid(columns: columns, spacing: 4) {
+                            ForEach(posts) { post in
+                                gridThumbnail(post) { openReader(.posts, post) }
+                                    .onAppear {
+                                        if post.id == posts.last?.id { Task { await loadMore() } }
+                                    }
+                            }
                         }
                     }
                 }
@@ -786,6 +790,140 @@ struct ProfilePostsGridView: View {
 
     private var currentUserId: String? {
         UserDefaults.standard.string(forKey: "backendUserId")
+    }
+
+    // MARK: - Calendar ("collect your days")
+
+    /// One month of the calendar: which day of the week it starts on, how
+    /// many days it has, and the post (newest) for each posted day.
+    private struct PostCalendarMonth: Identifiable {
+        let id: String          // "yyyy-MM"
+        let title: String       // "November 2026"
+        let leadingBlanks: Int
+        let dayCount: Int
+        let days: [Int: PostItem]
+    }
+
+    private static let dayKeyFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.calendar = Calendar(identifier: .gregorian)
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
+
+    private static let monthTitleFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "LLLL yyyy"
+        return f
+    }()
+
+    /// Posts grouped into calendar months, newest month first, by the post's
+    /// own local day (`local_date`, else the day it was created).
+    private var calendarMonths: [PostCalendarMonth] {
+        let cal = Calendar.current
+        var byMonth: [String: (start: Date, days: [Int: PostItem])] = [:]
+        for post in posts {
+            let key = post.local_date ?? String(post.created_at.prefix(10))
+            guard let date = Self.dayKeyFormatter.date(from: String(key.prefix(10))),
+                  let start = cal.dateInterval(of: .month, for: date)?.start else { continue }
+            let monthId = String(key.prefix(7))
+            let day = cal.component(.day, from: date)
+            var entry = byMonth[monthId] ?? (start, [:])
+            // Posts arrive newest first: keep the first one seen for a day.
+            if entry.days[day] == nil { entry.days[day] = post }
+            byMonth[monthId] = entry
+        }
+        return byMonth.sorted { $0.key > $1.key }.map { id, value in
+            let weekday = cal.component(.weekday, from: value.start)
+            let leading = (weekday - cal.firstWeekday + 7) % 7
+            let count = cal.range(of: .day, in: .month, for: value.start)?.count ?? 30
+            return PostCalendarMonth(
+                id: id,
+                title: Self.monthTitleFormatter.string(from: value.start),
+                leadingBlanks: leading,
+                dayCount: count,
+                days: value.days
+            )
+        }
+    }
+
+    private var weekdaySymbols: [String] {
+        let cal = Calendar.current
+        let symbols = cal.veryShortWeekdaySymbols
+        let first = cal.firstWeekday - 1
+        return Array(symbols[first...] + symbols[..<first])
+    }
+
+    /// The profile as a photo diary: each month a grid of days, each posted
+    /// day showing its post (the same tile and tap as the square grid), each
+    /// quiet day a numbered square. Counting the posted days per month is the
+    /// whole "collect your days" idea.
+    @ViewBuilder
+    private var calendarGrid: some View {
+        let months = calendarMonths
+        let dayColumns = Array(repeating: GridItem(.flexible(), spacing: 3), count: 7)
+        VStack(alignment: .leading, spacing: 22) {
+            ForEach(months) { month in
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(month.title)
+                            .madFont(size: 15, weight: .bold, design: .rounded)
+                            .foregroundColor(.white)
+                        Spacer(minLength: 8)
+                        Text(month.days.count == 1 ? "1 day" : "\(month.days.count) days")
+                            .madFont(size: 12, weight: .semibold, design: .rounded, monospacedDigit: true)
+                            .foregroundColor(.white.opacity(0.5))
+                    }
+                    LazyVGrid(columns: dayColumns, spacing: 3) {
+                        ForEach(Array(weekdaySymbols.enumerated()), id: \.offset) { _, symbol in
+                            Text(symbol)
+                                .madFont(size: 10, weight: .semibold, design: .rounded, maxScale: 1.2)
+                                .foregroundColor(.white.opacity(0.35))
+                                .frame(maxWidth: .infinity)
+                        }
+                        ForEach(0..<month.leadingBlanks, id: \.self) { i in
+                            Color.clear
+                                .aspectRatio(1, contentMode: .fit)
+                                .id("blank-\(month.id)-\(i)")
+                        }
+                        ForEach(1...month.dayCount, id: \.self) { day in
+                            calendarDay(day, post: month.days[day])
+                                .id("day-\(month.id)-\(day)")
+                        }
+                    }
+                }
+                .onAppear {
+                    if month.id == months.last?.id { Task { await loadMore() } }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func calendarDay(_ day: Int, post: PostItem?) -> some View {
+        if let post {
+            gridThumbnail(post) { openReader(.posts, post) }
+                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .overlay(alignment: .topLeading) {
+                    Text("\(day)")
+                        .madFont(size: 9, weight: .heavy, design: .rounded, maxScale: 1.1)
+                        .foregroundColor(.white)
+                        .shadow(color: .black.opacity(0.6), radius: 2)
+                        .padding(3)
+                        .allowsHitTesting(false)
+                }
+        } else {
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(Color.white.opacity(0.04))
+                .aspectRatio(1, contentMode: .fit)
+                .overlay(
+                    Text("\(day)")
+                        .madFont(size: 10, weight: .medium, design: .rounded, maxScale: 1.1)
+                        .foregroundColor(.white.opacity(0.28))
+                )
+                .accessibilityHidden(true)
+        }
     }
 
     /// A grid cell, carrying a long-press menu ONLY where there's something to
