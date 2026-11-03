@@ -63,6 +63,8 @@ struct SocialFeedView: View {
     /// Friends nudged from the board this session (the server allows one a
     /// day), so the tile flips to "Nudged" without a round trip.
     @State private var nudgedFriendIds: Set<String> = []
+    /// Friends asked "show us your walk" from the board this session.
+    @State private var askedPhotoFriendIds: Set<String> = []
     /// The opt-in "add today's finish to your story" sheet (your Today tile).
     @State private var showFinishStorySheet = false
 
@@ -423,6 +425,7 @@ struct SocialFeedView: View {
                             windowOpen: freshWindow.isCameraOpen,
                             windowOpenedAt: freshWindow.windowOpenedAt,
                             nudgedIds: nudgedFriendIds,
+                            askedPhotoIds: askedPhotoFriendIds,
                             isGroupViewable: { canViewStories(of: $0) },
                             isGroupUnviewed: { isGroupUnviewed(of: $0) },
                             onTapAdd: {
@@ -438,6 +441,7 @@ struct SocialFeedView: View {
                             onTapGroup: { viewerGroup = $0 },
                             onLockedStoryTap: { showMileHint = true },
                             onNudge: { friend in nudgeFromBoard(friend) },
+                            onAskPhoto: { friend in askPhotoFromBoard(friend) },
                             onTapFriend: { friend in
                                 openFriendProfile(id: friend.user_id, username: friend.username,
                                                   firstName: friend.first_name, lastName: friend.last_name,
@@ -1303,6 +1307,18 @@ struct SocialFeedView: View {
                 // Already done today, or the daily nudge was spent elsewhere:
                 // either way the tile shouldn't claim a nudge went out.
                 await MainActor.run { _ = nudgedFriendIds.remove(friend.user_id) }
+            }
+        }
+    }
+
+    private func askPhotoFromBoard(_ friend: FriendActivityItem) {
+        askedPhotoFriendIds.insert(friend.user_id)
+        Task {
+            do {
+                try await profileFriendService.askFriendForPhoto(friend.user_id)
+            } catch {
+                // Asked already today, or they posted meanwhile: don't claim it.
+                await MainActor.run { _ = askedPhotoFriendIds.remove(friend.user_id) }
             }
         }
     }

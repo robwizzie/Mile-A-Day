@@ -8,6 +8,7 @@ import {
   STREAK_QUALIFYING_STEPS,
 } from "./streakFeatureCore.js";
 import { START_OF_TODAY_ET_SQL } from "./dailyResetTime.js";
+import { CLIENT_FEATURES, supportsClientFeatureSql } from "./clientFeatures.js";
 
 const db = PostgresService.getInstance();
 
@@ -247,6 +248,10 @@ export interface FriendActivity {
   today_steps: number;
   /** Today's goal met: 0.95 mi OR 10,000 steps (the streak rule). */
   completed_today: boolean;
+  /** Additive: a deliberate (non-auto) post or story dated their today. */
+  posted_today: boolean;
+  /** Additive: their device can take a "show us your walk" ask (photo_ask_v1). */
+  photo_ask_supported: boolean;
 }
 
 export async function getFriendsActivityToday(
@@ -277,7 +282,15 @@ export async function getFriendsActivityToday(
 			COALESCE((
 				SELECT ds.steps FROM daily_steps ds
 				WHERE ds.user_id = u.user_id AND ds.local_date = ${userTodaySql("u")}
-			), 0)::int as today_steps
+			), 0)::int as today_steps,
+			EXISTS (
+				SELECT 1 FROM posts p
+				WHERE p.user_id = u.user_id
+					AND p.deleted_at IS NULL
+					AND NOT p.is_auto
+					AND p.local_date = ${userTodaySql("u")}
+			) AS posted_today,
+			${supportsClientFeatureSql("u.user_id", CLIENT_FEATURES.photoAskV1)} AS photo_ask_supported
 		FROM friendships f
 		JOIN users u ON u.user_id = f.friend_id
 		WHERE f.user_id = $1
@@ -294,7 +307,28 @@ export async function getFriendsActivityToday(
     completed_today:
       (parseFloat(r.today_miles) || 0) >= STREAK_QUALIFYING_MILES ||
       (Number(r.today_steps) || 0) >= STREAK_QUALIFYING_STEPS,
+    posted_today: r.posted_today === true,
+    photo_ask_supported: r.photo_ask_supported === true,
   }));
+}
+
+/**
+ * Has the user put up a deliberate post or story today (their local day)?
+ * Auto route cards don't count: they are posted FOR a user who skipped the
+ * photo, which is exactly who a "show us your walk" ask is for.
+ */
+export async function hasPostedToday(userId: string): Promise<boolean> {
+  const rows = await db.query(
+    `SELECT 1 FROM posts p
+		JOIN users u ON u.user_id = p.user_id
+		WHERE p.user_id = $1
+			AND p.deleted_at IS NULL
+			AND NOT p.is_auto
+			AND p.local_date = ${userTodaySql("u")}
+		LIMIT 1`,
+    [userId],
+  );
+  return rows.length > 0;
 }
 
 export interface FriendSuggestion {

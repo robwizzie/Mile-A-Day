@@ -1,13 +1,16 @@
 import { Response } from "express";
 import { AuthenticatedRequest } from "../middleware/auth.js";
 import { getUser } from "../services/userService.js";
-import { getFriendship } from "../services/friendshipService.js";
+import { getFriendship, hasPostedToday } from "../services/friendshipService.js";
 import {
   sendPush,
   canFriendNudge,
   hasNudgedFriendToday,
   logFriendNudge,
+  canPhotoAsk,
+  logPhotoAsk,
 } from "../services/pushNotificationService.js";
+import { CLIENT_FEATURES, userSupports } from "../services/clientFeatures.js";
 import { hasUnlimitedActions } from "../services/privilegedUsers.js";
 import { shouldSendNotification } from "../services/notificationSettingsService.js";
 import {
@@ -160,6 +163,66 @@ export async function nudgeFriend(req: AuthenticatedRequest, res: Response) {
 }
 
 // Check if a friend can be nudged (for UI state)
+/**
+ * "Show us your walk": ask a friend who has done their mile but hasn't posted
+ * for a photo. The mirror image of a nudge: a nudge is for a friend who
+ * HASN'T gone; this is for one who has and kept it to themselves.
+ *
+ * Only for a friend whose build routes the push (photo_ask_v1), once per
+ * sender→friend per day (photo_ask_log), and under the friend's own nudge
+ * notification setting.
+ */
+export async function askFriendForPhoto(req: AuthenticatedRequest, res: Response) {
+  const friendId = req.params.friendId;
+  const senderId = req.userId!;
+
+  try {
+    if (senderId === friendId) {
+      return res.status(400).json({ error: "photo_ask_self" });
+    }
+    const friendship = await getFriendship(senderId, friendId);
+    if (!friendship || "error" in friendship || friendship.status !== "accepted") {
+      return res.status(400).json({ error: "photo_ask_not_friends" });
+    }
+    if (!(await userSupports(friendId, CLIENT_FEATURES.photoAskV1))) {
+      return res.status(400).json({ error: "photo_ask_unavailable" });
+    }
+
+    const [miles, steps, posted] = await Promise.all([
+      getTodayMiles(friendId),
+      getTodaySteps(friendId),
+      hasPostedToday(friendId),
+    ]);
+    if (!dailyGoalMet(miles, steps)) {
+      return res.status(400).json({ error: "photo_ask_not_done" });
+    }
+    if (posted) {
+      return res.status(400).json({ error: "photo_ask_already_posted" });
+    }
+    if (!(await canPhotoAsk(senderId, friendId))) {
+      return res.status(429).json({ error: "photo_ask_already_asked" });
+    }
+
+    if (await shouldSendNotification(friendId, senderId, "nudge")) {
+      const sender = await getUser({ userId: senderId });
+      const senderName = sender?.username || "A friend";
+      await sendPush(friendId, {
+        title: `📸 ${senderName} wants to see your walk`,
+        body: "You did your mile. Show them where you went.",
+        type: "photo_ask",
+        data: { user_id: senderId },
+      });
+    }
+
+    // After the send, so a failed push doesn't spend the day's ask.
+    await logPhotoAsk(senderId, friendId);
+    res.status(200).json({ message: "Asked" });
+  } catch (error: any) {
+    console.error("Error sending photo ask:", error.message);
+    res.status(500).json({ error: "Error sending photo ask" });
+  }
+}
+
 export async function checkNudgeStatus(
   req: AuthenticatedRequest,
   res: Response,

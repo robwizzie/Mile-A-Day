@@ -69,6 +69,30 @@ export const friendNudgeLog = pgTable(
   ],
 );
 
+// "Show us your walk": a friend who has done their mile but not posted can be
+// asked for a photo, once per sender→friend per day (same shape and clock as
+// friend_nudge_log). Insert-only.
+export const photoAskLog = pgTable(
+  "photo_ask_log",
+  {
+    id: uuid().defaultRandom().primaryKey().notNull(),
+    senderId: text("sender_id").notNull(),
+    targetId: text("target_id").notNull(),
+    createdAt: timestamp("created_at", {
+      withTimezone: true,
+      mode: "string",
+    }).defaultNow(),
+  },
+  (table) => [
+    index("idx_photo_ask_log_lookup").using(
+      "btree",
+      table.senderId.asc().nullsLast(),
+      table.targetId.asc().nullsLast(),
+      table.createdAt.desc().nullsFirst(),
+    ),
+  ],
+);
+
 // Lightweight client feature telemetry — one row per meaningful use of a
 // feature the DB can't otherwise see (a flyover PLAY leaves no other trace).
 // Feeds the admin adoption panel through the same ADOPTION_SOURCES walk as

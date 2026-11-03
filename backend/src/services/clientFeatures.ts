@@ -202,6 +202,15 @@ export const CLIENT_FEATURES = {
    * empty photo for five seconds, so it never receives one.
    */
   storyFinishCardV1: "story_finish_card_v1",
+
+  /**
+   * The build handles the `photo_ask` push ("megs wants to see your walk"):
+   * its tap opens the home page's done card, where the photo prompt is one
+   * tap away. Gated on the RECIPIENT: an older build would show a push whose
+   * tap lands nowhere useful, so the ask is only offered for friends on a
+   * build that has it (`photo_ask_supported` on /friends/activity/today).
+   */
+  photoAskV1: "photo_ask_v1",
 } as const;
 
 export type ClientFeature =

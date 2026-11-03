@@ -40,12 +40,16 @@ struct TodayBoardView: View {
     var windowOpenedAt: Date? = nil
     /// Friends nudged from this board this session, so the tile flips at once.
     var nudgedIds: Set<String> = []
+    /// Friends asked for a photo from this board this session.
+    var askedPhotoIds: Set<String> = []
     var isGroupViewable: (StoryGroup) -> Bool = { _ in true }
     var isGroupUnviewed: (StoryGroup) -> Bool = { $0.has_unviewed }
     let onTapAdd: () -> Void
     let onTapGroup: (StoryGroup) -> Void
     var onLockedStoryTap: () -> Void = {}
     let onNudge: (FriendActivityItem) -> Void
+    /// "Show us your walk": a friend who's done but hasn't posted.
+    var onAskPhoto: (FriendActivityItem) -> Void = { _ in }
     /// A done-today friend with nothing to watch: their profile.
     let onTapFriend: (FriendActivityItem) -> Void
     /// Re-reads who's out; the board polls it while it is on screen.
@@ -317,14 +321,24 @@ struct TodayBoardView: View {
                 .overlay(alignment: .top) { liveChip(friend) }
                 .overlay(alignment: .bottom) { liveLabel(friend) }
             }
-        case .done:
+        case .done(let friend):
             TodayTile(edge: .done) {
                 ZStack {
                     TodayTileStyle.ground
                     AvatarView(name: entry.name, imageURL: entry.imageURL, size: 46)
                 }
                 .overlay(alignment: .top) {
-                    TodayChip(text: "Done", icon: "flame.fill", style: .done)
+                    // Done but nothing shared: the tile offers to ask for the
+                    // view. Otherwise it just says they're done.
+                    if friend.canAskForPhoto {
+                        if askedPhotoIds.contains(friend.user_id) {
+                            TodayChip(text: "Asked", icon: "checkmark", style: .nudged)
+                        } else {
+                            TodayChip(text: "Ask", icon: "camera.fill", style: .quiet)
+                        }
+                    } else {
+                        TodayChip(text: "Done", icon: "flame.fill", style: .done)
+                    }
                 }
             }
         case .notYet(_, let nudged):
@@ -378,8 +392,13 @@ struct TodayBoardView: View {
             MADHaptics.tap()
             outNowRoute = .person(friend.userId)
         case .done(let friend):
-            MADHaptics.tap()
-            onTapFriend(friend)
+            if friend.canAskForPhoto, !askedPhotoIds.contains(friend.user_id) {
+                MADHaptics.action()
+                onAskPhoto(friend)
+            } else {
+                MADHaptics.tap()
+                onTapFriend(friend)
+            }
         case .notYet(let friend, let nudged):
             if nudged {
                 MADHaptics.tap()
@@ -400,7 +419,12 @@ struct TodayBoardView: View {
             return s
         case .walking(let f):
             return "\(entry.name), walking now" + (f.distanceMiles.map { ", \($0.distanceFormatted)" } ?? "")
-        case .done:
+        case .done(let friend):
+            if friend.canAskForPhoto {
+                return askedPhotoIds.contains(friend.user_id)
+                    ? "\(entry.name), done today, asked for a photo"
+                    : "\(entry.name), done today, double tap to ask for a photo"
+            }
             return "\(entry.name), done today"
         case .notYet(_, let nudged):
             return "\(entry.name), not done yet, " + (nudged ? "nudged" : "double tap to nudge")
