@@ -245,6 +245,18 @@ async function main() {
   const s = await server();
   const base = `http://127.0.0.1:${s.address().port}`;
   const feed = (headers = {}, qs = "") => fetch(`${base}/display/feed${qs}`, { headers });
+  // The feed stores the box's reported state best-effort AFTER answering
+  // (displayController: recordBoxState is not awaited), so a read straight
+  // after a feed can race the write. Wait until the owner's box shows it.
+  const ownerState = async () =>
+    (await (await admin("desk/boxes", "GET", OWNER)).json()).boxes[0].state;
+  const reportState = async (header, until) => {
+    await feed({ authorization: `Display ${key}`, "x-desk-state": header });
+    for (let i = 0; i < 40; i++) {
+      if (until(await ownerState())) return;
+      await new Promise((r) => setTimeout(r, 25));
+    }
+  };
 
   // ── keys ──
   const { key } = await createDisplayKey(OWNER, "desk", ADMIN);
@@ -526,8 +538,8 @@ async function main() {
   check("animation must be a name → 400", (await post(`desk/box/${ownerBox}/test`, { scene: ["nudge"] }, OWNER)).status, 400);
   check("can't test on someone else's box", (await post(`desk/box/${ownerBox}/test`, { scene: "nudge" })).status, 404);
   // The box reports its screen with each poll; junk is ignored.
-  await feed({ authorization: `Display ${key}`, "x-desk-state": "2,1,0,1350,390" });
   await feed({ authorization: `Display ${adminKey}`, "x-desk-state": "9,9,9,'; drop" });
+  await reportState("2,1,0,1350,390", (s) => s?.style === 2 && s?.awake === false);
   const reported = (await (await admin("desk/boxes")).json()).boxes;
   check("box state reported", (await (await admin("desk/boxes", "GET", OWNER)).json()).boxes[0].state,
         { style: 2, mascot: 1, awake: false, sleep_start: 1350, sleep_end: 390, firmware: null });
@@ -680,10 +692,10 @@ async function main() {
 
   check("doodles are rate-limited", (await post(`desk/box/${adminBox}/doodle`, { to: ownerBox, px: heart })).status, 429);
   check("new styles can be chosen", (await (await post(`desk/box/${ownerBox}/settings`, { style: 10 }, OWNER)).json()).settings.style, 10);
-  await feed({ authorization: `Display ${key}`, "x-desk-state": "10,1,1,1350,390" });
+  await reportState("10,1,1,1350,390", (s) => s?.style === 10);
   check("Showcase (style 10) reported", (await (await admin("desk/boxes", "GET", OWNER)).json()).boxes[0].state?.style, 10);
   check("an older box: no version", (await (await admin("desk/boxes", "GET", OWNER)).json()).boxes[0].state?.firmware, null);
-  await feed({ authorization: `Display ${key}`, "x-desk-state": "2,1,1,1350,390,24" });
+  await reportState("2,1,1,1350,390,24", (s) => s?.firmware === 24);
   check("the box says which firmware it runs", (await (await admin("desk/boxes", "GET", OWNER)).json()).boxes[0].state?.firmware, 24);
   const fwInfo = await admin("desk/firmware/info", "GET", OWNER);
   check("firmware info for a desk owner", fwInfo.status === 200 && Number.isInteger((await fwInfo.json()).version), true);
