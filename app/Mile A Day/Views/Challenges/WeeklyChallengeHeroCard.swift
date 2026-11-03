@@ -8,6 +8,9 @@ import SwiftUI
 struct WeeklyChallengeHeroCard: View {
     let response: WeeklyChallengeResponse
     var compact: Bool = false
+    /// Inside the dashboard's shared Challenges card (compact only): no
+    /// padding or surface of its own.
+    var bare: Bool = false
     let action: () -> Void
 
     private var gradientColors: [Color] {
@@ -45,7 +48,7 @@ struct WeeklyChallengeHeroCard: View {
                     footer
                 }
             }
-            .padding(MADTheme.Spacing.md)
+            .padding(bare ? 0 : MADTheme.Spacing.md)
             .background(cardSurface)
         }
         .buttonStyle(ScaleButtonStyle())
@@ -55,7 +58,9 @@ struct WeeklyChallengeHeroCard: View {
     /// Compete tab keeps its glass, tint and rim.
     @ViewBuilder
     private var cardSurface: some View {
-        if compact {
+        if bare {
+            Color.clear
+        } else if compact {
             DashboardCardSurface(style: .fun)
         } else {
             RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)

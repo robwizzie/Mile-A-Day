@@ -304,21 +304,22 @@ struct FunDashboardBody: View {
             // column beside Flamey is ~155pt wide, so it caps here.
             .madTypeCap(.madFixedChromeCap)
 
-            VStack(spacing: 0) {
-                FunStartCard(
-                    healthManager: healthManager,
-                    userManager: userManager,
-                    trustedDone: (state.completed && healthManager.hasFreshTodaysDistance)
-                        || StepGoalDayStore.isTodayMet(),
-                    hasActiveWorkout: hasActiveWorkout,
-                    showWorkoutView: $showWorkoutView,
-                    onLogPastWorkout: onLogPastWorkout
-                )
-                // Mile A Day+ at the moment it would have helped: hides itself
-                // unless the streak is at risk or Plus would already hold a
-                // Save. Zero-spacing stack: hidden, it adds no gap.
-                PlusStreakCard(streak: userManager.currentUser.streak, topSpacing: 18)
-            }
+            // NOT wrapped in a stack: FunStartCard's parts (the share card,
+            // the buddy pill) and the Plus card each hide on their own, and an
+            // EMPTY wrapper stack still takes a slot in this one, so a done,
+            // shared day had a doubled gap under the hero.
+            FunStartCard(
+                healthManager: healthManager,
+                userManager: userManager,
+                trustedDone: (state.completed && healthManager.hasFreshTodaysDistance)
+                    || StepGoalDayStore.isTodayMet(),
+                hasActiveWorkout: hasActiveWorkout,
+                showWorkoutView: $showWorkoutView,
+                onLogPastWorkout: onLogPastWorkout
+            )
+            // Mile A Day+ at the moment it would have helped: hides itself
+            // unless the streak is at risk or Plus would already hold a Save.
+            PlusStreakCard(streak: userManager.currentUser.streak)
 
             NextMedalCard(userManager: userManager, style: .fun)
 
@@ -376,6 +377,14 @@ private struct ModernHeroCard: View {
     /// The Steps screen, opened from the goal bars' steps half or the
     /// column's steps line (the Steps tile that was its door is gone).
     @State private var showSteps = false
+
+    /// This week's counted miles so far: the same per-day numbers the week
+    /// chart draws (`WeekDataProvider`), summed.
+    private var weekMilesSoFar: Double {
+        WeekDataProvider.weekDays(healthManager: healthManager, goalDistance: goalDistance)
+            .filter { !$0.isFuture }
+            .reduce(0) { $0 + $1.distance }
+    }
 
     @State private var showTokens = false
     @State private var timeRemainingText = ""
@@ -511,7 +520,8 @@ private struct ModernHeroCard: View {
                         statusColor: statusColor,
                         todaySteps: todaySteps,
                         stepGoalMet: stepGoalMet,
-                        onOpenSteps: { showSteps = true }
+                        onOpenSteps: { showSteps = true },
+                        weekMiles: weekMilesSoFar
                     )
                 }
                 .frame(maxWidth: .infinity)
@@ -852,6 +862,10 @@ private struct HeroStatColumn: View {
     /// Opens the Steps screen (the Steps tile that used to be its door is
     /// gone: it repeated the goal bars' step count).
     var onOpenSteps: (() -> Void)? = nil
+    /// Miles so far this week (Sun → today, counted miles). Once the day is
+    /// done it leads the column: today's best pace was a number that barely
+    /// moves and sits on the workout row anyway; the week moves every day.
+    var weekMiles: Double? = nil
 
     private var goal: Double { max(goalMiles, 0.01) }
     private var milesDone: Bool { ProgressCalculator.isGoalCompleted(current: currentDistance, goal: goal) }
@@ -915,7 +929,15 @@ private struct HeroStatColumn: View {
 
     @ViewBuilder
     private var middleLine: some View {
-        if !dayDone {
+        if dayDone, let weekMiles {
+            ModernHeroStatLine(
+                icon: "calendar",
+                value: weekMiles.distanceText,
+                unit: DistanceUnits.current.abbreviation,
+                label: "this week",
+                tint: MADTheme.Colors.walkBlue
+            )
+        } else if !dayDone {
             ModernHeroStatLine(
                 icon: "flag.checkered",
                 value: max(goal - currentDistance, 0).distanceToGoText,
@@ -1246,9 +1268,10 @@ private struct NextMedalCard: View {
                         .accessibilityHidden(true)
                 }
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(info.next == nil ? "Medals" : "Next medal")
-                        .madFont(size: 12, weight: .semibold, design: .rounded)
+                    Text(info.next == nil ? "Medals" : "Next medal · \(info.earned) of \(info.total)")
+                        .madFont(size: 12, weight: .semibold, design: .rounded, monospacedDigit: true)
                         .foregroundColor(.white.opacity(0.5))
+                        .lineLimit(1)
                     if let next = info.next, let progress = info.progress {
                         Text(next.name)
                             .madFont(size: 16, weight: .heavy, design: .rounded)
@@ -1273,19 +1296,10 @@ private struct NextMedalCard: View {
                     }
                 }
                 Spacer(minLength: 8)
-                HStack(spacing: 6) {
-                    if info.next != nil {
-                        Text("\(info.earned)/\(info.total)")
-                            .madFont(size: 13, weight: .bold, design: .rounded, monospacedDigit: true)
-                            .foregroundColor(.white.opacity(0.45))
-                            .lineLimit(1)
-                            .fixedSize()
-                    }
-                    Image(systemName: "chevron.right")
-                        .madFont(size: 11, weight: .bold)
-                        .foregroundColor(.white.opacity(0.3))
-                        .accessibilityHidden(true)
-                }
+                Image(systemName: "chevron.right")
+                    .madFont(size: 11, weight: .bold)
+                    .foregroundColor(.white.opacity(0.3))
+                    .accessibilityHidden(true)
             }
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -1554,6 +1568,14 @@ private struct FlameBuddyHeroCard: View {
     /// The Steps screen, opened from the goal bars' steps half or the
     /// column's steps line (the Steps tile that was its door is gone).
     @State private var showSteps = false
+
+    /// This week's counted miles so far: the same per-day numbers the week
+    /// chart draws (`WeekDataProvider`), summed.
+    private var weekMilesSoFar: Double {
+        WeekDataProvider.weekDays(healthManager: healthManager, goalDistance: goalDistance)
+            .filter { !$0.isFuture }
+            .reduce(0) { $0 + $1.distance }
+    }
 
     @State private var timeRemainingText = ""
     @State private var timer: Timer?
@@ -2141,7 +2163,8 @@ private struct FlameBuddyHeroCard: View {
                 statusColor: statusColor,
                 todaySteps: todaySteps,
                 stepGoalMet: stepGoalMet,
-                onOpenSteps: { showSteps = true }
+                onOpenSteps: { showSteps = true },
+                weekMiles: weekMilesSoFar
             )
 
             RecordGhostRow(
@@ -2353,8 +2376,10 @@ private struct FunStartCard: View {
     @Binding var showWorkoutView: Bool
     let onLogPastWorkout: () -> Void
 
+    /// A Group, not a stack: its parts sit straight in the dashboard's
+    /// stack, so when both hide they leave no empty slot (and no gap).
     var body: some View {
-        VStack(spacing: 10) {
+        Group {
             if trustedDone {
                 // The day is won: share it (or don't). "Go again" lives on
                 // the hero's done line. See `DoneTodayCard`.

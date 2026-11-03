@@ -762,24 +762,31 @@ struct FlameyClosetPill: View {
     var hasNews: Bool = false
     /// His name, for VoiceOver ("Sparky's Closet").
     var name: String = FlameyNameRules.fallback
+    /// The hanger alone, borderless unless there's news: under Flamey on the
+    /// home hero, where a labelled, rimmed pill competed with the stats.
+    var iconOnly: Bool = false
     var action: () -> Void
 
     var body: some View {
         Button(action: action) {
             HStack(spacing: 5) {
                 Image(systemName: "hanger")
-                    .madFont(size: 11, weight: .bold, maxScale: 1.3)
+                    .madFont(size: iconOnly ? 13 : 11, weight: .bold, maxScale: 1.3)
                     .accessibilityHidden(true)
-                Text("Closet")
-                    .madFont(size: 11, weight: .heavy, design: .rounded, maxScale: 1.3)
-                    .lineLimit(1)
-                    .fixedSize()
+                if !iconOnly {
+                    Text("Closet")
+                        .madFont(size: 11, weight: .heavy, design: .rounded, maxScale: 1.3)
+                        .lineLimit(1)
+                        .fixedSize()
+                }
             }
-            .foregroundColor(.white.opacity(0.9))
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(Capsule().fill(Color.white.opacity(0.10)))
-            .overlay(Capsule().strokeBorder(hasNews ? FlameyClosetStyle.ember.opacity(0.7) : Color.white.opacity(0.16), lineWidth: 1))
+            .foregroundColor(.white.opacity(iconOnly ? 0.7 : 0.9))
+            .padding(.horizontal, iconOnly ? 9 : 10)
+            .padding(.vertical, iconOnly ? 8 : 6)
+            .background(Capsule().fill(Color.white.opacity(iconOnly ? 0.06 : 0.10)))
+            .overlay(Capsule().strokeBorder(
+                hasNews ? FlameyClosetStyle.ember.opacity(0.7) : Color.white.opacity(iconOnly ? 0 : 0.16),
+                lineWidth: 1))
             .overlay(alignment: .topTrailing) {
                 if hasNews {
                     Circle().fill(FlameyClosetStyle.newDot)

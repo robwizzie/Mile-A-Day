@@ -55,7 +55,7 @@ enum DashboardCard: String, CaseIterable, Identifiable {
         case .weekChart:
             return "The week's miles as bars, straight from Insights."
         case .recentWorkouts:
-            return "Your last three walks and runs, one tap from the full list."
+            return "Your latest walk or run, one tap from the full list."
         case .competitions:
             return "Every competition you're in, with what it needs from you today."
         case .weeklyChallenge:

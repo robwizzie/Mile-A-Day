@@ -20,9 +20,26 @@ struct DashboardCardsBlock: View {
 
     private var cards: [DashboardCard] { DashboardCards.ordered(in: raw, for: style) }
 
+    /// Daily and weekly challenges share ONE card on Fun when both are on and
+    /// this week's has loaded: two stacked cards of the same shape (label,
+    /// title, description, bar) read as one thing said twice. It renders at
+    /// whichever of the two comes first in the user's order.
+    private var combinesChallenges: Bool {
+        style == .fun && weeklyChallengeService.current != nil
+            && cards.contains(.dailyChallenge) && cards.contains(.weeklyChallenge)
+    }
+
+    private var firstChallenge: DashboardCard? {
+        cards.first { $0 == .dailyChallenge || $0 == .weeklyChallenge }
+    }
+
     var body: some View {
         ForEach(cards) { card in
             switch card {
+            case .dailyChallenge where combinesChallenges, .weeklyChallenge where combinesChallenges:
+                if card == firstChallenge {
+                    challengesCard
+                }
             case .dailyChallenge:
                 NavigationLink {
                     DailyChallengesView(healthManager: healthManager, userManager: userManager)
@@ -81,6 +98,40 @@ struct DashboardCardsBlock: View {
             ForEach(active, id: \.competition_id) { competition in
                 ActiveCompetitionBannerCard(competition: competition)
             }
+        }
+    }
+
+    /// Today's challenge over this week's, one surface, a hairline between.
+    /// Each half keeps its own door.
+    @ViewBuilder
+    private var challengesCard: some View {
+        if let weekly = weeklyChallengeService.current {
+            VStack(spacing: 0) {
+                NavigationLink {
+                    DailyChallengesView(healthManager: healthManager, userManager: userManager)
+                } label: {
+                    DailyChallengeCard(healthManager: healthManager, userManager: userManager, bare: true)
+                        .padding(16)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+
+                Rectangle()
+                    .fill(Color.white.opacity(0.07))
+                    .frame(height: 1)
+                    .padding(.horizontal, 16)
+
+                NavigationLink {
+                    WeeklyChallengeDetailView(response: weekly, service: weeklyChallengeService)
+                } label: {
+                    WeeklyChallengeHeroCard(response: weekly, compact: true, bare: true) {}
+                        .allowsHitTesting(false)
+                        .padding(16)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+            .background(DashboardCardSurface(style: style))
         }
     }
 
@@ -236,7 +287,7 @@ struct DashboardCustomizeRow: View {
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 12)
-            .background(DashboardCardSurface(style: style))
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .sheet(isPresented: Binding(
@@ -274,7 +325,7 @@ struct DashboardInsightsRow: View {
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 12)
-            .background(DashboardCardSurface(style: style))
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
