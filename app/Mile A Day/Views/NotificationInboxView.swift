@@ -550,9 +550,15 @@ struct NotificationInboxView: View {
                 await MainActor.run {
                     hypesRemaining = response.hypes_remaining
                     hypesUnlimited = response.unlimited ?? hypesUnlimited
+                    // A friend's mile: every other surface (their feed card,
+                    // board sheet) reads "Hyped" now too.
+                    if context.contextType == "mile" { HypeLedger.shared.markHyped(targetId) }
                 }
             } catch APIError.conflict {
                 // Already hyped server-side; stay greyed out, no toast.
+                if context.contextType == "mile" {
+                    await MainActor.run { HypeLedger.shared.markHyped(targetId) }
+                }
             } catch APIError.rateLimited(let msg) {
                 await MainActor.run {
                     hypedRowIds.remove(notification.id)

@@ -549,15 +549,6 @@ class FriendService: ObservableObject {
 
     // MARK: - Friend Nudge
 
-    /// "Show us your walk": ask a friend who's done but hasn't posted.
-    func askFriendForPhoto(_ friendId: String) async throws {
-        let _: FriendNudgeResponse = try await makeRequest(
-            endpoint: "/friends/\(friendId)/photo-ask",
-            method: .POST,
-            responseType: FriendNudgeResponse.self
-        )
-    }
-
     /// Nudge a friend who hasn't completed their mile yet. Marks the shared
     /// store at once (every surface flips to "Nudged" together) and rolls
     /// it back if the server refuses.
@@ -819,11 +810,6 @@ struct FriendActivityItem: Codable, Identifiable {
     var photo_ask_supported: Bool? = nil
 
     var id: String { user_id }
-
-    /// Done but nothing shared, on a build that takes the ask.
-    var canAskForPhoto: Bool {
-        completed_today && posted_today == false && photo_ask_supported == true
-    }
 
     var displayName: String {
         if let username = username, !username.isEmpty {

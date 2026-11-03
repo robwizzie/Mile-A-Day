@@ -168,6 +168,14 @@ Board tiles: a not-yet tile is in colour (not greyscale). Tapping it nudges with
 ### Flamey's glow is never cut (`softGlowMask`, Nov 2026)
 On the home hero (a tight surface), everything he wears is masked to his column (`tightMask`) and below the card top (`tightTopMask`). Those are hard edges, which is right for a prop: a prop is FITTED inside them, and the mask is only the guarantee. His glow (`glowBehind`: auras, colour halo and embers, spotlight) lived in the same masked stack, so a pumpkin's spectral aura showed straight cuts along the top and left of a rectangle. The glow now draws outside that stack under `softGlowMask`, the same room feathered wide (a fifth of the band on each side, a fifth of his size at the top). The light thins to nothing before the card edge, the card top or the stat column. `FlameyRender.swift` is one of the six byte-identical widget files (cp + cmp).
 
+### Hypes: one "hyped today" for the whole app (`HypeLedger`, Nov 2026)
+A friend's day can be hyped from their feed card, their Today-board sheet (`FriendDaySheet`), their live sheet (`LiveFriendSheet`), the buddy list (`BuddyJoinFriendCard`) and the inbox. The server dedupes per run (409 `already_hyped`), but each surface kept its own flag, so a hype sent from the sheet still offered "Hype" on the feed card until a refresh, and the other way round. `HypeLedger.shared` (in `HypeService.swift`) holds the friend ids hyped TODAY (local day, persisted in UserDefaults, reset at the day change):
+- Every surface marks it optimistically or on success/409 and unmarks it on failure. Un-hyping a today card unmarks it too.
+- The feed absorbs today's server-hyped cards on load (`syncHypes`), and flips today's cards for anyone marked elsewhere (`onReceive($hypedToday)`, +1 on the tally the server already counted).
+- Known limit: it is keyed per person + day, so a second, separate walk the same day reads as hyped.
+
+"Ask for a photo" (the board chip, the sheet button) was removed: the camera window is only 10 minutes after a walk, so the ask mostly reached people who could no longer answer it. The backend endpoint and the `photo_ask` push routing stay for builds already out.
+
 ### Stories open like Instagram (Nov 2026)
 - The viewer zooms out of the tapped tile and back into it (iOS 18 `matchedTransitionSource` + `.navigationTransition(.zoom)`, via `storyZoomSource`/`storyZoomTransition`; iOS 17 keeps the cover). The viewer's own swipe-down stays the gesture (`interactiveDismissDisabled`). With `zoomsBack` it closes at once on commit, so the system shrinks the story into the tile instead of first sliding it off-screen.
 - Photos (4:5 with the sticker baked in) are shown whole, full width, right under the progress bars and author row, over a blurred copy. Centred in the screen, they left a dead band above and ran the caption over their bottom edge.
