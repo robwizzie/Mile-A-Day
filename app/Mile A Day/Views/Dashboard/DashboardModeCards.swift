@@ -4,6 +4,9 @@ import HealthKit
 struct DashboardStartMileButton: View {
     let hasActiveWorkout: Bool
     var prominent: Bool = false
+    /// Today's goal is already met: the same red button stays (we want
+    /// people to keep going), titled for another one.
+    var goalDone: Bool = false
     @Binding var showWorkoutView: Bool
 
     var body: some View {
@@ -36,7 +39,8 @@ struct DashboardStartMileButton: View {
     }
 
     private var buttonTitle: String {
-        hasActiveWorkout ? "Resume workout" : "Start your mile"
+        if hasActiveWorkout { return "Resume workout" }
+        return goalDone ? "Go another mile" : "Start your mile"
     }
 }
 
@@ -300,7 +304,8 @@ struct ModernDashboardBody: View {
             .madTypeCap(.madFixedChromeCap)
 
             VStack(spacing: 6) {
-                DashboardStartMileButton(hasActiveWorkout: hasActiveWorkout, prominent: true, showWorkoutView: $showWorkoutView)
+                DashboardStartMileButton(hasActiveWorkout: hasActiveWorkout, prominent: true,
+                                         goalDone: state.completed, showWorkoutView: $showWorkoutView)
                 LogPastWorkoutLink(action: onLogPastWorkout)
             }
 
@@ -1066,9 +1071,6 @@ private struct DailyGoalBars: View {
     /// again (it was a gold-rimmed banner above the hero, a third "you're
     /// done" on one screen).
     var onReplay: (() -> Void)? = nil
-    /// Fun only (Modern keeps its Start button): an extra walk, small.
-    var onGoAgain: (() -> Void)? = nil
-    var goAgainTitle: String = "Go again"
     /// Fun only: a full-width Share button under the done line. Sharing was
     /// a tap on the hero card itself, which nothing on screen pointed to.
     var onShare: (() -> Void)? = nil
@@ -1119,12 +1121,11 @@ private struct DailyGoalBars: View {
                             .lineLimit(1)
                             .minimumScaleFactor(0.8)
                     }
-                    .foregroundColor(.white)
+                    // Tinted, not filled: the red Start button under the
+                    // hero is the screen's one primary action.
+                    .foregroundColor(.orange)
                     .frame(maxWidth: .infinity, minHeight: 44)
-                    .background(
-                        Capsule().fill(LinearGradient(colors: [.orange, MADTheme.Colors.madRed],
-                                                      startPoint: .leading, endPoint: .trailing))
-                    )
+                    .background(Capsule().fill(Color.orange.opacity(0.16)))
                     .contentShape(Capsule())
                 }
                 .buttonStyle(.plain)
@@ -1162,9 +1163,6 @@ private struct DailyGoalBars: View {
     private func doneActions(labels: Bool) -> some View {
         if let onReplay {
             doneAction("Replay", icon: "sparkles", labels: labels, action: onReplay)
-        }
-        if let onGoAgain {
-            doneAction(goAgainTitle, icon: "plus", labels: labels, action: onGoAgain)
         }
     }
 
@@ -1718,12 +1716,6 @@ private struct FlameBuddyHeroCard: View {
     @State private var memory: FlameyMemory?
 
     private var trustedDone: Bool { (isGoalCompleted && distanceIsFresh) || stepGoalMet }
-    /// Only on a TRUSTED done day: until then the Start button is still
-    /// under the hero, and two ways to start a walk is one too many.
-    private var goAgainAction: (() -> Void)? {
-        guard trustedDone else { return nil }
-        return { showWorkoutView = true }
-    }
     /// The flame reads the DAY: a mile or 10k steps (see ModernHeroCard).
     private var dayCompleted: Bool { isGoalCompleted || stepGoalMet }
     private var dayFresh: Bool { distanceIsFresh || stepGoalMet }
@@ -2036,10 +2028,8 @@ private struct FlameBuddyHeroCard: View {
                     steps: todaySteps,
                     stepGoalMet: stepGoalMet,
                     onReplay: onReplay,
-                    // Fun's done day has no Start button (DoneTodayCard
-                    // took its place), so the extra walk lives here.
-                    onGoAgain: goAgainAction,
-                    goAgainTitle: hasActiveWorkout ? "Resume" : "Go again",
+                    // No "Go again" capsule: the red Start button stays
+                    // under the hero on a done day ("Go another mile").
                     onShare: { showShareSheet = true },
                     onOpenSteps: { showSteps = true }
                 )
@@ -2537,8 +2527,12 @@ private struct FunStartCard: View {
     var body: some View {
         Group {
             if trustedDone {
-                // The day is won: share it (or don't). "Go again" lives on
-                // the hero's done line. See `DoneTodayCard`.
+                // The day is won, but the red button stays: going again is
+                // what we want people to do, and a small "Go again" capsule
+                // on the done line was easy to miss and read oddly.
+                DashboardStartMileButton(hasActiveWorkout: hasActiveWorkout, prominent: true,
+                                         goalDone: true, showWorkoutView: $showWorkoutView)
+                // Then the post-it prompt. See `DoneTodayCard`.
                 DoneTodayCard(
                     healthManager: healthManager,
                     userManager: userManager
