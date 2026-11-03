@@ -707,7 +707,7 @@ struct DashboardView: View {
                     }
 
                     // ONE "needs your attention" slot — active workout,
-                    // invites, waiting photo, replay — max two items, one
+                    // invites, waiting photo — max two items, one
                     // visual grammar, strict priority. Replaces the old pile
                     // of independently-styled banners.
                     attentionSection
@@ -1607,56 +1607,6 @@ struct DashboardView: View {
         ]
     }
 
-    // MARK: - Replay Celebration Card
-
-    /// Inline replacement for the old sparkles toolbar button. Only shown
-    /// when today's goal has been completed and the celebration isn't
-    /// currently on screen — sits right at the top of the dashboard content
-    /// where the achievement is contextually relevant.
-    private var replayTodaysCelebrationCard: some View {
-        Button {
-            replayTodaysCelebration()
-        } label: {
-            HStack(spacing: MADTheme.Spacing.sm) {
-                Image(systemName: "sparkles")
-                    .madFont(size: 16, weight: .bold)
-                    .foregroundStyle(
-                        LinearGradient(colors: [.yellow, MADTheme.Colors.madRed], startPoint: .top, endPoint: .bottom)
-                    )
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(StreakMilestoneInfo.isCelebrated(userManager.currentUser.streak)
-                         ? "Replay your \(userManager.currentUser.streak)-day celebration"
-                         : "Replay today's celebration")
-                        .madFont(size: 13, weight: .bold, design: .rounded)
-                        .foregroundColor(.white)
-                    Text("Re-watch or share your mile-a-day moment")
-                        .madFont(size: 11, weight: .medium, design: .rounded)
-                        .foregroundColor(.white.opacity(0.55))
-                }
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .madFont(size: 11, weight: .bold)
-                    .foregroundColor(.white.opacity(0.4))
-            }
-            .padding(MADTheme.Spacing.md)
-            .background(
-                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                    .fill(Color.white.opacity(0.04))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                            .strokeBorder(
-                                LinearGradient(
-                                    colors: [Color.yellow.opacity(0.4), MADTheme.Colors.madRed.opacity(0.3)],
-                                    startPoint: .topLeading, endPoint: .bottomTrailing
-                                ),
-                                lineWidth: 1
-                            )
-                    )
-            )
-        }
-        .buttonStyle(.plain)
-    }
-
     /// Nudge shown when a mid-run snap is waiting but today's goal isn't met.
     /// Tapping reopens the tracker so the user can finish their mile.
     private var photoWaitingBanner: some View {
@@ -1839,7 +1789,8 @@ struct DashboardView: View {
                     friendService: friendService,
                     hasActiveWorkout: hasActiveWorkout,
                     showWorkoutView: $showWorkoutView,
-                    onLogPastWorkout: { showManualWorkoutEntry = true }
+                    onLogPastWorkout: { showManualWorkoutEntry = true },
+                    onReplay: replayAction
                 )
             case .modern:
                 ModernDashboardBody(
@@ -1848,7 +1799,8 @@ struct DashboardView: View {
                     friendService: friendService,
                     hasActiveWorkout: hasActiveWorkout,
                     showWorkoutView: $showWorkoutView,
-                    onLogPastWorkout: { showManualWorkoutEntry = true }
+                    onLogPastWorkout: { showManualWorkoutEntry = true },
+                    onReplay: replayAction
                 )
             }
 
@@ -1880,11 +1832,11 @@ struct DashboardView: View {
     // MARK: - Attention slot
 
     private enum AttentionItem: Hashable {
-        case activeWorkout, invites, friendRequests, photoWaiting, replay
+        case activeWorkout, invites, friendRequests, photoWaiting
     }
 
     /// The two most important things needing the user, in strict priority:
-    /// a live workout beats everything; a replay card comes last.
+    /// a live workout beats everything.
     private var attentionItems: [AttentionItem] {
         var items: [AttentionItem] = []
         if showInProgressBanner, inProgressState?.isActive == true {
@@ -1903,12 +1855,18 @@ struct DashboardView: View {
         if midRunPhotoWaiting {
             items.append(.photoWaiting)
         }
-        if currentState.isCompleted
-            && celebrationManager.hasShownGoalCelebrationToday
-            && !celebrationManager.isShowingCelebration {
-            items.append(.replay)
-        }
         return Array(items.prefix(2))
+    }
+
+    /// "Replay" on the hero's done line, once today's celebration has played.
+    /// It was a gold-rimmed banner in the attention slot above the hero: a
+    /// third "you're done" on one screen (the goal bars and the done card
+    /// said it too).
+    private var replayAction: (() -> Void)? {
+        guard currentState.isCompleted
+            && celebrationManager.hasShownGoalCelebrationToday
+            && !celebrationManager.isShowingCelebration else { return nil }
+        return { replayTodaysCelebration() }
     }
 
     @ViewBuilder
@@ -1932,7 +1890,6 @@ struct DashboardView: View {
         case .invites: invitesAttentionRow
         case .friendRequests: friendRequestsAttentionRow
         case .photoWaiting: photoWaitingBanner
-        case .replay: replayTodaysCelebrationCard
         }
     }
 

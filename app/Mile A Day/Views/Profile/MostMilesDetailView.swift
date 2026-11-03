@@ -272,6 +272,10 @@ struct WorkoutRow: View {
     /// let this app add walks" are different messages, and showing the wrong
     /// one makes the app look like it's inventing rules.
     var exclusionKind: WorkoutDedup.ExclusionReason? = nil
+    /// The dashboard's peek: no icon disc, and no Route / Photo chips (the
+    /// map or photo is drawn right under the row there, so the chip only
+    /// repeated it). Manual and Stealth chips stay: nothing else says those.
+    var quiet: Bool = false
     @EnvironmentObject var healthManager: HealthKitManager
 
     /// True once we confirm the workout carries a GPS trace (cheap limit-1 probe).
@@ -319,13 +323,15 @@ struct WorkoutRow: View {
         // The feed's card grammar: verb + hero distance, accent icon chip,
         // rounded type — a workout reads the same here as on the feed.
         HStack(spacing: MADTheme.Spacing.md) {
-            ZStack {
-                Circle()
-                    .fill(workoutColor.opacity(0.15))
-                    .frame(width: 40, height: 40)
-                Image(systemName: workoutIcon)
-                    .font(.system(size: 17, weight: .bold))
-                    .foregroundColor(workoutColor)
+            if !quiet {
+                ZStack {
+                    Circle()
+                        .fill(workoutColor.opacity(0.15))
+                        .frame(width: 40, height: 40)
+                    Image(systemName: workoutIcon)
+                        .font(.system(size: 17, weight: .bold))
+                        .foregroundColor(workoutColor)
+                }
             }
             VStack(alignment: .leading, spacing: 3) {
                 HStack(alignment: .firstTextBaseline, spacing: 5) {
@@ -361,8 +367,8 @@ struct WorkoutRow: View {
                 // entry, a mapped route, or a photo stands out at a glance.
                 WorkoutRowTags(
                     source: workoutSource,
-                    hasRoute: hasRoute,
-                    hasPhoto: hasPhoto,
+                    hasRoute: hasRoute && !quiet,
+                    hasPhoto: hasPhoto && !quiet,
                     isStealth: StealthModeStore.shared.isStealth(workout),
                     routeColor: workoutColor
                 )

@@ -34,45 +34,92 @@ struct WeeklyChallengeHeroCard: View {
             VStack(alignment: .leading, spacing: 14) {
                 header
                 progressBar
-                // Last week's result rides BOTH sizes, including the compact
-                // dashboard card. Sunday swaps the challenge for one nobody
-                // has seen, and without this the week just spent left no
-                // trace anywhere the user would look — they were told what to
-                // do next without ever being told how the last one went.
-                lastWeekStrip
-                if !compact { footer }
+                // Last week's result: Sunday swaps the challenge for one
+                // nobody has seen, and without this the week just spent left
+                // no trace — they were told what to do next without ever
+                // being told how the last one went. The Compete tab's card
+                // carries it; the compact DASHBOARD card doesn't (a third
+                // line about a different week, under this week's).
+                if !compact {
+                    lastWeekStrip
+                    footer
+                }
             }
             .padding(MADTheme.Spacing.md)
-            .background(
-                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
-                    .fill(.ultraThinMaterial)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
-                            .fill(
-                                LinearGradient(
-                                    colors: [gradientColors[0].opacity(0.16), Color.clear],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
-                            )
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
-                            .strokeBorder(
-                                LinearGradient(
-                                    colors: [gradientColors[0].opacity(0.45), Color.white.opacity(0.06)],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                ),
-                                lineWidth: 1
-                            )
-                    )
-            )
+            .background(cardSurface)
         }
         .buttonStyle(ScaleButtonStyle())
     }
 
+    /// Compact (the dashboard) draws the dashboard's one card surface; the
+    /// Compete tab keeps its glass, tint and rim.
+    @ViewBuilder
+    private var cardSurface: some View {
+        if compact {
+            DashboardCardSurface(style: .fun)
+        } else {
+            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
+                .fill(.ultraThinMaterial)
+                .overlay(
+                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [gradientColors[0].opacity(0.16), Color.clear],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
+                        .strokeBorder(
+                            LinearGradient(
+                                colors: [gradientColors[0].opacity(0.45), Color.white.opacity(0.06)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            lineWidth: 1
+                        )
+                )
+        }
+    }
+
+    @ViewBuilder
     private var header: some View {
+        if compact {
+            compactHeader
+        } else {
+            fullHeader
+        }
+    }
+
+    /// The dashboard's header: the glyph in the label line (no icon circle),
+    /// sentence case, the days left as plain text.
+    private var compactHeader: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 5) {
+                    Image(systemName: response.progress.completed ? "checkmark.circle.fill" : response.challenge.icon)
+                        .font(.system(size: 12, weight: .bold))
+                        .accessibilityHidden(true)
+                    Text(response.progress.completed ? "This week · done" : "This week")
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                }
+                .foregroundColor(response.progress.completed ? .green : gradientColors[0])
+                Text(response.challenge.title)
+                    .font(.system(size: 17, weight: .heavy, design: .rounded))
+                    .foregroundColor(.white)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 4)
+            Text(WeeklyChallengeFormat.daysLeft(response.days_left))
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .foregroundColor(.white.opacity(0.5))
+                .fixedSize()
+        }
+    }
+
+    private var fullHeader: some View {
         HStack(spacing: 12) {
             Image(systemName: response.challenge.icon)
                 .font(.system(size: 17, weight: .bold))
@@ -146,9 +193,13 @@ struct WeeklyChallengeHeroCard: View {
 
                 Spacer(minLength: 4)
 
-                Text(ProgressCalculator.formatWholePercent(Double(Int((response.progress.percent * 100).rounded()))))
-                    .font(.system(size: 12, weight: .bold, design: .rounded))
-                    .foregroundColor(gradientColors[0])
+                // The dashboard says the progress once (the numbers); a
+                // percentage beside them was the same fact again.
+                if !compact {
+                    Text(ProgressCalculator.formatWholePercent(Double(Int((response.progress.percent * 100).rounded()))))
+                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                        .foregroundColor(gradientColors[0])
+                }
             }
         }
     }

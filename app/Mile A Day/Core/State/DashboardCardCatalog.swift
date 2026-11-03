@@ -47,7 +47,7 @@ enum DashboardCard: String, CaseIterable, Identifiable {
         case .dailyChallenge:
             return "Today's challenge and how you're doing on it."
         case .streakTokens:
-            return "Double Down, Streak Save and Assist — how close each one is."
+            return "Double Down, Streak Save and Assist, while one is earning or can help. With all three ready, tap the savers under your streak."
         case .friendActivity:
             return "Who's been out today, and a hype button for each."
         case .treats:

@@ -299,6 +299,10 @@ struct RecentWorkoutsView: View {
 struct RecentWorkoutsPreviewCard: View {
     @ObservedObject var healthManager: HealthKitManager
     @Binding var showWorkouts: Bool
+    /// "Routes" in the header, when the user also has the routes card on:
+    /// it takes that card's place (a whole card that was one doorway).
+    var showsRoutesLink: Bool = false
+    @State private var showRouteMap = false
 
     /// workoutId → its GPS trace / its post, read by the HOST for the same
     /// reason the other two lists do it: a card that draws nothing until its
@@ -314,12 +318,16 @@ struct RecentWorkoutsPreviewCard: View {
     private static let mapHeight: CGFloat = 120
 
     var body: some View {
+        // ONE surface. It was a glass card holding three boxed rows, each with
+        // an icon disc and Route / Photo chips over the map or photo they
+        // named: cards in a card, and everything said twice.
         VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
             header
             content
         }
-        .padding()
-        .cardStyle()
+        .padding(MADTheme.Spacing.md)
+        .background(DashboardCardSurface(style: .fun))
+        .sheet(isPresented: $showRouteMap) { RouteHeatmapView() }
         .task { await loadLinkedPosts() }
         // Keyed on the previewed workouts themselves: a sync landing while the
         // dashboard is open swaps one out, and a fixed key would leave the new
@@ -336,33 +344,38 @@ struct RecentWorkoutsPreviewCard: View {
     }
 
     private var header: some View {
-        Button {
-            showWorkouts = true
-        } label: {
-            HStack {
-                HStack(spacing: 8) {
-                    Image(systemName: "figure.run")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(MADTheme.Colors.redGradient)
-                        .accessibilityHidden(true)
-                    Text("Recent Workouts")
-                        .font(.system(size: 16, weight: .heavy, design: .rounded))
-                        .foregroundColor(.primary)
+        HStack(spacing: 14) {
+            Text("Recent workouts")
+                .font(.system(size: 16, weight: .heavy, design: .rounded))
+                .foregroundColor(.primary)
+                .accessibilityAddTraits(.isHeader)
+            Spacer(minLength: 4)
+            if showsRoutesLink {
+                headerLink("Routes") {
+                    MADHaptics.tap()
+                    showRouteMap = true
                 }
-                Spacer()
-                HStack(spacing: 3) {
-                    Text("See All")
-                        .font(.system(size: 13, weight: .bold, design: .rounded))
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 11, weight: .bold))
-                        .accessibilityHidden(true)
-                }
-                .foregroundColor(MADTheme.Colors.madRed)
+                .accessibilityLabel("Your routes map")
             }
+            headerLink("See all") { showWorkouts = true }
+                .accessibilityLabel("See all workouts")
+        }
+    }
+
+    private func headerLink(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 3) {
+                Text(title)
+                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 10, weight: .bold))
+                    .accessibilityHidden(true)
+            }
+            .foregroundColor(.white.opacity(0.6))
+            .padding(.vertical, 4)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Recent workouts, see all")
     }
 
     @ViewBuilder
@@ -387,7 +400,7 @@ struct RecentWorkoutsPreviewCard: View {
                 .padding(.vertical, MADTheme.Spacing.sm)
             }
         } else {
-            VStack(spacing: MADTheme.Spacing.sm) {
+            VStack(spacing: 18) {
                 ForEach(preview, id: \.uuid) { workout in
                     row(workout)
                 }
@@ -405,7 +418,7 @@ struct RecentWorkoutsPreviewCard: View {
         let open = { showWorkouts = true }
         return VStack(spacing: 8) {
             Button(action: open) {
-                WorkoutRow(workout: workout, showDate: true, hasPhoto: photo != nil)
+                WorkoutRow(workout: workout, showDate: true, hasPhoto: photo != nil, quiet: true)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -420,9 +433,6 @@ struct RecentWorkoutsPreviewCard: View {
                 )
             }
         }
-        .padding(MADTheme.Spacing.sm)
-        .background(Color.white.opacity(0.04))
-        .cornerRadius(MADTheme.CornerRadius.medium)
     }
 
     /// One page is enough for a three-row peek.
