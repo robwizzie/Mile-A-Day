@@ -305,9 +305,9 @@ struct StoryViewerView: View {
         isClosing = true
         MADHaptics.tap()
         if zoomsBack {
-            // Settle the drag as the zoom takes over, so the story shrinks
-            // into its tile from where it is rather than from off-screen.
-            withAnimation(.easeOut(duration: 0.18)) { dragY = 0 }
+            // Hand straight to the zoom from where the finger let go. Easing
+            // the drag back to 0 first made the story jump UP and then
+            // shrink, which read as a stutter.
             close()
             return
         }
@@ -360,6 +360,9 @@ private struct StoryGroupPlayerView: View {
     /// The current photo has rendered (or failed) — the 5s timer holds until
     /// then so a slow connection can't advance past an image nobody saw.
     @State private var imageReady = false
+    /// The footer's measured height (caption, Race, reactions), so the photo
+    /// takes exactly the room between the author row and it.
+    @State private var footerHeight: CGFloat = 190
 
     @State private var showReport = false
     /// The story the overflow options were opened FOR — captured at tap time so
@@ -532,56 +535,31 @@ private struct StoryGroupPlayerView: View {
 
     // MARK: - Pieces
 
-    /// Room the chrome takes above the photo (progress bars + author row)
-    /// and the least room left under it (caption, Race, reactions).
+    /// Room the chrome takes above the photo (progress bars + author row).
     private static let mediaTop: CGFloat = 64
-    private static let mediaBottom: CGFloat = 190
 
     private func storyImage(_ post: PostItem) -> some View {
         // The media is composed at 4:5 with the stats sticker baked in, so it
         // is shown WHOLE (fit, never fill-crop: that cut the sticker on tall
-        // phones). It sits full width right under the author row, Instagram
-        // style, over a blurred, dimmed copy filling the screen. It used to be
-        // centred in the whole screen, which left a dead band above it and
-        // ran the caption over its bottom.
-        AsyncImage(url: post.mediaURL) { phase in
-            switch phase {
-            case .success(let image):
-                ZStack(alignment: .top) {
-                    Color.clear
-                        .overlay(
-                            image.resizable()
-                                .aspectRatio(contentMode: .fill)
-                                .blur(radius: 40, opaque: true)
-                                .opacity(0.55)
-                        )
-                        .clipped()
-                        .ignoresSafeArea()
-                    GeometryReader { geo in
-                        let maxHeight = max(geo.size.height - Self.mediaTop - Self.mediaBottom,
-                                            geo.size.height * 0.55)
-                        image.resizable()
-                            .aspectRatio(contentMode: .fit)
-                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                            .frame(maxWidth: geo.size.width, maxHeight: maxHeight)
-                            .frame(width: geo.size.width)
-                            .padding(.top, Self.mediaTop)
-                    }
-                }
-                .onAppear { imageReady = true }
-            case .failure:
-                Image(systemName: "photo")
-                    .font(.largeTitle)
-                    .foregroundColor(.white.opacity(0.3))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .onAppear { imageReady = true }
-            default:
-                ProgressView().tint(.white)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
+        // phones), full width, centred in the room between the author row and
+        // the footer, over a blurred copy filling the screen. Through the
+        // feed's image cache (and pre-fetched, see `prefetchUpcoming`), so a
+        // step to the next story swaps photos instead of flashing a spinner.
+        StoryPhotoView(url: post.mediaURL, top: Self.mediaTop, bottom: footerHeight + 8) {
+            imageReady = true
         }
-        // Re-identify per story so the readiness onAppear refires every step.
+        // Re-identify per story so readiness fires every step, and crossfade.
         .id(post.post_id)
+        .transition(.opacity)
+    }
+
+    /// Warms the cache for the next two stories, so tapping on never waits.
+    private func prefetchUpcoming() {
+        let urls = stories.dropFirst(index + 1).prefix(2).compactMap(\.mediaURL)
+        guard !urls.isEmpty else { return }
+        Task.detached(priority: .utility) {
+            for url in urls { _ = await FeedImageLoader.fullImage(for: url) }
+        }
     }
 
     private var tapZones: some View {
@@ -708,8 +686,11 @@ private struct StoryGroupPlayerView: View {
             }
         }
         .padding(.horizontal, 16)
-        .padding(.bottom, 20)
+        // Down on the home indicator's line: 20pt here plus the safe area
+        // left a dead band under the reactions.
+        .padding(.bottom, 6)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { footerHeight = $0 }
         .background(
             LinearGradient(colors: [.clear, .black.opacity(0.55)], startPoint: .top, endPoint: .bottom)
                 .frame(height: 200)
@@ -952,8 +933,9 @@ private struct StoryGroupPlayerView: View {
             return
         }
         imageReady = false
-        index = next
+        withAnimation(.easeOut(duration: 0.18)) { index = next }
         markViewed()
+        prefetchUpcoming()
     }
 
     /// This page just became the pager's front face: restart the current bar
@@ -989,6 +971,7 @@ private struct StoryGroupPlayerView: View {
             }
             await MainActor.run {
                 stories = loaded
+                prefetchUpcoming()
                 // Hydrate the viewer's prior reactions so re-opening a story
                 // shows the emoji they already picked (server keeps one/story).
                 for story in loaded {
@@ -1187,5 +1170,72 @@ struct StoryViewersSheet: View {
             RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous)
                 .fill(Color.white.opacity(0.04))
         )
+    }
+}
+
+/// One story photo: whole (aspect-fit), full width, centred in the room
+/// between `top` and `bottom`, over a blurred copy filling the screen.
+/// Reads `FeedImageCache` first (a pre-fetched or already-seen story shows on
+/// its first frame, no spinner), else loads through `FeedImageLoader`.
+private struct StoryPhotoView: View {
+    let url: URL?
+    let top: CGFloat
+    let bottom: CGFloat
+    let onReady: () -> Void
+
+    @State private var image: UIImage?
+    @State private var failed = false
+
+    init(url: URL?, top: CGFloat, bottom: CGFloat, onReady: @escaping () -> Void) {
+        self.url = url
+        self.top = top
+        self.bottom = bottom
+        self.onReady = onReady
+        _image = State(initialValue: url.flatMap(FeedImageCache.image(for:)))
+    }
+
+    var body: some View {
+        ZStack(alignment: .top) {
+            if let image {
+                Color.clear
+                    .overlay(
+                        Image(uiImage: image)
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                            .blur(radius: 40, opaque: true)
+                            .opacity(0.55)
+                    )
+                    .clipped()
+                    .ignoresSafeArea()
+                GeometryReader { geo in
+                    let room = max(geo.size.height - top - bottom, geo.size.height * 0.5)
+                    Image(uiImage: image)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .frame(maxWidth: geo.size.width, maxHeight: room)
+                        .frame(width: geo.size.width, height: room)
+                        .padding(.top, top)
+                }
+                .onAppear(perform: onReady)
+            } else if failed || url == nil {
+                Image(systemName: "photo")
+                    .font(.largeTitle)
+                    .foregroundColor(.white.opacity(0.3))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .onAppear(perform: onReady)
+            } else {
+                ProgressView().tint(.white)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .task(id: url) {
+            guard image == nil, let url else { return }
+            if let loaded = await FeedImageLoader.fullImage(for: url) {
+                withAnimation(.easeOut(duration: 0.15)) { image = loaded }
+            } else if !Task.isCancelled {
+                failed = true
+            }
+        }
     }
 }
