@@ -44,6 +44,11 @@ struct TodayBoardView: View {
     /// Zoom source for the story viewer (iOS 18): a story opens out of its
     /// tile and shrinks back into it, Instagram-style.
     var storyZoom: Namespace.ID? = nil
+    /// The author the open story viewer is on. Their tile is scrolled into
+    /// view, so a swipe-down zooms back into the tile of the story you are
+    /// LOOKING at (a lazy row doesn't mount offscreen tiles, and a zoom with
+    /// no source on screen has nothing to land in).
+    var focusedStoryId: String? = nil
     /// When `friendsToday` was fetched: a friend's "minutes left" ages from it.
     var friendsTodayFetchedAt: Date = Date()
     var isGroupViewable: (StoryGroup) -> Bool = { _ in true }
@@ -157,17 +162,25 @@ struct TodayBoardView: View {
         let rows = entries
         VStack(alignment: .leading, spacing: 8) {
             header
-            ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(alignment: .top, spacing: FeedLayout.storyGap) {
-                    myTile
-                    ForEach(rows) { entry in
-                        tile(for: entry)
+            ScrollViewReader { proxy in
+                ScrollView(.horizontal, showsIndicators: false) {
+                    LazyHStack(alignment: .top, spacing: FeedLayout.storyGap) {
+                        myTile
+                            .id(myGroup?.user_id ?? "me")
+                        ForEach(rows) { entry in
+                            tile(for: entry)
+                        }
                     }
+                    .padding(.horizontal, FeedLayout.gutter)
+                    // Room for the live tile's pulse, which scales 8% past the
+                    // tile (~4pt each side); the scroll view clips at its bounds.
+                    .padding(.vertical, 6)
                 }
-                .padding(.horizontal, FeedLayout.gutter)
-                // Room for the live tile's pulse, which scales 8% past the
-                // tile (~4pt each side); the scroll view clips at its bounds.
-                .padding(.vertical, 6)
+                .onChange(of: focusedStoryId) { _, id in
+                    guard let id else { return }
+                    // Behind the full-screen viewer, so no animation needed.
+                    proxy.scrollTo(id, anchor: .center)
+                }
             }
             // Its own node: the board's root already presents the out-now
             // sheet, and two presentations on one node drop one.

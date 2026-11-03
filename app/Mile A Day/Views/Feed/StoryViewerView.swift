@@ -25,6 +25,9 @@ struct StoryViewerView: View {
     /// closes AT ONCE so the system shrinks the story back into its tile,
     /// instead of sliding the deck off the bottom first.
     var zoomsBack: Bool = false
+    /// The author on screen changed (cubed, auto-advanced, skipped): the
+    /// presenter points its closing zoom at that author's tile.
+    var onCurrentGroupChange: ((String) -> Void)? = nil
 
     @State private var currentIndex: Int
     /// Live horizontal drag translation (also driven programmatically for the
@@ -55,9 +58,11 @@ struct StoryViewerView: View {
         currentUserId: String?,
         allowedDaysFor: @escaping (StoryGroup) -> Set<String>?,
         zoomsBack: Bool = false,
+        onCurrentGroupChange: ((String) -> Void)? = nil,
         onClose: @escaping (_ changed: Bool) -> Void
     ) {
         self.zoomsBack = zoomsBack
+        self.onCurrentGroupChange = onCurrentGroupChange
         self.groups = groups
         self.currentUserId = currentUserId
         self.allowedDaysFor = allowedDaysFor
@@ -104,6 +109,9 @@ struct StoryViewerView: View {
         }
         .background(Color.clear.ignoresSafeArea())
         .statusBarHidden(true)
+        .onChange(of: currentIndex) { _, i in
+            if groups.indices.contains(i) { onCurrentGroupChange?(groups[i].user_id) }
+        }
     }
 
     /// Current page plus premounted neighbors, parked just shy of edge-on so
@@ -131,6 +139,14 @@ struct StoryViewerView: View {
             onChanged: { changed = true }
         )
         .frame(width: width, height: nil)
+        .overlay {
+            // A face turning away from you darkens, as a lit cube's would;
+            // without it the turn read as a flat slide with a skew.
+            Color.black
+                .opacity(Double(abs(progress)) * 0.55)
+                .ignoresSafeArea()
+                .allowsHitTesting(false)
+        }
         .rotation3DEffect(
             .degrees(Double(progress) * maxCubeAngle),
             axis: (x: 0, y: 1, z: 0),
@@ -192,17 +208,21 @@ struct StoryViewerView: View {
         let goNext = translation < -width / 3 || flick < -width * 0.6
         let goPrev = translation > width / 3 || flick > width * 0.6
 
+        let velocity = value.velocity.width
         if goNext {
             if currentIndex < groups.count - 1 {
-                animate(to: currentIndex + 1, width: width)
+                animate(to: currentIndex + 1, width: width, velocity: velocity)
             } else {
                 // Cubing past the last author ends the show, like Instagram.
                 close()
             }
         } else if goPrev, currentIndex > 0 {
-            animate(to: currentIndex - 1, width: width)
+            animate(to: currentIndex - 1, width: width, velocity: velocity)
         } else {
-            withAnimation(.spring(response: 0.35, dampingFraction: 0.86)) { dragX = 0 }
+            withAnimation(.interpolatingSpring(stiffness: 300, damping: 30,
+                                               initialVelocity: springVelocity(velocity, toward: 0))) {
+                dragX = 0
+            }
         }
     }
 
@@ -240,15 +260,24 @@ struct StoryViewerView: View {
     /// commit the index and zero the translation in one animation-free
     /// transaction. The transition flag flips in that same pass so the landed
     /// page never renders one inactive frame.
-    private func animate(to target: Int, width: CGFloat) {
+    ///
+    /// A finger-driven turn carries the finger's speed into a critically
+    /// damped spring (no overshoot: a cube that bounced would show the next
+    /// face's back), so a flick lands fast and a slow drag eases in. A turn
+    /// with no finger (a story ran out, a tap past the end) eases in and out
+    /// over ~0.4s like Instagram's, instead of the 0.24s ease-out that
+    /// snapped.
+    private func animate(to target: Int, width: CGFloat, velocity: CGFloat? = nil) {
         guard groups.indices.contains(target), target != currentIndex, !isClosing else { return }
         isTransitioning = true
         MADHaptics.action()
-        withAnimation(
-            .easeOut(duration: 0.24),
-            completionCriteria: .logicallyComplete
-        ) {
-            dragX = -CGFloat(target - currentIndex) * width
+        let end = -CGFloat(target - currentIndex) * width
+        let animation: Animation = velocity.map {
+            .interpolatingSpring(stiffness: 260, damping: 32.2,
+                                 initialVelocity: springVelocity($0, toward: end))
+        } ?? .timingCurve(0.45, 0, 0.25, 1, duration: 0.42)
+        withAnimation(animation, completionCriteria: .logicallyComplete) {
+            dragX = end
         } completion: {
             var settle = Transaction()
             settle.disablesAnimations = true
@@ -258,6 +287,14 @@ struct StoryViewerView: View {
                 isTransitioning = false
             }
         }
+    }
+
+    /// A spring's initial velocity is in units of the distance left to travel
+    /// per second; clamped so a wild flick can't fling past the face.
+    private func springVelocity(_ pointsPerSecond: CGFloat, toward end: CGFloat) -> Double {
+        let remaining = end - dragX
+        guard abs(remaining) > 1 else { return 0 }
+        return Double(min(max(pointsPerSecond / remaining, 0), 8))
     }
 
     /// A group's last story finished (timer or tap) — flow straight into the
@@ -406,7 +443,15 @@ private struct StoryGroupPlayerView: View {
             Color.black.ignoresSafeArea()
 
             if isLoading {
-                ProgressView().tint(.white)
+                // The tile's own photo while the stories load, laid out as
+                // the story will be: the zoom opens out of the tile showing
+                // that picture, not a black card with a spinner, and when the
+                // first story is that photo it is already on screen.
+                if let preview = group.previewURL {
+                    StoryPhotoView(url: preview, top: Self.mediaTop, bottom: footerHeight + 8) {}
+                } else {
+                    ProgressView().tint(.white)
+                }
             } else if let post = current {
                 if post.is_auto == true && post.photoURL == nil {
                     // A finish frame the author chose to add: drawn live,
