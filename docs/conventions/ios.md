@@ -220,7 +220,7 @@ A device screenshot of a done day showed the same facts over and over: "done" th
 
 ### Home screen pass 5 (Nov 2026)
 - The doubled gap under the hero survived pass 4 because `PlusStreakCard`'s body is an always-present `VStack` (it hosts the paywall sheet, which has to outlive the card), so it took a slot even when it showed nothing. It now shares a zero-spacing stack with `NextMedalCard` and adds its own `bottomSpacing` only while it shows. Making it disappear entirely would dismiss the paywall the moment a purchase turns the offer off.
-- The streak headline is one line, "539 day streak", falling back to "539 days" and then to the stacked form (`ViewThatFits`). The stat column is centred in Flamey's frame instead of hung from its top, which had left an empty band under the steps.
+- The streak headline is one line, "539 day streak", falling back to "539 days" and then to the stacked form (`ViewThatFits`). The stat column was then centred in Flamey's frame, which left an empty band across the top whenever he wasn't talking (the frame keeps room above him for a hat and a two-line bubble). It now SPANS the frame: the streak (54pt) at the top, level with that room, a `Spacer`, then the day's lines down by his feet.
 - Card content uses one inset, `DashboardCardSurface.padding` (16). Cards had drifted to 14, 16 and 18.
 - Recent workouts' photo face takes the photo's own shape (`WorkoutMediaPreviewCard(fitsPhoto:)`, clamped 4:5 to 16:9) instead of a 150pt strip that cropped a portrait selfie to a letterbox. The map face keeps its height.
 
