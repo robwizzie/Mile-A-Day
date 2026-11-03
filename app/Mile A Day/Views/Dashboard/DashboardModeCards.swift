@@ -113,153 +113,6 @@ struct DashboardMilestoneBar: View {
     }
 }
 
-struct WeekMileDaysRow: View {
-    @ObservedObject var healthManager: HealthKitManager
-    let statusColor: Color
-    var showLabels: Bool = true
-    /// The hero's stat column (~150pt): small dots, no labels row, no
-    /// checkmarks. Seven 34pt circles need ~240pt.
-    var compact: Bool = false
-    /// Seven 6pt dots, no letters: sits in a stat line's label row, before
-    /// "this week". A lettered strip of its own under the hero's stats read
-    /// as a loose extra row.
-    var inline: Bool = false
-
-    private static let narrowDayFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "EEEEE"
-        return f
-    }()
-
-    private var weekDays: [Date] {
-        let calendar = Calendar.current
-        let today = Date()
-        let weekday = calendar.component(.weekday, from: today)
-        guard let start = calendar.date(
-            byAdding: .day,
-            value: -(weekday - 1),
-            to: calendar.startOfDay(for: today)
-        ) else { return [] }
-        return (0..<7).compactMap { calendar.date(byAdding: .day, value: $0, to: start) }
-    }
-
-    /// A mile day or a 10k-step day ("1 mile OR 10,000 steps").
-    private func isDone(_ date: Date) -> Bool {
-        (healthManager.dailyMileGoals[Calendar.current.startOfDay(for: date)] ?? false)
-            || StepGoalDayStore.goalDayKeys.contains(StepGoalDayStore.dayKey(for: date))
-    }
-
-    private var completedCount: Int {
-        weekDays.filter { isDone($0) }.count
-    }
-
-    var body: some View {
-        if inline {
-            inlineDots
-        } else if compact {
-            compactRow
-        } else {
-            fullRow
-        }
-    }
-
-    private var inlineDots: some View {
-        HStack(spacing: 3) {
-            ForEach(weekDays, id: \.self) { date in
-                let calendar = Calendar.current
-                let isFuture = calendar.startOfDay(for: date) > calendar.startOfDay(for: Date())
-                Circle()
-                    .fill(isDone(date) ? Color.orange : Color.white.opacity(isFuture ? 0.1 : 0.22))
-                    .frame(width: 6, height: 6)
-            }
-        }
-        .fixedSize()
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(completedCount) of 7 goal days")
-    }
-
-    /// S M T W T F S over seven dots: filled for a done day, today ringed.
-    private var compactRow: some View {
-        HStack(spacing: 0) {
-            ForEach(weekDays, id: \.self) { date in
-                let calendar = Calendar.current
-                let completed = isDone(date)
-                let isToday = calendar.isDateInToday(date)
-                let isFuture = calendar.startOfDay(for: date) > calendar.startOfDay(for: Date())
-                VStack(spacing: 4) {
-                    Text(Self.narrowDayFormatter.string(from: date))
-                        .madFont(size: 9, weight: .bold, design: .rounded, maxScale: 1.2)
-                        .foregroundColor(.white.opacity(isToday ? 0.8 : 0.42))
-                    Circle()
-                        .fill(completed ? Color.orange : Color.white.opacity(isFuture ? 0.06 : 0.14))
-                        .frame(width: 12, height: 12)
-                        .overlay {
-                            if isToday {
-                                Circle().stroke(completed ? Color.white.opacity(0.85) : statusColor, lineWidth: 1.5)
-                                    .frame(width: 17, height: 17)
-                            }
-                        }
-                        .frame(width: 17, height: 17)
-                }
-                .frame(maxWidth: .infinity)
-            }
-        }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(completedCount) of 7 goal days this week")
-    }
-
-    private var fullRow: some View {
-        VStack(spacing: 12) {
-            if showLabels {
-                HStack {
-                    Text("Goal days")
-                        .madFont(size: 14, weight: .heavy, design: .rounded)
-                        .foregroundColor(.white)
-                    Spacer()
-                    Text("\(completedCount) of 7 this week")
-                        .madFont(size: 12, weight: .bold, design: .rounded, monospacedDigit: true)
-                        .foregroundColor(.white.opacity(0.58))
-                }
-            }
-
-            HStack(spacing: 0) {
-                ForEach(weekDays, id: \.self) { date in
-                    let calendar = Calendar.current
-                    let completed = isDone(date)
-                    let isToday = calendar.isDateInToday(date)
-                    let isFuture = calendar.startOfDay(for: date) > calendar.startOfDay(for: Date())
-
-                    VStack(spacing: 6) {
-                        Text(Self.narrowDayFormatter.string(from: date))
-                            .madFont(size: 11, weight: .bold, design: .rounded)
-                            .foregroundColor(.white.opacity(0.46))
-
-                        ZStack {
-                            Circle()
-                                .fill(completed ? Color.green.opacity(0.95) : Color.white.opacity(isFuture ? 0.07 : 0.12))
-                                .frame(width: 34, height: 34)
-                                .overlay(Circle().strokeBorder(Color.white.opacity(completed ? 0.18 : 0.08), lineWidth: 1))
-
-                            if completed {
-                                Image(systemName: "checkmark")
-                                    .madFont(size: 15, weight: .black, maxScale: 1.3)
-                                    .foregroundColor(.white)
-                            }
-
-                            if isToday {
-                                Circle()
-                                    .stroke(statusColor, lineWidth: 2.5)
-                                    .frame(width: 39, height: 39)
-                            }
-                        }
-                    }
-                    .frame(maxWidth: .infinity)
-                }
-            }
-        }
-    }
-}
-
 struct ModernDashboardBody: View {
     @ObservedObject var healthManager: HealthKitManager
     @ObservedObject var userManager: UserManager
@@ -449,14 +302,6 @@ private struct ModernHeroCard: View {
     /// column's steps line (the Steps tile that was its door is gone).
     @State private var showSteps = false
 
-    /// This week's counted miles so far: the same per-day numbers the week
-    /// chart draws (`WeekDataProvider`), summed.
-    private var weekMilesSoFar: Double {
-        WeekDataProvider.weekDays(healthManager: healthManager, goalDistance: goalDistance)
-            .filter { !$0.isFuture }
-            .reduce(0) { $0 + $1.distance }
-    }
-
     @State private var showTokens = false
     @State private var timeRemainingText = ""
     @State private var timer: Timer?
@@ -591,8 +436,7 @@ private struct ModernHeroCard: View {
                         statusColor: statusColor,
                         todaySteps: todaySteps,
                         stepGoalMet: stepGoalMet,
-                        onOpenSteps: { showSteps = true },
-                        weekMiles: weekMilesSoFar
+                        onOpenSteps: { showSteps = true }
                     )
                 }
                 .frame(maxWidth: .infinity)
@@ -864,8 +708,6 @@ private struct ModernHeroStatLine: View {
     let unit: String
     let label: String
     let tint: Color
-    /// Drawn in place of the icon (the week line's seven day dots).
-    var accessory: AnyView? = nil
 
     var body: some View {
         // The number leads; what it means sits under it in plain words, with
@@ -884,14 +726,10 @@ private struct ModernHeroStatLine: View {
                     .minimumScaleFactor(0.7)
             }
             HStack(spacing: 5) {
-                if let accessory {
-                    accessory
-                } else {
-                    Image(systemName: icon)
-                        .madFont(size: 10, weight: .bold, maxScale: 1.3)
-                        .foregroundColor(tint)
-                        .accessibilityHidden(true)
-                }
+                Image(systemName: icon)
+                    .madFont(size: 10, weight: .bold, maxScale: 1.3)
+                    .foregroundColor(tint)
+                    .accessibilityHidden(true)
                 Text(label)
                     .madFont(size: 12, weight: .semibold, design: .rounded)
                     .foregroundColor(.white.opacity(0.5))
@@ -939,13 +777,6 @@ private struct HeroStatColumn: View {
     /// Opens the Steps screen (the Steps tile that used to be its door is
     /// gone: it repeated the goal bars' step count).
     var onOpenSteps: (() -> Void)? = nil
-    /// Miles so far this week (Sun → today, counted miles). Once the day is
-    /// done it leads the column: today's best pace was a number that barely
-    /// moves and sits on the workout row anyway; the week moves every day.
-    var weekMiles: Double? = nil
-    /// Seven day dots drawn under the week's miles (`WeekMileDaysRow`
-    /// `.inline`): which days counted, beside how far the week has gone.
-    var weekDots: AnyView? = nil
 
     private var goal: Double { max(goalMiles, 0.01) }
     private var milesDone: Bool { ProgressCalculator.isGoalCompleted(current: currentDistance, goal: goal) }
@@ -1009,16 +840,10 @@ private struct HeroStatColumn: View {
 
     @ViewBuilder
     private var middleLine: some View {
-        if dayDone, let weekMiles {
-            ModernHeroStatLine(
-                icon: "calendar",
-                value: weekMiles.distanceText,
-                unit: DistanceUnits.current.abbreviation,
-                label: "this week",
-                tint: MADTheme.Colors.walkBlue,
-                accessory: weekDots
-            )
-        } else if !dayDone {
+        // No "this week" line once the day is done: the week's miles (and a
+        // row of day dots on it) read as clutter beside the streak. Done
+        // shows today's best pace, or that the goal is done.
+        if !dayDone {
             ModernHeroStatLine(
                 icon: "flag.checkered",
                 value: max(goal - currentDistance, 0).distanceToGoText,
@@ -1682,14 +1507,6 @@ private struct FlameBuddyHeroCard: View {
     /// column's steps line (the Steps tile that was its door is gone).
     @State private var showSteps = false
 
-    /// This week's counted miles so far: the same per-day numbers the week
-    /// chart draws (`WeekDataProvider`), summed.
-    private var weekMilesSoFar: Double {
-        WeekDataProvider.weekDays(healthManager: healthManager, goalDistance: goalDistance)
-            .filter { !$0.isFuture }
-            .reduce(0) { $0 + $1.distance }
-    }
-
     @State private var timeRemainingText = ""
     @State private var timer: Timer?
     @State private var showShareSheet = false
@@ -2306,11 +2123,7 @@ private struct FlameBuddyHeroCard: View {
                 statusColor: statusColor,
                 todaySteps: todaySteps,
                 stepGoalMet: stepGoalMet,
-                onOpenSteps: { showSteps = true },
-                weekMiles: weekMilesSoFar,
-                // The week's days ride on its miles line. A lettered strip
-                // under the stats was a loose extra row.
-                weekDots: AnyView(WeekMileDaysRow(healthManager: healthManager, statusColor: statusColor, inline: true))
+                onOpenSteps: { showSteps = true }
             )
 
             RecordGhostRow(
