@@ -1,5 +1,62 @@
+import Combine
 import Foundation
 import SwiftUI
+
+/// THE nudge state, one per app. Every `FriendService` reads and writes it.
+///
+/// There are several `FriendService` instances (the Friends tab's, the
+/// Feed's, ones the profile screens get handed), and each used to keep its
+/// own `nudgeStatuses`. On top of that the Today board kept a session-only
+/// "nudged" set. So a nudge sent from the Feed board still offered "Nudge"
+/// on the Friends tab and the profile, and the other way round. Now a nudge
+/// from anywhere lands here first (optimistic, rolled back on failure) and
+/// every surface reads it.
+@MainActor
+final class NudgeStatusStore: ObservableObject {
+    static let shared = NudgeStatusStore()
+
+    /// Server truth per friend id, patched optimistically on send.
+    @Published var statuses: [String: NudgeStatusResponse] = [:]
+
+    /// Nudged today by me, from anywhere (or the server says so).
+    func hasNudgedToday(_ friendId: String) -> Bool {
+        statuses[friendId]?.nudgedToday == true
+            || FlexNudgeTracker.hasSentFriendNudgeToday(friendId: friendId)
+    }
+
+    /// Server answers (batch or single) merged in; never drops other ids.
+    func merge(_ fresh: [String: NudgeStatusResponse]) {
+        guard !fresh.isEmpty else { return }
+        statuses.merge(fresh) { _, new in new }
+    }
+
+    /// The optimistic "nudged today" state. Keeps miles / completion / a
+    /// covered day as they were; unlimited nudgers keep `can_nudge` so
+    /// "Nudge again" stays available. Returns what was there, for rollback.
+    @discardableResult
+    func markNudged(_ friendId: String) -> NudgeStatusResponse? {
+        let existing = statuses[friendId]
+        let unlimited = existing?.unlimitedNudges ?? false
+        statuses[friendId] = NudgeStatusResponse(
+            can_nudge: unlimited,
+            has_completed_mile: existing?.has_completed_mile ?? false,
+            already_nudged_today: !unlimited,
+            today_miles: existing?.today_miles,
+            current_streak: existing?.current_streak,
+            has_nudged_today: true,
+            unlimited_nudges: existing?.unlimited_nudges,
+            today_covered: existing?.today_covered
+        )
+        FlexNudgeTracker.markFriendNudgeSent(friendId: friendId)
+        return existing
+    }
+
+    /// Undo an optimistic mark after the request failed.
+    func rollback(_ friendId: String, to previous: NudgeStatusResponse?) {
+        statuses[friendId] = previous
+        FlexNudgeTracker.clearFriendNudgeSent(friendId: friendId)
+    }
+}
 
 /// Service for handling all friend-related API operations
 @MainActor
@@ -12,7 +69,14 @@ class FriendService: ObservableObject {
     /// Today-status (completed mile, miles, nudged) per friend id. Lives here —
     /// not in view @State — so every refresh trigger (app foreground, tab switch,
     /// push, pull-to-refresh) updates the same data all friend rows read.
-    @Published var nudgeStatuses: [String: NudgeStatusResponse] = [:]
+    /// Backed by `NudgeStatusStore.shared`, so every instance agrees.
+    var nudgeStatuses: [String: NudgeStatusResponse] {
+        get { NudgeStatusStore.shared.statuses }
+        set { NudgeStatusStore.shared.statuses = newValue }
+    }
+    /// Forwards the shared store's changes as this service's own, so views
+    /// observing a `FriendService` redraw when a nudge lands elsewhere.
+    private var nudgeStoreRelay: AnyCancellable?
     @Published var isLoading = false
     /// `friends` has been answered by the server at least once this session —
     /// until then an empty list means "not asked", not "no friends".
@@ -27,6 +91,11 @@ class FriendService: ObservableObject {
     init() {
         // Load auth token from UserDefaults
         self.authToken = UserDefaults.standard.string(forKey: "authToken")
+        nudgeStoreRelay = NudgeStatusStore.shared.objectWillChange
+            .sink { [weak self] _ in
+                // The store is @MainActor and publishes on main.
+                MainActor.assumeIsolated { self?.objectWillChange.send() }
+            }
     }
     
     // MARK: - Authentication
@@ -436,12 +505,11 @@ class FriendService: ObservableObject {
     /// Re-fetch today-status for all current friends into `nudgeStatuses`.
     func refreshNudgeStatuses() async {
         let friendIds = friends.map { $0.user_id }
-        guard !friendIds.isEmpty else {
-            nudgeStatuses = [:]
-            return
-        }
+        // An instance that hasn't loaded its friends (the Feed's) must not
+        // wipe the SHARED store the Friends tab filled.
+        guard !friendIds.isEmpty else { return }
         do {
-            nudgeStatuses = try await checkNudgeStatusBatch(friendIds: friendIds)
+            NudgeStatusStore.shared.merge(try await checkNudgeStatusBatch(friendIds: friendIds))
         } catch {
             print("[FriendService] ❌ refreshNudgeStatuses failed: \(error)")
         }
@@ -490,13 +558,21 @@ class FriendService: ObservableObject {
         )
     }
 
-    /// Nudge a friend who hasn't completed their mile yet
+    /// Nudge a friend who hasn't completed their mile yet. Marks the shared
+    /// store at once (every surface flips to "Nudged" together) and rolls
+    /// it back if the server refuses.
     func nudgeFriend(_ friendId: String) async throws {
-        let _: FriendNudgeResponse = try await makeRequest(
-            endpoint: "/friends/\(friendId)/nudge",
-            method: .POST,
-            responseType: FriendNudgeResponse.self
-        )
+        let previous = NudgeStatusStore.shared.markNudged(friendId)
+        do {
+            let _: FriendNudgeResponse = try await makeRequest(
+                endpoint: "/friends/\(friendId)/nudge",
+                method: .POST,
+                responseType: FriendNudgeResponse.self
+            )
+        } catch {
+            NudgeStatusStore.shared.rollback(friendId, to: previous)
+            throw error
+        }
     }
 
     /// Check nudge status for a specific friend

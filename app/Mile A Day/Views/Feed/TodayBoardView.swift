@@ -16,8 +16,11 @@ import SwiftUI
 /// - **New / seen story**: the newest story photo as the tile (`preview_url`,
 ///   withheld server-side when the photo gate applies), the brand ring while
 ///   unseen. Locked behind the viewer's own mile like every story.
-/// - **Done today**: a flame edge; nothing new to watch.
-/// - **Not yet**: dimmed; tap once to nudge (the existing friend nudge).
+/// - **Done today**: a flame edge; tap → THEIR day (`FriendDaySheet`: Hype,
+///   Ask for a photo, Profile), the way a walking tile opens the person.
+/// - **Not yet**: tap once to nudge (a hand waves on the tile); once nudged,
+///   tap → their day. "Nudged" reads `NudgeStatusStore`, the app-wide nudge
+///   state, so it agrees with the Friends tab and their profile.
 ///
 /// The viewer's own tile leads, with a progress ring of their mile.
 struct TodayBoardView: View {
@@ -38,8 +41,9 @@ struct TodayBoardView: View {
     /// The CAMERA window's countdown ring on the viewer's own tile.
     var windowOpen: Bool = false
     var windowOpenedAt: Date? = nil
-    /// Friends nudged from this board this session, so the tile flips at once.
-    var nudgedIds: Set<String> = []
+    /// Zoom source for the story viewer (iOS 18): a story opens out of its
+    /// tile and shrinks back into it, Instagram-style.
+    var storyZoom: Namespace.ID? = nil
     /// Friends asked for a photo from this board this session.
     var askedPhotoIds: Set<String> = []
     var isGroupViewable: (StoryGroup) -> Bool = { _ in true }
@@ -61,6 +65,14 @@ struct TodayBoardView: View {
     /// The live sheet: one person (a walking tile) or everyone (the header's
     /// pill). nil = closed.
     @State private var outNowRoute: OutNowRoute?
+    /// A done (or already-nudged) friend's day, opened from their tile.
+    @State private var dayFriend: FriendActivityItem?
+    /// App-wide nudge state (see `NudgeStatusStore`).
+    @ObservedObject private var nudgeStore = NudgeStatusStore.shared
+    /// The tile whose hand is waving right now, and a counter that restarts
+    /// the wave on each nudge.
+    @State private var wavingId: String?
+    @State private var waveCount = 0
 
     // MARK: - Entries
 
@@ -115,7 +127,7 @@ struct TodayBoardView: View {
             } else {
                 out.append(Entry(id: friend.user_id, name: friend.displayName,
                                  imageURL: friend.profile_image_url,
-                                 kind: .notYet(friend, nudged: nudgedIds.contains(friend.user_id)), rank: 4))
+                                 kind: .notYet(friend, nudged: nudgeStore.hasNudgedToday(friend.user_id)), rank: 4))
             }
         }
         // Stable within a rank: the server's own order (rail recency, live
@@ -148,6 +160,22 @@ struct TodayBoardView: View {
                 // Room for the live tile's pulse, which scales 8% past the
                 // tile (~4pt each side); the scroll view clips at its bounds.
                 .padding(.vertical, 6)
+            }
+            // Its own node: the board's root already presents the out-now
+            // sheet, and two presentations on one node drop one.
+            .sheet(item: $dayFriend) { friend in
+                FriendDaySheet(
+                    friend: friend,
+                    askedPhoto: askedPhotoIds.contains(friend.user_id),
+                    onAskPhoto: { onAskPhoto(friend) },
+                    onNudge: { nudge(friend) },
+                    onOpenProfile: {
+                        dayFriend = nil
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { onTapFriend(friend) }
+                    }
+                )
+                .presentationDetents([.medium])
+                .presentationDragIndicator(.visible)
             }
             if !mileDone, lockedStoryCount > 0 {
                 unlockBar
@@ -249,6 +277,7 @@ struct TodayBoardView: View {
         } label: {
             VStack(spacing: 6) {
                 tileFace(entry)
+                    .storyZoomSource(id: zoomSourceId(entry), in: storyZoom)
                 Text(entry.name)
                     .madFont(size: 11, weight: .medium, design: .rounded, maxScale: 1.2)
                     .foregroundColor(.white.opacity(isDim(entry) ? 0.4 : 0.62))
@@ -259,6 +288,13 @@ struct TodayBoardView: View {
         }
         .buttonStyle(TodayTileButtonStyle())
         .accessibilityLabel(accessibilityText(entry))
+    }
+
+    /// Story tiles are zoom sources for the viewer (keyed by author id, the
+    /// same id the viewer is presented with).
+    private func zoomSourceId(_ entry: Entry) -> String? {
+        if case .story(let group, _, let locked, _) = entry.kind, !locked { return group.user_id }
+        return nil
     }
 
     private func isDim(_ entry: Entry) -> Bool {
@@ -341,20 +377,37 @@ struct TodayBoardView: View {
                     }
                 }
             }
-        case .notYet(_, let nudged):
-            TodayTile(edge: .none) {
+        case .notYet(let friend, let nudged):
+            // In colour, a little quiet: a friend who hasn't walked yet is
+            // someone to wave at, not a greyed-out absence.
+            TodayTile(edge: nudged ? .quiet : .none) {
                 ZStack {
                     TodayTileStyle.dimGround
                     AvatarView(name: entry.name, imageURL: entry.imageURL, size: 46)
-                        .saturation(0)
-                        .opacity(0.45)
+                        .opacity(nudged ? 0.9 : 0.7)
+                        .overlay(alignment: .bottomTrailing) {
+                            if nudged {
+                                Text("👋")
+                                    .font(.system(size: 15))
+                                    .offset(x: 6, y: 4)
+                                    .transition(.scale.combined(with: .opacity))
+                                    .accessibilityHidden(true)
+                            }
+                        }
+                    if wavingId == friend.user_id {
+                        NudgeWave(trigger: waveCount)
+                            .allowsHitTesting(false)
+                            .transition(.opacity)
+                    }
                 }
                 .overlay(alignment: .top) {
                     TodayChip(text: nudged ? "Nudged" : "Nudge",
-                              icon: nudged ? "checkmark" : "hand.wave.fill",
+                              icon: nudged ? "checkmark" : nil,
                               style: nudged ? .nudged : .quiet)
+                        .contentTransition(.interpolate)
                 }
             }
+            .animation(.spring(response: 0.35, dampingFraction: 0.7), value: nudged)
         }
     }
 
@@ -392,22 +445,32 @@ struct TodayBoardView: View {
             MADHaptics.tap()
             outNowRoute = .person(friend.userId)
         case .done(let friend):
-            if friend.canAskForPhoto, !askedPhotoIds.contains(friend.user_id) {
-                MADHaptics.action()
-                onAskPhoto(friend)
-            } else {
-                MADHaptics.tap()
-                onTapFriend(friend)
-            }
+            // Tapping a person opens THAT person's day, not their profile
+            // (it's one tap further, in the sheet).
+            MADHaptics.tap()
+            dayFriend = friend
         case .notYet(let friend, let nudged):
             if nudged {
                 MADHaptics.tap()
-                onTapFriend(friend)
+                dayFriend = friend
             } else {
-                MADHaptics.action()
-                onNudge(friend)
+                nudge(friend)
             }
         }
+    }
+
+    /// One tap: the hand waves on their tile, the chip flips to "Nudged"
+    /// (the shared store marks it at once and rolls back on failure).
+    private func nudge(_ friend: FriendActivityItem) {
+        MADHaptics.success()
+        waveCount += 1
+        withAnimation(.easeOut(duration: 0.15)) { wavingId = friend.user_id }
+        let count = waveCount
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.3) {
+            guard waveCount == count else { return }
+            withAnimation(.easeIn(duration: 0.25)) { wavingId = nil }
+        }
+        onNudge(friend)
     }
 
     private func accessibilityText(_ entry: Entry) -> String {
@@ -423,11 +486,11 @@ struct TodayBoardView: View {
             if friend.canAskForPhoto {
                 return askedPhotoIds.contains(friend.user_id)
                     ? "\(entry.name), done today, asked for a photo"
-                    : "\(entry.name), done today, double tap to ask for a photo"
+                    : "\(entry.name), done today, no photo yet"
             }
-            return "\(entry.name), done today"
+            return "\(entry.name), done today, double tap for their day"
         case .notYet(_, let nudged):
-            return "\(entry.name), not done yet, " + (nudged ? "nudged" : "double tap to nudge")
+            return "\(entry.name), not done yet, " + (nudged ? "nudged, double tap for their day" : "double tap to nudge")
         }
     }
 
@@ -499,6 +562,7 @@ struct TodayBoardView: View {
                         }
                     }
                 }
+                .storyZoomSource(id: myGroup?.user_id, in: storyZoom)
                 Text("You")
                     .madFont(size: 11, weight: .medium, design: .rounded, maxScale: 1.2)
                     .foregroundColor(.white.opacity(0.62))
@@ -806,6 +870,57 @@ struct OutNowSheet: View {
                 await buddy.refreshFriendsOutNow()
                 try? await Task.sleep(nanoseconds: 20 * 1_000_000_000)
             }
+        }
+    }
+}
+
+/// The hand that waves on a tile when you nudge: a big 👋 swinging from the
+/// wrist, restarted by `trigger`.
+private struct NudgeWave: View {
+    let trigger: Int
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        Text("👋")
+            .font(.system(size: 34))
+            .shadow(color: .black.opacity(0.35), radius: 4, y: 2)
+            .phaseAnimator(reduceMotion ? [0.0] : [0.0, -22, 18, -22, 18, 0], trigger: trigger) { content, angle in
+                content.rotationEffect(.degrees(angle), anchor: .bottomTrailing)
+            } animation: { _ in .easeInOut(duration: 0.16) }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color.black.opacity(0.25))
+    }
+}
+
+/// Whether stories zoom out of their tiles (the iOS 18 zoom transition).
+enum StoryZoom {
+    static var isAvailable: Bool {
+        if #available(iOS 18.0, *) { return true }
+        return false
+    }
+}
+
+extension View {
+    /// The tile a story zooms out of and back into (iOS 18 zoom transition).
+    /// No-op before iOS 18 or without a namespace.
+    @ViewBuilder
+    func storyZoomSource(id: String?, in namespace: Namespace.ID?) -> some View {
+        if #available(iOS 18.0, *), let id, let namespace {
+            self.matchedTransitionSource(id: id, in: namespace) { source in
+                source.clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            }
+        } else {
+            self
+        }
+    }
+
+    /// The presented story viewer's side of that zoom.
+    @ViewBuilder
+    func storyZoomTransition(id: String, in namespace: Namespace.ID?) -> some View {
+        if #available(iOS 18.0, *), let namespace {
+            self.navigationTransition(.zoom(sourceID: id, in: namespace))
+        } else {
+            self
         }
     }
 }

@@ -690,11 +690,13 @@ struct DailyChallengeCard: View {
                                     .madFont(size: 12, weight: .heavy, design: .rounded)
                             }
                             .foregroundColor(.green)
-                        } else {
-                            Image(systemName: "chevron.right")
-                                .madFont(size: 12, weight: .bold)
-                                .foregroundColor(.white.opacity(0.3))
                         }
+                        // Always: the card opens the challenges screen
+                        // whether or not today's is done.
+                        Image(systemName: "chevron.right")
+                            .madFont(size: 12, weight: .bold)
+                            .foregroundColor(.white.opacity(0.3))
+                            .accessibilityHidden(true)
                     }
 
                     Text(challenge.title)

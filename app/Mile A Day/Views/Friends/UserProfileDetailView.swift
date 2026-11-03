@@ -85,7 +85,10 @@ struct UserProfileDetailView: View {
 
     // Nudge state — fetched on appear, only relevant when viewing a friend
     // who hasn't completed today and hasn't been nudged in the last 24h.
-    @State private var nudgeStatus: NudgeStatusResponse?
+    /// Read from the app-wide store, not kept here: a nudge sent from the
+    /// Feed board or the Friends tab shows on this profile too.
+    @ObservedObject private var nudgeStore = NudgeStatusStore.shared
+    private var nudgeStatus: NudgeStatusResponse? { nudgeStore.statuses[user.user_id] }
     @State private var isNudging = false
     @State private var nudgeFeedback: NudgeFeedback?
     /// A Flamey poke got 403 flamey_unavailable — no Flamey this visit.
@@ -1001,30 +1004,14 @@ struct UserProfileDetailView: View {
     /// The optimistic "nudged today" state, shared by the Nudge pill and a
     /// Flamey poke (the two spend the same daily nudge).
     private func markNudgeSent() {
-        FlexNudgeTracker.markFriendNudgeSent(friendId: user.user_id)
-        // Preserve existing miles/completion in the optimistic update.
-        // Unlimited nudgers keep "Nudge again" available.
-        let unlimited = nudgeStatus?.unlimitedNudges ?? false
-        nudgeStatus = NudgeStatusResponse(
-            can_nudge: unlimited,
-            has_completed_mile: nudgeStatus?.has_completed_mile ?? false,
-            already_nudged_today: !unlimited,
-            today_miles: nudgeStatus?.today_miles,
-            current_streak: nudgeStatus?.current_streak,
-            has_nudged_today: true,
-            unlimited_nudges: nudgeStatus?.unlimited_nudges,
-            // Sending a nudge doesn't change whether a token is
-            // holding their day — carry it, or the banner blinks
-            // out the moment the bell is tapped.
-            today_covered: nudgeStatus?.today_covered
-        )
+        NudgeStatusStore.shared.markNudged(user.user_id)
     }
 
     private func loadNudgeStatus() async {
         guard !isCurrentUser(), friendService.isFriend(user) else { return }
         do {
             let status = try await friendService.checkNudgeStatus(for: user.user_id)
-            await MainActor.run { self.nudgeStatus = status }
+            await MainActor.run { NudgeStatusStore.shared.merge([user.user_id: status]) }
         } catch {
             print("[UserProfile] loadNudgeStatus failed: \(error)")
         }

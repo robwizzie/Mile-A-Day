@@ -233,6 +233,8 @@ enum FlameyPoke {
         do {
             _ = try await APIClient.fancyFetch(endpoint: "/friends/\(friendId)/nudge", method: .POST,
                                                body: body, responseType: FriendNudgeResponse.self)
+            // The same daily nudge as the button: every surface flips with it.
+            await MainActor.run { _ = NudgeStatusStore.shared.markNudged(friendId) }
             return .sent
         } catch let error as APIError {
             switch error {

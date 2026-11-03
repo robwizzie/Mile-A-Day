@@ -117,10 +117,19 @@ struct WeeklyChallengeHeroCard: View {
                     .lineLimit(1)
             }
             Spacer(minLength: 4)
-            Text(WeeklyChallengeFormat.daysLeft(response.days_left))
-                .font(.system(size: 12, weight: .semibold, design: .rounded))
-                .foregroundColor(.white.opacity(0.5))
-                .fixedSize()
+            // Days left, then the same chevron the daily challenge carries:
+            // each half of the dashboard's Challenges card opens its own
+            // screen, and only one of them used to say so.
+            HStack(spacing: 6) {
+                Text(WeeklyChallengeFormat.daysLeft(response.days_left))
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.5))
+                    .fixedSize()
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundColor(.white.opacity(0.3))
+                    .accessibilityHidden(true)
+            }
         }
     }
 
