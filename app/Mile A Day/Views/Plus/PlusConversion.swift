@@ -224,6 +224,10 @@ struct PlusStreakCard: View {
     /// Space above the card when it shows. The host sits in a zero-spacing
     /// stack with the card above it, so a hidden card adds no gap.
     var topSpacing: CGFloat = 0
+    /// Space under the card, applied only while it shows. Its body is an
+    /// always-present (empty) stack that hosts the paywall sheet, so a gap
+    /// put AROUND it by a spaced parent stack shows even when it's hidden.
+    var bottomSpacing: CGFloat = 0
 
     @ObservedObject private var store = PlusStore.shared
     @ObservedObject private var tokens = StreakTokensState.shared
@@ -289,6 +293,7 @@ struct PlusStreakCard: View {
             if let current {
                 card(current)
                     .padding(.top, topSpacing)
+                    .padding(.bottom, bottomSpacing)
                     .transition(.opacity.combined(with: .move(edge: .top)))
                     .onAppear {
                         guard !reportedShown, !preview else { return }
