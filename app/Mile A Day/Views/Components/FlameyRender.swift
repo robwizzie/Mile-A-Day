@@ -48,14 +48,24 @@ struct FlameyOutfitLayer: View {
     var body: some View {
         ZStack {
             if !look.isPlain {
-                switch side {
-                case .behind: behind
-                case .front: front
+                if side == .behind {
+                    // His glow is LIGHT, not a thing he wears: the tight
+                    // masks below cut it in straight lines (a pumpkin's aura
+                    // squared off at the card top and his column's edge), so
+                    // it gets its own mask that FADES out before those edges.
+                    glowBehind(anchors)
+                        .mask { softGlowMask }
                 }
+                ZStack {
+                    switch side {
+                    case .behind: behind
+                    case .front: front
+                    }
+                }
+                .mask { tightMask }
+                .mask { tightTopMask }
             }
         }
-        .mask { tightMask }
-        .mask { tightTopMask }
         .frame(width: size, height: size)
         .allowsHitTesting(false)
         .accessibilityHidden(true)
@@ -135,6 +145,36 @@ struct FlameyOutfitLayer: View {
         }
     }
 
+    /// The glow's mask on a tight surface: the same room as `tightMask` and
+    /// `tightTopMask`, but feathered wide (a fifth of the band each side, a
+    /// fifth of his size at the top) so the light thins to nothing before
+    /// the card edge, the card top or the stat column. Never a hard edge.
+    @ViewBuilder
+    private var softGlowMask: some View {
+        if tight {
+            let bounds = FlameyArt.tightMaskBounds
+            let width = (bounds.right - bounds.left) * size
+            let top = FlameyArt.tightTopBound(for: look, scale: scale)
+            LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .black, location: 0.2),
+                                   .init(color: .black, location: 0.8), .init(color: .clear, location: 1)],
+                           startPoint: .leading, endPoint: .trailing)
+                .frame(width: width, height: size * 4)
+                .offset(x: (bounds.left + bounds.right) / 2 * size)
+                .mask {
+                    VStack(spacing: 0) {
+                        Color.clear.frame(height: max(0, (top + 2) * size))
+                        LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom)
+                            .frame(height: 0.2 * size)
+                        Color.black.frame(height: size * 4)
+                    }
+                    .frame(width: size * 4, height: size * 4, alignment: .top)
+                }
+                .frame(width: size, height: size)
+        } else {
+            Color.black.frame(width: size * 4, height: size * 4).frame(width: size, height: size)
+        }
+    }
+
     private var needsMotion: Bool {
         look[.trail] != nil || look[.companion] != nil || look.wears(.heartBopper) || look.glow != .none
     }
@@ -148,7 +188,7 @@ struct FlameyOutfitLayer: View {
         let reach = self.reach
         let look = self.look
         ZStack {
-            glowBehind(a)
+            // (The glow is drawn by `body`, under its own soft mask.)
             // The trail goes UNDER a cape: both stream to his left, and the
             // cape is the bigger, chosen piece — the trail shows around it.
             if let trail = look[.trail] {
