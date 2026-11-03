@@ -12,6 +12,34 @@ import { CLIENT_FEATURES, supportsClientFeatureSql } from "./clientFeatures.js";
 
 const db = PostgresService.getInstance();
 
+/**
+ * Minutes until a user's local midnight: their latest workout's offset, the
+ * same day `userTodaySql` uses. One rule for the Today board and the nudge
+ * push.
+ */
+export function minutesLeftTodaySql(alias: string): string {
+  return `(SELECT (EXTRACT(EPOCH FROM (date_trunc('day', lt.now_local) + INTERVAL '1 day' - lt.now_local)) / 60)::int
+				FROM (SELECT (NOW() AT TIME ZONE 'UTC') + (COALESCE((
+					SELECT w.timezone_offset FROM workouts w
+					WHERE w.user_id = ${alias}.user_id
+					ORDER BY w.device_end_date DESC LIMIT 1), 0) || ' minutes')::interval AS now_local) lt
+			)`;
+}
+
+/** A user's streak (decay applied) and minutes left in their day. */
+export async function getStreakStakes(
+  userId: string,
+): Promise<{ streak: number; minutesLeft: number } | null> {
+  const rows = await db.query<{ streak: number; minutes_left: number }>(
+    `SELECT (${effectiveStreakSql("u")})::int AS streak,
+            ${minutesLeftTodaySql("u")} AS minutes_left
+       FROM users u WHERE u.user_id = $1`,
+    [userId],
+  );
+  const r = rows[0];
+  return r ? { streak: Number(r.streak) || 0, minutesLeft: Number(r.minutes_left) || 0 } : null;
+}
+
 type ErrorReturn = {
   error: string;
 };
@@ -300,12 +328,7 @@ export async function getFriendsActivityToday(
 			) AS posted_today,
 			${supportsClientFeatureSql("u.user_id", CLIENT_FEATURES.photoAskV1)} AS photo_ask_supported,
 			(${effectiveStreakSql("u")})::int AS current_streak,
-			(SELECT (EXTRACT(EPOCH FROM (date_trunc('day', lt.now_local) + INTERVAL '1 day' - lt.now_local)) / 60)::int
-				FROM (SELECT (NOW() AT TIME ZONE 'UTC') + (COALESCE((
-					SELECT w.timezone_offset FROM workouts w
-					WHERE w.user_id = u.user_id
-					ORDER BY w.device_end_date DESC LIMIT 1), 0) || ' minutes')::interval AS now_local) lt
-			) AS minutes_left_today
+			${minutesLeftTodaySql("u")} AS minutes_left_today
 		FROM friendships f
 		JOIN users u ON u.user_id = f.friend_id
 		WHERE f.user_id = $1

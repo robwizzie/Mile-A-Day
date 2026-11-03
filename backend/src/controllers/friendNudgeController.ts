@@ -1,7 +1,7 @@
 import { Response } from "express";
 import { AuthenticatedRequest } from "../middleware/auth.js";
 import { getUser } from "../services/userService.js";
-import { getFriendship, hasPostedToday } from "../services/friendshipService.js";
+import { getFriendship, getStreakStakes, hasPostedToday } from "../services/friendshipService.js";
 import {
   sendPush,
   canFriendNudge,
@@ -63,6 +63,42 @@ const FLAMEY_POKE_BODIES = [
 ];
 
 /** Varied copy for a Flamey poke. Playful, never a health claim. */
+/** The Today board's "streak ends tonight" window (iOS `riskWindowMinutes`). */
+export const NUDGE_RISK_WINDOW_MINUTES = 180;
+
+/**
+ * A nudge says what's at stake when there is something: "Your 17-day streak
+ * ends in 34m" lands harder than a generic "time to lace up", and it is the
+ * case the Today board's red tiles and "Nudge all" exist for. Same push type
+ * and data as before; only the words change.
+ */
+export function nudgeCopy(
+  senderName: string,
+  stakes: { streak: number; minutesLeft: number } | null,
+): { title: string; body: string } {
+  const streak = stakes?.streak ?? 0;
+  const left = stakes?.minutesLeft ?? 0;
+  if (streak > 0 && left > 0 && left <= NUDGE_RISK_WINDOW_MINUTES) {
+    const h = Math.floor(left / 60);
+    const m = left % 60;
+    const time = h > 0 ? `${h}h ${m}m` : `${m}m`;
+    return {
+      title: `🔥 Your ${streak}-day streak ends in ${time}`,
+      body: `${senderName} is nudging you: get your mile in before midnight.`,
+    };
+  }
+  if (streak > 0) {
+    return {
+      title: "Time to lace up!",
+      body: `${senderName} is nudging you to keep your ${streak}-day streak going`,
+    };
+  }
+  return {
+    title: "Time to lace up!",
+    body: `${senderName} is nudging you to get your mile in today`,
+  };
+}
+
 export function flameyPokeCopy(senderName: string): { title: string; body: string } {
   const body =
     FLAMEY_POKE_BODIES[Math.floor(Math.random() * FLAMEY_POKE_BODIES.length)];
@@ -141,8 +177,7 @@ export async function nudgeFriend(req: AuthenticatedRequest, res: Response) {
               data: { user_id: senderId, source: "flamey" },
             }
           : {
-              title: "Time to lace up!",
-              body: `${senderName} is nudging you to get your mile in today`,
+              ...nudgeCopy(senderName, await getStreakStakes(friendId).catch(() => null)),
               type: "friend_nudge",
               data: { user_id: senderId },
             },
