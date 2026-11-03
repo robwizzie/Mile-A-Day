@@ -102,6 +102,18 @@ export const displayMovingSecondsSql = (w: string) => `(CASE
  * A bare column read off `u` — no subquery, no join — so the feed's plan is
  * unchanged. The author's only, never a coauthor's.
  */
+/**
+ * The restated display pace for a stitched mile (seconds per mile), or NULL
+ * when it can't be a real on-foot pace: faster than 2:00 /mi or slower than
+ * 60:00 /mi (1 mph). Same bounds as iOS `DisplayPace`. A day that rolls a
+ * walk the Watch kept recording for hours (0.82 mi over 4h24m) into a manual
+ * 1.72 mi restated to "115:48 /mi", which no client should print.
+ */
+export const rollupPaceSql = (movingSeconds: string, distance: string) =>
+  `(CASE WHEN ${distance} > 0
+		AND ${movingSeconds} / ${distance} BETWEEN 120 AND 3600
+	THEN ${movingSeconds} / ${distance} END)`;
+
 export const authorFlameySql = (u: string) => `CASE WHEN ${u}.dashboard_style = 'fun'
 	THEN jsonb_build_object('look', ${u}.flamey_look, 'name', ${u}.flamey_name) END`;
 
@@ -169,8 +181,7 @@ const POST_COLUMNS = `
 				-- recorded it (falling back per-row to elapsed), so a
 				-- stop-heavy day doesn't restate to an absurd pace. The
 				-- 'duration' key above stays the elapsed truth.
-				'pace', CASE WHEN roll_.distance > 0
-					THEN roll_.moving_duration / roll_.distance END
+				'pace', ${rollupPaceSql("roll_.moving_duration", "roll_.distance")}
 			)
 			ELSE p.stats_snapshot
 		END

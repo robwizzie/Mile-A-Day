@@ -109,6 +109,7 @@ Details: docs/conventions/backend.md § Competition Resolution
 ## Hypes & Posts
 Details: docs/conventions/backend.md § Hypes & Posts
 - 'mile' hypes key on `<userId>:<localDate>`; match via `mileHypeKeyMatchSql`.
+- A stitched mile's restated `pace` goes through `rollupPaceSql` (NULL outside 120–3600 s/mi, iOS `DisplayPace`), in BOTH `POST_COLUMNS` and the unified feed.
 - Keep the `express.json` limit at 2mb.
 - `posts.is_auto` is tri-state; a user post replaces only an auto post, else 409.
 - Wrap `media_url` responses in `signMediaUrlsDeep(...)`; `stripMediaQuery(...)` inputs; store bare paths.
