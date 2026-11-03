@@ -348,19 +348,20 @@ struct TodayBoardView: View {
                 }
             }
         case .walking(let friend):
-            // Says what it is in words: their progress as a ring around the
-            // face (filling toward THEIR goal), the distance on top, and
-            // "Walking"/"Running" along the bottom. A blue edge and a number
-            // alone read as decoration to anyone who hadn't been told.
+            // Lit from within, not shouted: a blue glow rising from the
+            // bottom of the tile, a "Live" chip in the same quiet dark style
+            // as Done (a solid blue pill on a solid blue edge was loud and
+            // crowded the face), their progress as a ring around the face,
+            // and the distance with a walk/run glyph along the bottom.
             TodayTile(edge: .live) {
                 ZStack {
-                    TodayTileStyle.ground
+                    TodayTileStyle.liveGround
                     LiveProgressAvatar(name: entry.name, imageURL: entry.imageURL,
                                        progress: liveProgress(friend))
                         .frame(maxHeight: .infinity, alignment: .center)
-                        .padding(.bottom, 10)
+                        .padding(.bottom, 6)
                 }
-                .overlay(alignment: .top) { liveChip(friend) }
+                .overlay(alignment: .top) { LiveTileChip() }
                 .overlay(alignment: .bottom) { liveLabel(friend) }
             }
         case .done:
@@ -438,12 +439,23 @@ struct TodayBoardView: View {
             .animation(.easeOut(duration: 0.4), value: friend.distanceMiles)
     }
 
+    /// "🚶 0.48 mi" (or "Walking" before the first distance report).
     private func liveLabel(_ friend: FriendOutNow) -> some View {
-        Text(friend.isRunning ? "Running" : "Walking")
-            .madFont(size: 10, weight: .heavy, design: .rounded, maxScale: 1.1)
-            .foregroundColor(MADTheme.Colors.walkBlue)
-            .lineLimit(1)
-            .padding(.bottom, 8)
+        HStack(spacing: 3) {
+            Image(systemName: friend.isRunning ? "figure.run" : "figure.walk")
+                .font(.system(size: 9, weight: .bold))
+                .foregroundColor(MADTheme.Colors.walkBlue)
+                .accessibilityHidden(true)
+            Text(friend.distanceMiles.map { $0.distanceFormatted } ?? (friend.isRunning ? "Running" : "Walking"))
+                .madFont(size: 11, weight: .heavy, design: .rounded, maxScale: 1.1, monospacedDigit: true)
+                .foregroundColor(.white)
+                .contentTransition(.numericText())
+                .animation(.easeOut(duration: 0.4), value: friend.distanceMiles)
+        }
+        .lineLimit(1)
+        .minimumScaleFactor(0.8)
+        .padding(.horizontal, 4)
+        .padding(.bottom, 8)
     }
 
     private func liveProgress(_ friend: FriendOutNow) -> Double {
@@ -649,6 +661,16 @@ private enum TodayTileStyle {
 
     static var dimGround: Color { Color(red: 0.10, green: 0.07, blue: 0.08) }
 
+    /// A walking tile: the usual ground with a blue glow rising from the
+    /// bottom, so "out now" reads from across the row without a loud fill.
+    static var liveGround: some View {
+        ZStack {
+            Color(red: 0.07, green: 0.08, blue: 0.13)
+            RadialGradient(colors: [MADTheme.Colors.walkBlue.opacity(0.45), .clear],
+                           center: .bottom, startRadius: 2, endRadius: 90)
+        }
+    }
+
     static var bottomScrim: some View {
         LinearGradient(colors: [.clear, .black.opacity(0.5)], startPoint: .center, endPoint: .bottom)
             .allowsHitTesting(false)
@@ -701,7 +723,7 @@ private struct TodayTile<Content: View>: View {
             return AnyShapeStyle(AngularGradient(
                 colors: [MADTheme.Colors.madRed, .orange, MADTheme.Colors.madRed],
                 center: .center))
-        case .live: return AnyShapeStyle(MADTheme.Colors.walkBlue)
+        case .live: return AnyShapeStyle(MADTheme.Colors.walkBlue.opacity(0.75))
         case .done: return AnyShapeStyle(Color.orange.opacity(0.55))
         case .risk: return AnyShapeStyle(MADTheme.Colors.madRed.opacity(0.85))
         case .quiet: return AnyShapeStyle(Color.white.opacity(0.12))
@@ -788,6 +810,36 @@ private struct TodayTileButtonStyle: ButtonStyle {
 }
 
 
+/// The walking tile's top chip: a breathing blue dot and "Live", dark like
+/// the Done chip.
+private struct LiveTileChip: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var on = false
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Circle()
+                .fill(MADTheme.Colors.walkBlue)
+                .frame(width: 6, height: 6)
+                .opacity(on ? 0.3 : 1)
+            Text("Live")
+                .madFont(size: 10, weight: .heavy, design: .rounded, maxScale: 1.1)
+                .foregroundColor(MADTheme.Colors.walkBlue)
+        }
+        .padding(.horizontal, 7)
+        .padding(.vertical, 3)
+        .background(Capsule().fill(Color.black.opacity(0.55)))
+        .padding(.top, 6)
+        .onAppear {
+            guard !reduceMotion else { return }
+            DispatchQueue.main.async {
+                withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) { on = true }
+            }
+        }
+        .accessibilityHidden(true)
+    }
+}
+
 /// A face with a progress ring around it, for a friend mid-walk: the ring
 /// fills toward their own goal as their phone reports in.
 private struct LiveProgressAvatar: View {
@@ -798,15 +850,16 @@ private struct LiveProgressAvatar: View {
     var body: some View {
         ZStack {
             Circle()
-                .stroke(Color.white.opacity(0.14), lineWidth: 3)
+                .stroke(Color.white.opacity(0.14), lineWidth: 3.5)
             Circle()
                 .trim(from: 0, to: progress)
-                .stroke(MADTheme.Colors.walkBlue, style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                .stroke(MADTheme.Colors.walkBlue, style: StrokeStyle(lineWidth: 3.5, lineCap: .round))
                 .rotationEffect(.degrees(-90))
+                .shadow(color: MADTheme.Colors.walkBlue.opacity(0.6), radius: 4)
                 .animation(.easeOut(duration: 0.6), value: progress)
-            AvatarView(name: name, imageURL: imageURL, size: 40)
+            AvatarView(name: name, imageURL: imageURL, size: 44)
         }
-        .frame(width: 50, height: 50)
+        .frame(width: 56, height: 56)
     }
 }
 
@@ -889,6 +942,9 @@ struct OutNowSheet: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(red: 0.09, green: 0.05, blue: 0.07).ignoresSafeArea())
+        // A list: medium to start, pull up for more. (The one-person sheet
+        // sizes itself to its content.)
+        .presentationDetents([.medium, .large])
         .madTypeCap(.madCardCap)
         .task {
             // Fresh numbers the moment it opens, then every 20s while open.
