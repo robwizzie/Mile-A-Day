@@ -808,6 +808,26 @@ struct FriendActivityItem: Codable, Identifiable {
     var posted_today: Bool? = nil
     /// Their device can take a "show us your walk" ask. Optional (older servers).
     var photo_ask_supported: Bool? = nil
+    /// Their current streak. Optional (older servers).
+    var current_streak: Int? = nil
+    /// Minutes until THEIR local midnight, at fetch time. Optional (older
+    /// servers). Ages with the board's fetch time (`minutesLeft(since:)`).
+    var minutes_left_today: Int? = nil
+
+    /// A streak that ends tonight unless they walk: not done, a streak worth
+    /// keeping, and under `Self.riskWindowMinutes` left in THEIR day.
+    static let riskWindowMinutes = 180
+
+    func minutesLeft(since fetchedAt: Date, now: Date = Date()) -> Int? {
+        guard let m = minutes_left_today else { return nil }
+        return max(0, m - Int(now.timeIntervalSince(fetchedAt) / 60))
+    }
+
+    func streakAtRisk(since fetchedAt: Date, now: Date = Date()) -> Bool {
+        guard !completed_today, (current_streak ?? 0) > 0,
+              let left = minutesLeft(since: fetchedAt, now: now) else { return false }
+        return left > 0 && left <= Self.riskWindowMinutes
+    }
 
     var id: String { user_id }
 

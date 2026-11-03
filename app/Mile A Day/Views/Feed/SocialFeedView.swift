@@ -60,6 +60,8 @@ struct SocialFeedView: View {
     @ObservedObject private var buddy = BuddySessionService.shared
     /// Every friend's miles + done flag today, for the Today board.
     @State private var friendsToday: [FriendActivityItem] = []
+    /// When `friendsToday` arrived: a friend's "minutes left" ages from it.
+    @State private var friendsTodayFetchedAt = Date()
     /// The story viewer zooms out of (and back into) the tapped tile.
     @Namespace private var storyZoom
     /// The opt-in "add today's finish to your story" sheet (your Today tile).
@@ -422,6 +424,7 @@ struct SocialFeedView: View {
                             windowOpen: freshWindow.isCameraOpen,
                             windowOpenedAt: freshWindow.windowOpenedAt,
                             storyZoom: storyZoom,
+                            friendsTodayFetchedAt: friendsTodayFetchedAt,
                             isGroupViewable: { canViewStories(of: $0) },
                             isGroupUnviewed: { isGroupUnviewed(of: $0) },
                             onTapAdd: {
@@ -1296,7 +1299,10 @@ struct SocialFeedView: View {
         let today = try? await profileFriendService.fetchFriendsActivityToday()
         _ = await live
         await MainActor.run {
-            if let today { friendsToday = today }
+            if let today {
+                friendsToday = today
+                friendsTodayFetchedAt = Date()
+            }
         }
         // Who I've already nudged today, from the server, so a nudge sent on
         // another screen (or another phone) reads "Nudged" here too.
