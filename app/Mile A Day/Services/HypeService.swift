@@ -1,4 +1,75 @@
+import Combine
 import Foundation
+
+/// Who I've hyped TODAY, by person, for the whole app.
+///
+/// A friend's day can be hyped from five places: their feed card, their
+/// Today-board sheet, their live sheet while they walk, the buddy list, and
+/// the inbox. The server already dedupes per run (409 `already_hyped`), but
+/// each surface kept its own "hyped" flag, so a hype sent from the board sheet
+/// still showed "Hype" on their feed card (and the other way round) until a
+/// refresh. Every surface now marks this on a hype (or a 409) and reads it.
+///
+/// Keyed by person + the local day: a second, separate walk the same day
+/// reads as hyped too. That is rare, and the server still accepts a hype for
+/// it from the card's own context.
+@MainActor
+final class HypeLedger: ObservableObject {
+    static let shared = HypeLedger()
+
+    @Published private(set) var hypedToday: Set<String> = []
+    private var day: String
+
+    private static let key = "hypeLedgerV1"
+
+    private static func today() -> String {
+        let f = DateFormatter()
+        f.calendar = Calendar(identifier: .gregorian)
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd"
+        return f.string(from: Date())
+    }
+
+    private init() {
+        let stored = UserDefaults.standard.dictionary(forKey: Self.key)
+        let storedDay = stored?["day"] as? String
+        day = Self.today()
+        if storedDay == day, let ids = stored?["ids"] as? [String] {
+            hypedToday = Set(ids)
+        }
+    }
+
+    private func rollIfNeeded() {
+        let now = Self.today()
+        guard now != day else { return }
+        day = now
+        hypedToday = []
+        persist()
+    }
+
+    func hasHypedToday(_ userId: String) -> Bool {
+        rollIfNeeded()
+        return hypedToday.contains(userId)
+    }
+
+    func markHyped(_ userId: String) {
+        rollIfNeeded()
+        guard !hypedToday.contains(userId) else { return }
+        hypedToday.insert(userId)
+        persist()
+    }
+
+    /// A send that failed (not a 409): put it back.
+    func unmark(_ userId: String) {
+        guard hypedToday.contains(userId) else { return }
+        hypedToday.remove(userId)
+        persist()
+    }
+
+    private func persist() {
+        UserDefaults.standard.set(["day": day, "ids": Array(hypedToday)], forKey: Self.key)
+    }
+}
 
 struct HypeResponse: Decodable {
     let message: String
