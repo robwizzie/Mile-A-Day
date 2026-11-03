@@ -114,6 +114,7 @@ Details: docs/conventions/backend.md § Hypes & Posts
 - Wrap `media_url` responses in `signMediaUrlsDeep(...)`; `stripMediaQuery(...)` inputs; store bare paths.
 - Others' photos go behind `DIRECT_POST_ACCESS_SQL` (`visiblePostAuthor(s)`) + `lockUnearnedPhotos`; the stories rail's `preview_url` goes through `gateStoryRailPreviews`.
 - Story reads filter photo-less frames by `STORY_FRAME_VISIBLE_SQL` (`story_finish_card_v1`); auto cards never push friends.
+- `POST /friends/:id/photo-ask` only for a friend who's done, hasn't posted (`hasPostedToday`, auto cards excluded) and declares `photo_ask_v1`; once per pair per day (`photo_ask_log`); push `photo_ask` under the nudge setting, cap-exempt, stale by morning.
 - One walk = one feed card: resolve the walk via `buddy_session_participants`, never stored links.
 - Live auto cards store `media_url = ''`; `AUTO_FLAG_SQL` gates on `live_auto_card_v1`. Check: `live-auto-card-check`.
 - Crew session = `CREW_SESSION_SQL`; duel standing via one `standing()`.

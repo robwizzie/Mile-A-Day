@@ -70,12 +70,17 @@ enum PostGridFilter: String, CaseIterable, Identifiable, Codable {
 enum PostGridLayout: String, CaseIterable, Identifiable, Codable {
     case compact
     case large
+    /// Months of days, each posted day showing its post: the profile as a
+    /// photo diary of the streak. Client-side, like the other two.
+    case calendar
 
     var id: String { rawValue }
 
+    /// Columns for the square grids (posts, pins). The calendar draws its own
+    /// seven-day weeks; its pins keep the compact three.
     var columns: Int {
         switch self {
-        case .compact: return 3
+        case .compact, .calendar: return 3
         case .large: return 2
         }
     }
@@ -84,6 +89,7 @@ enum PostGridLayout: String, CaseIterable, Identifiable, Codable {
         switch self {
         case .compact: return "Compact"
         case .large: return "Large"
+        case .calendar: return "Calendar"
         }
     }
 
@@ -91,6 +97,7 @@ enum PostGridLayout: String, CaseIterable, Identifiable, Codable {
         switch self {
         case .compact: return "square.grid.3x3.fill"
         case .large: return "square.grid.2x2.fill"
+        case .calendar: return "calendar"
         }
     }
 }

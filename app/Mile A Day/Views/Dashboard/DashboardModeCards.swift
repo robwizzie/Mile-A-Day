@@ -309,6 +309,8 @@ struct FunDashboardBody: View {
 
             VStack(spacing: 0) {
                 FunStartCard(
+                    healthManager: healthManager,
+                    userManager: userManager,
                     trustedDone: (state.completed && healthManager.hasFreshTodaysDistance)
                         || StepGoalDayStore.isTodayMet(),
                     hasActiveWorkout: hasActiveWorkout,
@@ -2327,6 +2329,8 @@ private struct FunHeroEmbers: View {
 }
 
 private struct FunStartCard: View {
+    @ObservedObject var healthManager: HealthKitManager
+    @ObservedObject var userManager: UserManager
     let trustedDone: Bool
     let hasActiveWorkout: Bool
     @Binding var showWorkoutView: Bool
@@ -2334,9 +2338,22 @@ private struct FunStartCard: View {
 
     var body: some View {
         VStack(spacing: 10) {
-            VStack(spacing: 6) {
-                DashboardStartMileButton(hasActiveWorkout: hasActiveWorkout, prominent: true, showWorkoutView: $showWorkoutView)
-                LogPastWorkoutLink(action: onLogPastWorkout)
+            if trustedDone {
+                // The day is won: share it (or don't), and "Go again" is a
+                // small link, not the headline. See `DoneTodayCard`.
+                DoneTodayCard(
+                    healthManager: healthManager,
+                    userManager: userManager,
+                    hasActiveWorkout: hasActiveWorkout,
+                    showWorkoutView: $showWorkoutView
+                )
+            } else {
+                VStack(spacing: 6) {
+                    DashboardStartMileButton(hasActiveWorkout: hasActiveWorkout, prominent: true, showWorkoutView: $showWorkoutView)
+                    // Before the mile is where logging one done elsewhere
+                    // matters; after it, the done card owns this space.
+                    LogPastWorkoutLink(action: onLogPastWorkout)
+                }
             }
             BuddyWalkPill(hasActiveWorkout: hasActiveWorkout)
         }

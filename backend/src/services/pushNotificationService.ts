@@ -153,6 +153,9 @@ export type NotificationType =
   | "friend_request_reminder"
   | "friend_request_accepted"
   | "friend_nudge"
+  // "Show us your walk": a friend who's done today asks one who's done but
+  // hasn't posted for a photo. Sent only to photo_ask_v1 builds.
+  | "photo_ask"
   | "friend_activity"
   | "competition_invite"
   | "competition_accepted"
@@ -465,6 +468,9 @@ const CAP_EXEMPT_TYPES: NotificationType[] = [
   // toggle, per-friend muting, blocking and quiet hours.
   "hype_received",
   "friend_nudge",
+  // Same deliberate one-friend tap as a nudge, limited once a day per pair
+  // on the send side (photo_ask_log).
+  "photo_ask",
 
   // ─── Addressed to you, or about you ────────────────────────────────
   //
@@ -1150,6 +1156,7 @@ const DIGEST_LABELS: Partial<Record<NotificationType, [string, string]>> = {
   friend_request_reminder: ["friend request", "friend requests"],
   friend_request_accepted: ["new friend", "new friends"],
   friend_nudge: ["nudge", "nudges"],
+  photo_ask: ["photo request", "photo requests"],
   friend_activity: ["friend's mile", "friends' miles"],
   friend_post: ["friend post", "friend posts"],
   friend_badge_earned: ["friend badge", "friend badges"],
@@ -1247,6 +1254,7 @@ const BRIEFING_PRIORITY: NotificationType[] = [
  */
 const STALE_BY_MORNING: NotificationType[] = [
   "friend_nudge",
+  "photo_ask",
   "competition_nudge",
   "crew_photo_nudge",
   "lead_change",
@@ -1595,6 +1603,33 @@ export async function logFriendNudge(
      )
      UPDATE users SET nudges_sent_total = nudges_sent_total + 1
      WHERE user_id IN (SELECT sender_id FROM logged)`,
+    [senderId, targetId],
+  );
+}
+
+// ─── Photo asks ("show us your walk"): one per sender→friend per day ──────
+
+export async function canPhotoAsk(
+  senderId: string,
+  targetId: string,
+): Promise<boolean> {
+  if (await hasUnlimitedActions(senderId)) return true;
+  const result = await db.query(
+    `SELECT id FROM photo_ask_log
+		WHERE sender_id = $1 AND target_id = $2
+			AND created_at >= ${START_OF_TODAY_ET_SQL}
+		LIMIT 1`,
+    [senderId, targetId],
+  );
+  return result.length === 0;
+}
+
+export async function logPhotoAsk(
+  senderId: string,
+  targetId: string,
+): Promise<void> {
+  await db.query(
+    `INSERT INTO photo_ask_log (sender_id, target_id) VALUES ($1, $2)`,
     [senderId, targetId],
   );
 }
@@ -2029,6 +2064,9 @@ export async function cleanupNotificationLogs(): Promise<void> {
     ),
     db.query(
       `DELETE FROM friend_nudge_log WHERE created_at < NOW() - INTERVAL '7 days'`,
+    ),
+    db.query(
+      `DELETE FROM photo_ask_log WHERE created_at < NOW() - INTERVAL '7 days'`,
     ),
     db.query(
       `DELETE FROM friend_request_log WHERE created_at < NOW() - INTERVAL '7 days'`,

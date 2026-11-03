@@ -12,6 +12,7 @@ import {
 } from "../controllers/friendshipsController.js";
 import {
   nudgeFriend,
+  askFriendForPhoto,
   checkNudgeStatus,
   checkNudgeStatusBatch,
 } from "../controllers/friendNudgeController.js";
@@ -82,6 +83,8 @@ router.delete(
 
 // Nudge routes
 router.post("/:friendId/nudge", nudgeFriend);
+// "Show us your walk" — a friend who's done but hasn't posted.
+router.post("/:friendId/photo-ask", askFriendForPhoto);
 router.get("/:friendId/nudge-status", checkNudgeStatus);
 router.post("/nudge-status/batch", checkNudgeStatusBatch);
 

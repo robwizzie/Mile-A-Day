@@ -728,6 +728,10 @@ struct NotificationInboxView: View {
             openActorProfileOrFriends(notification)
         case "friend_nudge":
             switchTab(3)
+        case "photo_ask":
+            // "Megs wants to see your walk": the home page's done card has the
+            // photo prompt one tap away.
+            switchTab(0)
         case "friend_badge_earned", "friend_challenge_completed":
             // The medal case / their challenge run lives on their profile.
             openActorProfileOrFriends(notification)
@@ -1086,6 +1090,7 @@ struct NotificationInboxView: View {
         case "friend_request", "friend_request_reminder": return "FRIEND REQUEST"
         case "friend_request_accepted": return "FRIEND"
         case "friend_nudge": return "NUDGE"
+        case "photo_ask": return "PHOTO REQUEST"
         case "friend_activity": return "FRIEND"
         case "friend_post": return "NEW POST"
         case "story_reaction": return "STORY"
@@ -1141,6 +1146,7 @@ struct NotificationInboxView: View {
         case "friend_request", "friend_request_reminder": return ("person.badge.plus", .blue)
         case "friend_request_accepted": return ("person.2.fill", .green)
         case "friend_nudge": return ("bell.badge", .orange)
+        case "photo_ask": return ("camera.fill", .orange)
         case "friend_activity": return ("figure.run", .green)
         case "friend_post": return ("photo.fill", .orange)
         case "story_reaction": return ("heart.circle.fill", .pink)

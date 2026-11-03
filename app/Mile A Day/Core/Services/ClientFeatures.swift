@@ -136,6 +136,10 @@ enum ClientFeatures {
     /// frames from builds without this, which would show an empty photo.
     static let storyFinishCardV1 = "story_finish_card_v1"
 
+    /// Routes the `photo_ask` push ("megs wants to see your walk") to the
+    /// home page's done card, and offers the ask on the Today board.
+    static let photoAskV1 = "photo_ask_v1"
+
     static let supported: [String] = [
         friendRequestV2, collabTagV1, ghostFriendRaceV1, postWindowV1, buddyWalksV1,
         weeklyChallengeV1, buddyGroupPostV1, buddyJoinRequestV1, activityDigestV1,
@@ -143,5 +147,6 @@ enum ClientFeatures {
         weeklyRecapV1,
         liveAutoCardV1,
         storyFinishCardV1,
+        photoAskV1,
     ]
 }
