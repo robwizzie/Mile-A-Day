@@ -252,6 +252,14 @@ export interface FriendActivity {
   posted_today: boolean;
   /** Additive: their device can take a "show us your walk" ask (photo_ask_v1). */
   photo_ask_supported: boolean;
+  /** Additive: their current streak (decay applied, `effectiveStreakSql`). */
+  current_streak: number;
+  /**
+   * Additive: minutes until THEIR local midnight (their latest workout's
+   * offset, the same day `userTodaySql` uses). With `current_streak` it lets
+   * the Today board say "2h 10m left" on a friend whose streak is at risk.
+   */
+  minutes_left_today: number;
 }
 
 export async function getFriendsActivityToday(
@@ -290,7 +298,14 @@ export async function getFriendsActivityToday(
 					AND NOT p.is_auto
 					AND p.local_date = ${userTodaySql("u")}
 			) AS posted_today,
-			${supportsClientFeatureSql("u.user_id", CLIENT_FEATURES.photoAskV1)} AS photo_ask_supported
+			${supportsClientFeatureSql("u.user_id", CLIENT_FEATURES.photoAskV1)} AS photo_ask_supported,
+			(${effectiveStreakSql("u")})::int AS current_streak,
+			(SELECT (EXTRACT(EPOCH FROM (date_trunc('day', lt.now_local) + INTERVAL '1 day' - lt.now_local)) / 60)::int
+				FROM (SELECT (NOW() AT TIME ZONE 'UTC') + (COALESCE((
+					SELECT w.timezone_offset FROM workouts w
+					WHERE w.user_id = u.user_id
+					ORDER BY w.device_end_date DESC LIMIT 1), 0) || ' minutes')::interval AS now_local) lt
+			) AS minutes_left_today
 		FROM friendships f
 		JOIN users u ON u.user_id = f.friend_id
 		WHERE f.user_id = $1
@@ -309,6 +324,8 @@ export async function getFriendsActivityToday(
       (Number(r.today_steps) || 0) >= STREAK_QUALIFYING_STEPS,
     posted_today: r.posted_today === true,
     photo_ask_supported: r.photo_ask_supported === true,
+    current_streak: Number(r.current_streak) || 0,
+    minutes_left_today: Number(r.minutes_left_today) || 0,
   }));
 }
 
