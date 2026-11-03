@@ -285,9 +285,12 @@ extension HealthKitManager {
                     // Before the publish, so views redrawn by it read the key.
                     StepGoalDayStore.record(steps: steps, on: now)
                     #endif
-                    self.todaysStepsDay = startOfDay
-                    self.todaysSteps = steps
-                } else {
+                    // Only on a change: every @Published write redraws every
+                    // view observing the manager (the whole tab root), and
+                    // the step observer re-reads often with the same count.
+                    if self.todaysStepsDay != startOfDay { self.todaysStepsDay = startOfDay }
+                    if self.todaysSteps != steps { self.todaysSteps = steps }
+                } else if self.todaysSteps != 0 {
                     self.todaysSteps = 0
                 }
             }
@@ -544,12 +547,22 @@ extension HealthKitManager {
         let target = calendar.startOfDay(for: day)
         let indexedIds = Set(workoutIndex?.workouts(for: target).map { $0.id } ?? [])
 
+        #if !os(watchOS)
+        let deleted = DeletedWorkoutRegistry.all
+        #endif
+        // A workout's local day is at most ~1 day from its UTC start (time
+        // zones span ±14h), so anything 3+ days away can't belong unless the
+        // index says so. Skips the calendar maths for nearly all of history.
+        let windowStart = target.addingTimeInterval(-3 * 86_400)
+        let windowEnd = target.addingTimeInterval(4 * 86_400)
         var seen = Set<String>()
         var out: [HKWorkout] = []
         for workout in cachedWorkouts {
             let id = workout.uuid.uuidString
+            if workout.startDate < windowStart || workout.startDate > windowEnd,
+               !indexedIds.contains(id) { continue }
             #if !os(watchOS)
-            if DeletedWorkoutRegistry.contains(id) { continue }
+            if deleted.contains(id) { continue }
             #endif
             guard !seen.contains(id) else { continue }
             let belongs = indexedIds.contains(id)

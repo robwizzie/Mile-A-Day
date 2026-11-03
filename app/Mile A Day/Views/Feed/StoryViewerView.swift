@@ -351,7 +351,11 @@ private struct StoryGroupPlayerView: View {
 
     @State private var stories: [PostItem] = []
     @State private var index: Int = 0
-    @State private var progress: CGFloat = 0
+    /// The current story's 0→1 progress. A class held in `@State` (NOT
+    /// observed here): only `StoryProgressBars` observes it, so the 20 Hz
+    /// tick redraws the bars instead of this whole page (photo, stickers,
+    /// footer).
+    @State private var clock = StoryClock()
     @State private var isLoading = true
     @State private var paused = false
     /// Finger held down on the photo — playback pauses and the chrome fades,
@@ -578,19 +582,7 @@ private struct StoryGroupPlayerView: View {
     }
 
     private var progressBars: some View {
-        HStack(spacing: 4) {
-            ForEach(stories.indices, id: \.self) { i in
-                GeometryReader { geo in
-                    Capsule().fill(Color.white.opacity(0.3))
-                        .overlay(alignment: .leading) {
-                            Capsule().fill(Color.white)
-                                .frame(width: geo.size.width * fill(for: i))
-                        }
-                }
-                .frame(height: 3)
-            }
-        }
-        .padding(.horizontal, 10)
+        StoryProgressBars(clock: clock, count: stories.count, index: index)
     }
 
     /// Open whoever's story this is. Pauses playback first — the profile is a
@@ -905,22 +897,16 @@ private struct StoryGroupPlayerView: View {
 
     // MARK: - Progress / navigation
 
-    private func fill(for i: Int) -> CGFloat {
-        if i < index { return 1 }
-        if i == index { return progress }
-        return 0
-    }
-
     private func advanceProgress() {
         guard isActive, !isGesturing, !holdPaused,
               !isLoading, !paused, !showReport, !showOptions, !promoting,
               imageReady, current != nil else { return }
-        progress += 0.05 / stepDuration
-        if progress >= 1 { step(1) }
+        clock.progress += 0.05 / stepDuration
+        if clock.progress >= 1 { step(1) }
     }
 
     private func step(_ dir: Int) {
-        progress = 0
+        clock.progress = 0
         let next = index + dir
         if next < 0 {
             // First story replays (progress just reset); the pager may cube
@@ -946,7 +932,7 @@ private struct StoryGroupPlayerView: View {
         if stories.isEmpty {
             onGroupEmpty()
         } else {
-            progress = 0
+            clock.progress = 0
             markViewed()
         }
     }
@@ -1070,7 +1056,7 @@ private struct StoryGroupPlayerView: View {
                 onChanged()
                 stories.removeAll { $0.post_id == post.post_id }
                 if index >= stories.count { index = max(0, stories.count - 1) }
-                progress = 0
+                clock.progress = 0
                 imageReady = false
                 if stories.isEmpty { onGroupEmpty() }
             }
@@ -1237,5 +1223,40 @@ private struct StoryPhotoView: View {
                 failed = true
             }
         }
+    }
+}
+
+/// The playing story's progress, observed only by `StoryProgressBars`.
+final class StoryClock: ObservableObject {
+    @Published var progress: CGFloat = 0
+}
+
+/// The segmented bars across the top of a story: done ones full, the
+/// playing one filling, the rest empty.
+private struct StoryProgressBars: View {
+    @ObservedObject var clock: StoryClock
+    let count: Int
+    let index: Int
+
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(0..<count, id: \.self) { i in
+                GeometryReader { geo in
+                    Capsule().fill(Color.white.opacity(0.3))
+                        .overlay(alignment: .leading) {
+                            Capsule().fill(Color.white)
+                                .frame(width: geo.size.width * fill(i))
+                        }
+                }
+                .frame(height: 3)
+            }
+        }
+        .padding(.horizontal, 10)
+    }
+
+    private func fill(_ i: Int) -> CGFloat {
+        if i < index { return 1 }
+        if i == index { return min(1, clock.progress) }
+        return 0
     }
 }

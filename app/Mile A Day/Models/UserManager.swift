@@ -380,7 +380,8 @@ class UserManager: ObservableObject {
         mostMilesInDay: Double,
         stepGoalMet: Bool = false
     ) {
-        currentUser.updateFromHealthKit(
+        var updated = currentUser
+        updated.updateFromHealthKit(
             streak: vettedHealthKitStreak(retroactiveStreak),
             miles: currentMiles,
             totalMiles: totalMiles,
@@ -389,6 +390,29 @@ class UserManager: ObservableObject {
             stepGoalMet: stepGoalMet,
             date: Date()
         )
+
+        // Nothing the HealthKit read owns changed: no publish, no save. This
+        // runs on every dashboard refresh, and each publish redrew every
+        // UserManager observer (the tab root, the feed) and each save
+        // JSON-encoded the user and friends on the main thread. A done day's
+        // `lastCompletionDate` is re-stamped to "now" on every call, so it
+        // counts as changed only when it moves to another day or to/from nil.
+        let old = currentUser
+        let sameCompletionDay: Bool = {
+            switch (old.lastCompletionDate, updated.lastCompletionDate) {
+            case (nil, nil): return true
+            case let (a?, b?): return Calendar.current.isDate(a, inSameDayAs: b)
+            default: return false
+            }
+        }()
+        if updated.streak == old.streak,
+           updated.totalMiles == old.totalMiles,
+           updated.fastestMilePace == old.fastestMilePace,
+           updated.mostMilesInOneDay == old.mostMilesInOneDay,
+           sameCompletionDay {
+            return
+        }
+        currentUser = updated
 
         // No medal fetch here any more: this runs on every dashboard
         // refresh, and each call was a network round trip that republished
