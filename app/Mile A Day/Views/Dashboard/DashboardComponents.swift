@@ -575,6 +575,9 @@ struct CalendarPreviewCard: View {
 struct DailyChallengeCard: View {
     @ObservedObject var healthManager: HealthKitManager
     @ObservedObject var userManager: UserManager
+    /// Inside the dashboard's shared Challenges card: no padding or surface
+    /// of its own (the host draws one around daily + weekly).
+    var bare: Bool = false
     @Environment(\.colorScheme) var colorScheme
     @State private var todaysChallenge: DailyChallenge?
     @State private var tomorrowsChallenge: DailyChallenge?
@@ -642,8 +645,7 @@ struct DailyChallengeCard: View {
                 .madFont(size: 13, weight: .bold)
                 .foregroundColor(.secondary)
         }
-        .padding(16)
-        .background(cardBackground)
+        .modifier(DailyChallengeChrome(bare: bare))
     }
 
     @ViewBuilder
@@ -690,8 +692,8 @@ struct DailyChallengeCard: View {
                             .foregroundColor(.green)
                         } else {
                             Image(systemName: "chevron.right")
-                                .madFont(size: 17, weight: .bold)
-                                .foregroundColor(.secondary)
+                                .madFont(size: 12, weight: .bold)
+                                .foregroundColor(.white.opacity(0.3))
                         }
                     }
 
@@ -724,8 +726,7 @@ struct DailyChallengeCard: View {
             // Footer: tomorrow preview (incomplete) OR celebration (complete)
             footerRow(challenge)
         }
-        .padding(16)
-        .background(cardBackground)
+        .modifier(DailyChallengeChrome(bare: bare))
     }
 
     @ViewBuilder
@@ -787,11 +788,6 @@ struct DailyChallengeCard: View {
         }
     }
 
-    private var cardBackground: some View {
-        // The shared dashboard surface; the challenge's colour lives in its
-        // icon and progress bar, not in a tinted, rimmed, shadowed frame.
-        DashboardCardSurface(style: .fun)
-    }
 
     private func progressLabel(_ value: Double) -> String {
         if value <= 0 { return "Not started" }
@@ -810,6 +806,23 @@ struct DailyChallengeCard: View {
         }
         challengesCompletedCount = ChallengeService.shared.allCompletions().count
         challengeStreak = ChallengeService.shared.currentChallengeStreak()
+    }
+}
+
+/// The daily challenge's own padding + surface, skipped when it sits bare
+/// inside the shared Challenges card. The challenge's colour lives in its
+/// glyph and progress bar, never in its frame.
+private struct DailyChallengeChrome: ViewModifier {
+    let bare: Bool
+
+    func body(content: Content) -> some View {
+        if bare {
+            content
+        } else {
+            content
+                .padding(16)
+                .background(DashboardCardSurface(style: .fun))
+        }
     }
 }
 

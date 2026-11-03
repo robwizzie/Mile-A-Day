@@ -1807,11 +1807,18 @@ struct DashboardView: View {
             // AFTER the switch, not inside either body: its identity (and the
             // Customize sheet it presents) survives a style change, which is
             // exactly what that sheet does.
-            VStack(spacing: 10) {
+            // Two quiet doors, ONE surface with a hairline between (they were
+            // two full-width cards for two one-line links).
+            VStack(spacing: 0) {
                 DashboardInsightsRow(style: dashboardStyle) { showInsights = true }
+                Rectangle()
+                    .fill(Color.white.opacity(0.07))
+                    .frame(height: 1)
+                    .padding(.leading, 37)
                 DashboardCustomizeRow(style: dashboardStyle)
                     .id("dashboard-customize-row")
             }
+            .background(DashboardCardSurface(style: dashboardStyle))
             .padding(.horizontal, 16)
         }
         .padding(.bottom, 100)

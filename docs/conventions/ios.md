@@ -193,6 +193,12 @@ A device screenshot of a done day showed the same facts over and over: "done" th
 - Well Earned on the Fun dashboard is `TreatLineCard` (one row); Insights keeps the scene.
 - The hero's Share icon under Flamey went (the card's own tap shares); the Closet pill stays.
 
+### Home screen pass 4 (Nov 2026)
+- A done, shared day showed a doubled gap (~36pt instead of 18) under the hero. `FunStartCard` was a `VStack` (share card + buddy pill), wrapped with `PlusStreakCard` in another `VStack(spacing: 0)`. All three hid themselves, but the empty wrapper stacks still took a slot in the body's `VStack(spacing: 18)`, so the spacing was applied twice. `FunStartCard` is now a `Group`, and the Plus card sits directly in the body's stack. Self-hiding parts must never be wrapped in a stack inside a spaced stack.
+- Daily and weekly challenges share ONE card on Fun (`DashboardCardsBlock.challengesCard`) when both are on and this week's challenge has loaded. It renders at whichever of the two comes first in the user's order, and each half keeps its own door. Both cards take `bare: true` there, meaning no padding or surface of their own.
+- Insights and Customize are two rows on one surface with a hairline between them, instead of two full-width cards.
+- `NextMedalCard` puts the count in its label line ("Next medal · 84 of 105").
+
 ## Monthly Flames
 - A Monthly Flame "fully changes" Flamey without touching his geometry: a palette, a pattern drawn by `FlameyMonthlyFX` clipped to `FlameBuddyOuterShape` (snowflakes, hearts, clovers, rain + rainbow, flowers, sun rays, flag, melon rind + seeds, leaves, pumpkin ribs, knit, string lights), and at most a crown on a BARE tip (October's pumpkin stem — the same `pumpkinStem` the Pumpkin Suit wears — and December's tree-top star). Because his outline, `Anchors` and face never move, every hat, cape, shoe, prop and companion fits every form exactly as it fits Classic; any head piece or costume replaces the crown, and `FlameyArt.crest` counts the crown so stages reserve its height. Keep new forms to that recipe — a new silhouette would mean re-fitting the whole wardrobe.
 - Ownership is the server's (`owned_item_ids`); the gallery (`FlameyMonthlyFlamesView`, the Closet's 📅 button) reads `monthly_flames` from the closet payload and never judges days itself. Owned forms go onto the Closet's DRAFT ("Try it on" → Save), like every other item.
