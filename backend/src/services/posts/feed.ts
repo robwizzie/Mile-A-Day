@@ -27,6 +27,7 @@ import {
   VIEWER_WAS_ON_THIS_WALK,
   CURSOR_BEFORE,
   displayMovingSecondsSql,
+  rollupPaceSql,
   ROUTE_STARTED_AT_EXPR,
   competitionsJson,
   postCommentMatchSql,
@@ -263,8 +264,7 @@ const FEED_ENTRY_PROJECTION = `
 					'duration', roll.total_duration,
 					-- Same moving-time display pace as POST_COLUMNS' restating —
 					-- these two blocks must stay in lockstep (see that comment).
-					'pace', CASE WHEN roll.distance > 0
-						THEN roll.moving_duration / roll.distance END
+					'pace', ${rollupPaceSql("roll.moving_duration", "roll.distance")}
 				)
 				ELSE p.stats_snapshot
 			END AS stats_snapshot,

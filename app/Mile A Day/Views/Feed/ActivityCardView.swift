@@ -49,12 +49,22 @@ struct ActivityCardView: View {
         PostStats(
             distance: distance > 0 ? distance : nil,
             pace: pace,
-            duration: entry.total_duration,
+            duration: shownDuration,
             streak: nil,
             date: dateText,
             calories: entry.calories,
             steps: entry.steps
         )
+    }
+
+    /// The elapsed time, unless it's mostly a recording left running: a
+    /// stitched day that rolled in a Watch walk recorded for hours over
+    /// 0.82 mi read "4:54:01" for 2.53 mi. Past the slowest plausible pace
+    /// (`DisplayPace`), no time is shown rather than a false one.
+    private var shownDuration: Double? {
+        guard let d = entry.total_duration, d > 0 else { return nil }
+        if distance > 0, d / distance > DisplayPace.slowestPlausibleSecondsPerMile { return nil }
+        return d
     }
 
     private var pace: Double? {
@@ -77,7 +87,7 @@ struct ActivityCardView: View {
         return RunStatsInput(
             distance: distance,
             paceSecondsPerMile: pace,
-            durationSeconds: entry.total_duration,
+            durationSeconds: shownDuration,
             streak: nil,
             calories: entry.calories,
             steps: entry.steps,
@@ -458,7 +468,7 @@ struct ActivityCardView: View {
         storyShare = MADStoryContent(
             distanceMiles: distance > 0 ? distance : nil,
             paceSecondsPerMile: pace,
-            durationSeconds: entry.total_duration,
+            durationSeconds: shownDuration,
             // A raw workout card carries no streak (`stats` sets it nil) —
             // pass none rather than a number this card never showed.
             streak: nil,

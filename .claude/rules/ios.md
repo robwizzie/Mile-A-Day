@@ -62,6 +62,7 @@ Details: docs/conventions/ios.md § Key Patterns
 - One photo prompt, `PhotoPromptView`, for all three doors, previewing the POST itself and reporting one `Outcome`; actions `useSnap` → `camera` → `library`; composer `.cancelled` returns to it; `recoverLostPhotoPrompt` re-offers.
 - `FreshPostWindowManager`: gate posting on `canPostToday`, capture only on `isCameraOpen`; `.camera` `photo_source` only for in-session shots; never re-anchor (`anchoredIds`); `syncPostWindow()` only adopts.
 - Type backend `timestamptz` as `String` in DTOs; parse with `.withFractionalSeconds` (`BuddyDate`).
+- Never print an implausible pace or time: `PostStats` DECODES through `DisplayPace` bounds (pace outside 2:00–60:00 /mi → nil; duration ÷ distance past 60:00 /mi → nil); raw cards use `ActivityCardView.shownDuration`.
 - Goal scoring uses `isGoalCompleted(current:goal:)` (clamp goal > 0), never `>= goal` (in-workout alert and competitions excepted); day miles via `countedMiles(onLocalDay:)`.
 - The DAY is done at a mile OR 10k steps (`isDayComplete`, `dailyStepGoal`); steps-done reads `StepGoalDayStore.isTodayMet()`, never `todaysSteps`; walks union `StepGoalDayStore`, behind `#if !os(watchOS)` in Watch-member files; celebration/posting stay miles.
 - Never use `HKWorkout.totalDistance` for display/sums: use `madDistanceMiles` (tracked floor, `userOverride` wins); sync uploads it too.

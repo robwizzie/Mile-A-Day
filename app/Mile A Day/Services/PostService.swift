@@ -51,6 +51,40 @@ struct PostStats: Codable, Equatable {
     }
 }
 
+extension PostStats {
+    /// Decoded through `DisplayPace`'s bounds, so no surface can print a pace
+    /// that isn't a real on-foot pace, or a "time" for a day that was mostly
+    /// a recording left running. A stitched mile (several workouts rolled up
+    /// server-side) once came through as 2.53 mi in 4:54:01 at "115:48 /mi":
+    /// a Watch walk had kept recording for 4h24m over 0.82 mi, and the rollup
+    /// summed its elapsed time into the day. Implausible pace → nil; a
+    /// duration whose own pace (duration ÷ distance) is past the slowest
+    /// plausible pace → nil, so the card shows the distance and no false time.
+    /// Encoding (what the app SENDS) is untouched.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let distance = try c.decodeIfPresent(Double.self, forKey: .distance)
+        let pace = try c.decodeIfPresent(Double.self, forKey: .pace)
+        let duration = try c.decodeIfPresent(Double.self, forKey: .duration)
+        self.distance = distance
+        // DisplayPace's bounds (2:00 – 60:00 /mi), as literals: decoding runs
+        // off the main actor, where its statics may not be reachable.
+        let fastest: Double = 120, slowest: Double = 3600
+        self.pace = pace.flatMap { ($0 >= fastest && $0 <= slowest) ? $0 : nil }
+        if let duration, let distance, distance > 0, duration / distance > slowest {
+            self.duration = nil
+        } else {
+            self.duration = duration
+        }
+        self.streak = try c.decodeIfPresent(Int.self, forKey: .streak)
+        self.date = try c.decodeIfPresent(String.self, forKey: .date)
+        self.calories = try c.decodeIfPresent(Double.self, forKey: .calories)
+        self.steps = try c.decodeIfPresent(Int.self, forKey: .steps)
+        self.ghost_margin_seconds = try c.decodeIfPresent(Double.self, forKey: .ghost_margin_seconds)
+        self.ghost_target_seconds = try c.decodeIfPresent(Double.self, forKey: .ghost_target_seconds)
+    }
+}
+
 /// One per-mile split as the feed serves it (mirrors `workout_splits`) — the
 /// data behind the indoor cards' pace wave. Additive: nil on older servers, on
 /// stitched-mile rollups, and on auto posts, so every consumer must treat an
