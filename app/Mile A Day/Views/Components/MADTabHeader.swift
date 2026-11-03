@@ -152,7 +152,9 @@ struct MADTabHeader: View {
                     )
 
                 if case .notification(let count) = badge {
-                    Text("\(min(count, 99))")
+                    // "9+" past nine: a badge says "something's waiting", and
+                    // "31" made an inbox read like a backlog to clear.
+                    Text(count > 9 ? "9+" : "\(count)")
                         .font(.system(size: 9, weight: .heavy, design: .rounded))
                         .foregroundColor(.white)
                         .padding(.horizontal, 5)
