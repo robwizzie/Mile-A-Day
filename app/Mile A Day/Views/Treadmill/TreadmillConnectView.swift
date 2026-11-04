@@ -556,3 +556,266 @@ struct TreadmillConnectSheet: View {
         return "Further away"
     }
 }
+
+// MARK: - Start wizard step
+
+/// The treadmill step of the start wizard, reached from the "Treadmill" card
+/// on the Where step. Same chrome as every other step (and as buddy setup):
+/// the tracker renders the top bar and the glyph-over-question header from
+/// `TreadmillWizardCopy`; this is the panel under it.
+///
+/// Pressing GO to start the belt is something the user does anyway, so here
+/// it doubles as the proof the machine is theirs: the step moves on by
+/// itself the moment THAT treadmill's speed changes.
+struct TreadmillWizardPanel: View {
+    let onConfirmed: () -> Void
+    let onSkip: () -> Void
+
+    private let link = TreadmillLink.shared
+    @State private var scanStartedAt = Date()
+    @State private var showList = false
+    /// Proof landed while this step was on screen: celebrate, then advance.
+    /// Re-entering the step already connected waits for "Continue" instead.
+    @State private var advanceScheduled = false
+
+    var body: some View {
+        VStack(spacing: 16) {
+            content
+            Button(action: onSkip) {
+                Text("Skip, use motion sensors instead")
+                    .madFont(size: 15, weight: .semibold, design: .rounded)
+                    .foregroundColor(.white.opacity(0.8))
+                    .underline()
+                    .padding(.vertical, 6)
+            }
+            .buttonStyle(.plain)
+        }
+        .foregroundColor(.white)
+        .onAppear {
+            if !link.isConnected, !link.isBusy {
+                scanStartedAt = Date()
+                link.startScanning()
+            }
+        }
+        .onChange(of: link.isConnected) { _, connected in
+            guard connected, !advanceScheduled else { return }
+            advanceScheduled = true
+            MADHaptics.success()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                if link.isConnected { onConfirmed() }
+            }
+        }
+        .task {
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(500))
+                if link.phase == .scanning, let id = link.autoPickCandidate() {
+                    MADHaptics.action()
+                    link.connect(id)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        switch link.phase {
+        case .idle, .scanning:
+            find
+        case .connecting:
+            WizardPanel {
+                HStack(spacing: 12) {
+                    ProgressView().tint(.white)
+                    Text("Connecting…")
+                        .madFont(size: 16, weight: .semibold, design: .rounded)
+                }
+            }
+        case .confirming:
+            liveSpeedPanel(waiting: true)
+        case .unconfirmed(let name):
+            VStack(spacing: 12) {
+                WizardPanel {
+                    Text("\(name) didn't change speed. It may be the one next to you.")
+                        .madFont(size: 15, weight: .medium, design: .rounded)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if link.hasUntriedNearby {
+                    WizardPrimaryButton(title: "Try the next one") { link.tryNextNearest() }
+                }
+                quietButton("Try again") { link.rearmConfirmation() }
+            }
+        case .connected:
+            VStack(spacing: 12) {
+                liveSpeedPanel(waiting: false)
+                if !advanceScheduled {
+                    WizardPrimaryButton(title: "Continue", action: onConfirmed)
+                }
+            }
+        case .failed(let message):
+            problem(message, action: ("Try again", {
+                scanStartedAt = Date()
+                link.startScanning()
+            }))
+        case .unauthorized:
+            problem("Bluetooth access is off for Mile A Day. Turn it on in Settings to connect a treadmill.",
+                    action: ("Open Settings", {
+                        guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+                        UIApplication.shared.open(url)
+                    }))
+        case .bluetoothOff:
+            problem("Bluetooth is off. Turn it on in Control Center, then come back.", action: nil)
+        }
+    }
+
+    private var find: some View {
+        VStack(spacing: 12) {
+            WizardPanel {
+                VStack(alignment: .leading, spacing: 10) {
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            Capsule().fill(Color.white.opacity(0.18))
+                            Capsule()
+                                .fill(Color.white)
+                                .frame(width: max(12, geo.size.width * link.nearestSignal))
+                        }
+                    }
+                    .frame(height: 12)
+                    .animation(.easeOut(duration: 0.3), value: link.nearestSignal)
+
+                    HStack(spacing: 8) {
+                        if link.nearestSignal < 1 { ProgressView().tint(.white).controlSize(.small) }
+                        Text(meterCaption)
+                            .madFont(size: 14, weight: .semibold, design: .rounded)
+                            .opacity(0.9)
+                            .lineLimit(2)
+                    }
+                }
+                .accessibilityElement(children: .combine)
+            }
+
+            if !link.nearby.isEmpty {
+                DisclosureGroup(isExpanded: $showList) {
+                    VStack(spacing: 8) {
+                        ForEach(link.nearby.prefix(6)) { machine in
+                            Button {
+                                link.connect(machine.id)
+                            } label: {
+                                WizardPanel(prominent: false, cornerRadius: 14, padding: 12) {
+                                    HStack(spacing: 10) {
+                                        Text(machine.name)
+                                            .madFont(size: 15, weight: .semibold, design: .rounded)
+                                            .lineLimit(1)
+                                        Spacer(minLength: 8)
+                                        Text(machine.rssi >= TreadmillLink.onConsoleRSSI ? "Right here"
+                                             : machine.rssi >= -70 ? "Close by" : "Further away")
+                                            .madFont(size: 12, weight: .medium, design: .rounded)
+                                            .opacity(0.75)
+                                            .lineLimit(1)
+                                    }
+                                }
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.top, 8)
+                } label: {
+                    Text("Or pick from a list (\(link.nearby.count) nearby)")
+                        .madFont(size: 14, weight: .semibold, design: .rounded)
+                        .opacity(0.85)
+                }
+                .tint(.white)
+            } else {
+                TimelineView(.periodic(from: scanStartedAt, by: 1)) { context in
+                    if context.date.timeIntervalSince(scanStartedAt) > 10 {
+                        Text("No treadmills found yet. Not every treadmill shares its data over Bluetooth.")
+                            .madFont(size: 13, weight: .medium, design: .rounded)
+                            .opacity(0.8)
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+        }
+    }
+
+    private var meterCaption: String {
+        if link.nearby.isEmpty { return "Looking for treadmills…" }
+        let level = link.nearestSignal
+        if level >= 1 { return "Found it. Connecting…" }
+        if level >= 0.6 { return "Getting warmer. Keep it right on the screen." }
+        return "Bring your phone closer to the console."
+    }
+
+    private func liveSpeedPanel(waiting: Bool) -> some View {
+        WizardPanel {
+            HStack(spacing: 14) {
+                if waiting {
+                    ProgressView().tint(.white)
+                } else {
+                    Image(systemName: "checkmark.circle.fill")
+                        .madFont(size: 26, weight: .bold)
+                        .accessibilityHidden(true)
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(link.speedKmh.map { TreadmillFormat.speed(kmh: $0) } ?? "—")
+                        .madFont(size: 30, weight: .bold, design: .rounded, monospacedDigit: true)
+                        .contentTransition(.numericText())
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                    Text(waiting ? "Waiting for the belt to change speed…" : "Belt speed")
+                        .madFont(size: 13, weight: .medium, design: .rounded)
+                        .opacity(0.8)
+                        .lineLimit(2)
+                }
+                Spacer(minLength: 0)
+            }
+        }
+    }
+
+    private func problem(_ message: String, action: (String, () -> Void)?) -> some View {
+        VStack(spacing: 12) {
+            WizardPanel {
+                Text(message)
+                    .madFont(size: 15, weight: .medium, design: .rounded)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let action {
+                WizardPrimaryButton(title: action.0, action: action.1)
+            }
+        }
+    }
+
+    private func quietButton(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .madFont(size: 16, weight: .semibold, design: .rounded)
+                .frame(maxWidth: .infinity)
+                .frame(height: WizardMetrics.controlHeight)
+                .background(Capsule().strokeBorder(Color.white.opacity(0.5), lineWidth: 1.5))
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+/// The question above `TreadmillWizardPanel`, per phase — one sentence that
+/// says what to do right now.
+enum TreadmillWizardCopy {
+    static func title(_ phase: TreadmillLink.Phase) -> String {
+        switch phase {
+        case .confirming: return "Press GO on the treadmill"
+        case .unconfirmed: return "Is this your treadmill?"
+        case .connected: return "It's yours!"
+        case .connecting: return "Found a treadmill"
+        default: return "Hold your phone on the treadmill"
+        }
+    }
+
+    static func subtitle(_ phase: TreadmillLink.Phase) -> String {
+        switch phase {
+        case .confirming: return "Belt already moving? Tap speed ▲ once. That's how we know it's yours."
+        case .unconfirmed: return "Press GO or speed ▲ on yours, or try the next one."
+        case .connected: return "Your mile will count the treadmill's own distance."
+        case .connecting: return "Hang on a second…"
+        default: return "Lay it flat on the treadmill's screen. We'll find it."
+        }
+    }
+}

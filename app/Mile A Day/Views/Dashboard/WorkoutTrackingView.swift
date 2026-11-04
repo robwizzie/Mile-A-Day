@@ -50,6 +50,8 @@ struct WorkoutTrackingView: View {
     @State private var showLocationTypeSelection = false
     @State private var showRaceModeSelection = false
     @State private var showGhostOptions = false
+    /// The treadmill sub-step of Where (`TreadmillWizardPanel`).
+    @State private var showTreadmillConnect = false
     /// Which way the next step transition should slide. Set immediately before
     /// the `withAnimation` that changes the step.
     @State private var wizardGoingBack = false
@@ -382,16 +384,24 @@ struct WorkoutTrackingView: View {
     /// Which pre-start step is on screen, derived from the flags so the
     /// wizard can be rendered as ONE scaffold instead of four screens.
     enum PreStartStep {
-        case activity, location, mode, ghostOptions
+        case activity, location, treadmill, mode, ghostOptions
 
         /// Which progress segment to fill. Ghost options is a SUB-step of the
-        /// mode choice, not a fourth question, so it shares segment 3.
-        var indicator: Int { self == .activity ? 1 : (self == .location ? 2 : 3) }
+        /// mode choice, not a fourth question, so it shares segment 3; the
+        /// treadmill connect is a sub-step of Where, so it shares 2.
+        var indicator: Int {
+            switch self {
+            case .activity: return 1
+            case .location, .treadmill: return 2
+            case .mode, .ghostOptions: return 3
+            }
+        }
     }
 
     private var currentPreStartStep: PreStartStep? {
         if showActivitySelection { return .activity }
         if showLocationTypeSelection { return .location }
+        if showTreadmillConnect { return .treadmill }
         if showRaceModeSelection { return .mode }
         if showGhostOptions { return .ghostOptions }
         return nil
@@ -480,6 +490,7 @@ struct WorkoutTrackingView: View {
         switch step {
         case .activity: return .symbol("figure.walk")
         case .location: return .symbol(activity)
+        case .treadmill: return .symbol(indoorLocationIcon)
         // NOT the ghost: racing is one of the two answers here, and putting its
         // mascot above the question pre-announces the winner.
         case .mode: return .symbol("stopwatch")
@@ -491,6 +502,7 @@ struct WorkoutTrackingView: View {
         switch step {
         case .activity: return "Choose Activity Type"
         case .location: return "Choose Location"
+        case .treadmill: return TreadmillWizardCopy.title(TreadmillLink.shared.phase)
         case .mode: return "Choose Your Mode"
         case .ghostOptions: return "Ghost Race"
         }
@@ -500,6 +512,7 @@ struct WorkoutTrackingView: View {
         switch step {
         case .activity: return "Select how you'll complete your mile"
         case .location: return "Where will you be working out?"
+        case .treadmill: return TreadmillWizardCopy.subtitle(TreadmillLink.shared.phase)
         case .mode: return "Race a time, or just log the miles."
         case .ghostOptions: return "Pick a time to chase."
         }
@@ -508,7 +521,13 @@ struct WorkoutTrackingView: View {
     private func goBack(from step: PreStartStep) {
         switch step {
         case .activity:
+            // Leaving the wizard: let go of a treadmill connected on Where.
+            if !isTracking { TreadmillLink.shared.disconnect() }
             dismiss()
+        case .treadmill:
+            TreadmillLink.shared.disconnect()
+            goBack(to: { showLocationTypeSelection = true },
+                   from: { showTreadmillConnect = false })
         case .location:
             goBack(to: { showActivitySelection = true },
                    from: { showLocationTypeSelection = false })
@@ -537,9 +556,24 @@ struct WorkoutTrackingView: View {
             workoutOptionButton(icon: "location.fill", title: "Outdoor", subtitle: "Uses GPS for accurate tracking") {
                 selectLocationType(.outdoor)
             }
-            workoutOptionButton(icon: indoorLocationIcon, title: "Indoor", subtitle: "Treadmill or indoors — uses motion sensors") {
+            // Treadmill gets its own card, like "With a buddy" on the step
+            // before: connecting is steps of THIS wizard, never a hunt for a
+            // control mid-workout.
+            workoutOptionButton(icon: indoorLocationIcon, title: "Treadmill", subtitle: "Connects to the gym treadmill for its exact distance") {
+                chooseTreadmill()
+            }
+            workoutOptionButton(icon: "house.fill", title: "Indoor", subtitle: "No treadmill to connect — uses motion sensors") {
                 selectLocationType(.indoor)
             }
+
+        case .treadmill:
+            TreadmillWizardPanel(
+                onConfirmed: { selectLocationType(.indoor, from: .treadmill) },
+                onSkip: {
+                    TreadmillLink.shared.disconnect()
+                    selectLocationType(.indoor, from: .treadmill)
+                }
+            )
 
         case .mode:
             workoutOptionButton(
@@ -2421,6 +2455,7 @@ struct WorkoutTrackingView: View {
         showLocationTypeSelection = false
         showRaceModeSelection = false
         showGhostOptions = false
+        showTreadmillConnect = false
         showPresenceConsent = false
         showCountdown = false
         // The buddy questions and the lobby are steps of this wizard too now,
@@ -2473,11 +2508,26 @@ struct WorkoutTrackingView: View {
         }
     }
 
-    private func selectLocationType(_ locationType: HKWorkoutSessionLocationType) {
+    private func selectLocationType(
+        _ locationType: HKWorkoutSessionLocationType,
+        from step: PreStartStep = .location
+    ) {
         selectedLocationType = locationType
+        // Outdoor/Indoor picked straight from Where (e.g. after Back from a
+        // connected treadmill): that machine is no longer wanted.
+        if step == .location { TreadmillLink.shared.disconnect() }
         advance {
             showLocationTypeSelection = false
+            showTreadmillConnect = false
             showRaceModeSelection = true
+        }
+    }
+
+    private func chooseTreadmill() {
+        selectedLocationType = .indoor
+        advance {
+            showLocationTypeSelection = false
+            showTreadmillConnect = true
         }
     }
 

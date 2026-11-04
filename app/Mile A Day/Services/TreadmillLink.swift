@@ -337,6 +337,15 @@ final class TreadmillLink: NSObject {
         phase = .idle
     }
 
+    /// The indoor workout just started tracking. A machine proven in the
+    /// start wizard (before there was a workout to feed) counts from here.
+    func workoutDidStart() {
+        guard isConnected else { return }
+        odometer = TreadmillOdometer()
+        segmentMiles = 0
+        WorkoutLocationManager.shared.beginTreadmillSegment()
+    }
+
     /// Start the speed-press check over on the machine already connected.
     func rearmConfirmation() {
         guard let active else { return }

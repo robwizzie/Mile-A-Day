@@ -559,6 +559,9 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
 
         startPauseHeartbeat()
         applyLocationPowerProfile()
+        // A treadmill connected and proven in the start wizard starts
+        // counting now, from zero — not from when it was connected.
+        if isUsingPedometer { TreadmillLink.shared.workoutDidStart() }
     }
 
     // MARK: - Manual pause / resume
