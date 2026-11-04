@@ -129,19 +129,23 @@ struct FeedMetaLine<Middle: View>: View {
     @ViewBuilder
     private var leading: some View {
         if let streak {
-            // The flame carries the colour; the words stay quiet, like the
-            // rest of the line.
+            // A tinted pill, not quiet grey text: the streak is the one thing
+            // on this line people look for, and at white 0.6 it read as part
+            // of the timestamp. Same pill on photo posts and raw workout
+            // cards (the day's mile AND the walks after it).
             HStack(spacing: 4) {
                 Image(systemName: "flame.fill")
-                    .madFont(size: 10, weight: .semibold)
-                    .foregroundColor(.orange)
+                    .madFont(size: 11, weight: .bold)
                 Text("\(streak)-day streak")
-                    .madFont(size: 12, weight: .medium, design: .rounded)
+                    .madFont(size: 12, weight: .bold, design: .rounded)
                     .monospacedDigit()
-                    .foregroundColor(.white.opacity(0.6))
             }
+            .foregroundColor(.orange)
             .lineLimit(1)
             .fixedSize()
+            .padding(.horizontal, 9)
+            .padding(.vertical, 4)
+            .background(Capsule().fill(Color.orange.opacity(0.16)))
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("\(streak) day streak")
         }
