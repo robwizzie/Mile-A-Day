@@ -35,6 +35,9 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
     /// what lets the server tell them they were caught — without it the win is
     /// recorded but anonymous.
     static let ghostFriendMetadataKey = "MAD_ghost_friend_id"
+    /// "treadmill" when a connected treadmill's belt distance counted toward
+    /// this workout (`TreadmillLink`). Absent otherwise.
+    static let distanceSourceMetadataKey = "MAD_distance_source"
 
     private let locationManager = CLLocationManager()
     private let pedometer = CMPedometer()
@@ -274,6 +277,29 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
         max(0, rawPedometerMiles - excludedPedometerMiles)
     }
 
+    // Treadmill belt (`TreadmillLink`, Bluetooth FTMS) — a second INDOOR
+    // instrument, bookkept exactly like the pedometer: a raw monotonic span
+    // for the current connection, with pauses measured and subtracted rather
+    // than dropped. A connection can start mid-walk (and reconnect), so each
+    // segment is credited ON TOP of the indoor span already counted when it
+    // began (`treadmillJoinMiles`), and the indoor distance is the max of the
+    // two instruments — a phone in the cupholder counts no steps, a pocketed
+    // phone on a belt that was never connected counts no belt.
+    private var rawTreadmillMiles: Double = 0
+    private var committedPausedTreadmillMiles: Double = 0
+    private var pauseAnchorTreadmillMiles: Double?
+    private var treadmillJoinMiles: Double = 0
+    private var hasTreadmillSegment = false
+    /// True once any belt distance reached this session. Survives
+    /// `stopTracking()` on purpose — the save reads it afterwards (stamped as
+    /// `distanceSourceMetadataKey`); reset only by the next `startTracking`.
+    private(set) var usedTreadmill = false
+
+    private var countableTreadmillMiles: Double {
+        let open = max(0, rawTreadmillMiles - (pauseAnchorTreadmillMiles ?? rawTreadmillMiles))
+        return max(0, rawTreadmillMiles - committedPausedTreadmillMiles - open)
+    }
+
     /// Distance carried into this session by a recovery (miles). The pedometer
     /// starts at resume time, so the estimator only compares the span BOTH
     /// instruments actually measured this session.
@@ -491,6 +517,9 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
         // Recovering INTO a pause: anchor at zero so anything walked before
         // the user taps resume is excluded, exactly as a live pause would.
         pauseAnchorPedometerMiles = isPaused ? 0 : nil
+        resetTreadmillSegment()
+        hasTreadmillSegment = false
+        usedTreadmill = false
 
         armTrackingWatchdog(force: !isPaused)
 
@@ -553,6 +582,7 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
         // through the pause regardless; this anchor is what keeps that ground
         // out of `liveDistance` (see `excludedPedometerMiles`).
         pauseAnchorPedometerMiles = rawPedometerMiles
+        pauseAnchorTreadmillMiles = rawTreadmillMiles
         // Manual pause outranks the guess — two pause chips at once is
         // nonsense, and the auto one would flap underneath this anyway.
         isAutoPaused = false
@@ -583,6 +613,10 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
         if let anchor = pauseAnchorPedometerMiles {
             committedPausedPedometerMiles += max(0, rawPedometerMiles - anchor)
             pauseAnchorPedometerMiles = nil
+        }
+        if let anchor = pauseAnchorTreadmillMiles {
+            committedPausedTreadmillMiles += max(0, rawTreadmillMiles - anchor)
+            pauseAnchorTreadmillMiles = nil
         }
         lastLocation = nil
         lastRoutePoint = nil
@@ -768,7 +802,18 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
         // out is to keep MEASURING it and subtract it. `countablePedometerMiles`
         // is frozen for the whole pause and steps forward again on resume.
         rawPedometerMiles = max(rawPedometerMiles, miles)
-        currentDistance = max(currentDistance, pedometerOffset + countablePedometerMiles)
+        applyIndoorDistance()
+    }
+
+    /// Fold both indoor instruments into `currentDistance` (main thread).
+    /// The treadmill side is its segment ON TOP of what was already counted
+    /// when it connected; the outer max keeps the class invariant.
+    private func applyIndoorDistance() {
+        var span = countablePedometerMiles
+        if hasTreadmillSegment {
+            span = max(span, treadmillJoinMiles + countableTreadmillMiles)
+        }
+        currentDistance = max(currentDistance, pedometerOffset + span)
         refreshLiveDistance()
         persistDistanceThrottled()
         // Liveness rides the data callbacks, not a view timer: a delivered
@@ -777,6 +822,38 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
         armTrackingWatchdog()
         LivePresenceService.shared.tick()
         reportBuddyProgress()
+    }
+
+    // MARK: - Treadmill (Bluetooth FTMS)
+
+    /// Whether a treadmill can feed this session: an indoor workout on the
+    /// pedometer path (the same path `ingestIndoorPedometerDistance` serves).
+    var acceptsTreadmill: Bool { isTracking && isUsingPedometer }
+
+    /// A treadmill connection just started streaming. Its readings count
+    /// from zero, on top of the indoor span already credited.
+    func beginTreadmillSegment() {
+        guard acceptsTreadmill else { return }
+        resetTreadmillSegment()
+        treadmillJoinMiles = max(0, currentDistance - pedometerOffset)
+        hasTreadmillSegment = true
+    }
+
+    /// Belt distance since `beginTreadmillSegment`, miles (main thread).
+    func ingestTreadmillDistance(_ miles: Double) {
+        guard acceptsTreadmill, hasTreadmillSegment else { return }
+        rawTreadmillMiles = max(rawTreadmillMiles, miles)
+        if countableTreadmillMiles > 0 { usedTreadmill = true }
+        applyIndoorDistance()
+    }
+
+    private func resetTreadmillSegment() {
+        rawTreadmillMiles = 0
+        committedPausedTreadmillMiles = 0
+        // Starting a segment mid-pause: anything the belt moves before the
+        // user taps resume is excluded, same as the pedometer.
+        pauseAnchorTreadmillMiles = isPaused ? 0 : nil
+        treadmillJoinMiles = 0
     }
 
     /// Buddy Walk progress from the DATA callbacks, not the view timer.
@@ -981,6 +1058,11 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
         rawPedometerMiles = 0
         committedPausedPedometerMiles = 0
         pauseAnchorPedometerMiles = nil
+        // The treadmill only ever serves a live workout; let the machine go
+        // so the next person (or their own app) can connect.
+        hasTreadmillSegment = false
+        resetTreadmillSegment()
+        TreadmillLink.shared.disconnect()
     }
 
     /// Re-derive `liveDistance` after either instrument moved (main thread

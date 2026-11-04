@@ -199,6 +199,14 @@ A friend's day can be hyped from their feed card, their Today-board sheet (`Frie
 ### Story finish frame is opt-in (`AddFinishStorySheet`, Nov 2026)
 Stories on other apps hold only what the user chose to put there, and ours must too. The finish frame (route tracing itself, distance rolling in, streak) is a story-only auto card with no picture, created ONLY when the user taps "Add to my story" in the sheet their own Today tile opens after the mile. There is no automatic path: `autoPostMile` still writes feed cards only, behind its own `autoPostWithoutPhoto` preference. The viewer draws a photo-less auto story as `StoryFinishFrame` (no load, so the timer runs at once); a later photo story for the same walk replaces it in place (story slot upsert, auto rows only). Builds without `storyFinishCardV1` never receive such a frame, because their viewer would show an empty photo.
 
+### Treadmill over Bluetooth (`TreadmillLink`, Nov 2026)
+Gym treadmills (verified on a Life Fitness console, North Pole Engineering module, advertised as `LF<hex>`) broadcast the standard Fitness Machine Service `0x1826`; Treadmill Data `0x2ACD` notifies about 1 Hz with speed (0.01 km/h), total distance (u24 metres), incline, energy, elapsed time. Pace fields are u8 per spec; decoding the captured packets with u8 pace consumed exactly 32/32 bytes (fixtures in `Mile_A_DayTests.swift`). The console's own "Bluetooth" button only pairs headphones/HR straps — FTMS advertising is independent of it.
+- READ-ONLY. Control Point `0x2AD9` can change a stranger's belt speed in a public gym; `TreadmillLink` never discovers it.
+- The console total is ITS workout's odometer: `TreadmillOdometer` counts only after connect, rebases on a console reset, drops jumps over 9 m/s.
+- A gym is a wall of identical advertisers 10–30 dB apart; a phone lying on its own console reads about −40 to −55 dBm. Auto-connect needs ≥ −55, a 10 dB lead and a 1.5 s hold (`autoPickCandidate`); otherwise the user picks, and the sheet asks them to check the belt speed matches.
+- `bluetooth-central` background mode keeps notifications flowing while locked (otherwise the Live Activity and buddy roster freeze); the location keep-alive alone does not deliver CoreBluetooth events.
+- Workouts with belt distance carry `MAD_distance_source = "treadmill"` (HK metadata only; not synced yet).
+
 ## Performance
 
 The app felt slow and the console showed "Gesture: System gesture gate timed out" (the main thread was busy when a touch began). An audit found:

@@ -839,6 +839,13 @@ struct WorkoutTrackingView: View {
                             .padding(.horizontal, 20)
                         }
 
+                        // Indoor only: read a gym treadmill's own belt distance
+                        // over Bluetooth. Renders nothing outdoors, or when the
+                        // indoor session fell back to GPS.
+                        if isTracking, !isStopping, locationManager.acceptsTreadmill {
+                            TreadmillChip()
+                        }
+
                         distanceDisplay
 
                         progressRing(diameter: ringDiameter(for: screen.size.height))
@@ -3191,6 +3198,9 @@ struct WorkoutTrackingView: View {
         // key is exactly the shape that draws the route in our feed (we read
         // the route directly) and no map in Fitness.
         metadata[HKMetadataKeyIndoorWorkout] = (self.selectedLocationType == .indoor)
+        if locationManager.usedTreadmill {
+            metadata[WorkoutLocationManager.distanceSourceMetadataKey] = "treadmill"
+        }
         let movingSeconds = locationManager.movingSeconds
         if movingSeconds > 0 {
             metadata[WorkoutLocationManager.movingSecondsMetadataKey] = movingSeconds
