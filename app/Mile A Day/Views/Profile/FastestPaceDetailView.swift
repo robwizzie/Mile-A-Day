@@ -278,7 +278,7 @@ struct FastestPaceDetailView: View {
         let qualifying = healthManager.cachedWorkouts.filter { workout in
             let miles = workout.madDistanceMiles
             guard miles >= 0.95 else { return false }
-            let avgPace = workout.duration / 60.0 / miles
+            let avgPace = workout.madDuration / 60.0 / miles
             return avgPace <= pace + tolerance
         }.sorted { $0.endDate > $1.endDate }
 

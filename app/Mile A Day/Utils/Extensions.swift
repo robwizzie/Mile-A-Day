@@ -169,9 +169,9 @@ extension HKWorkout {
     }
     
     var formattedDuration: String {
-        let hours = Int(duration) / 3600
-        let minutes = Int(duration) % 3600 / 60
-        let seconds = Int(duration) % 60
+        let hours = Int(madDuration) / 3600
+        let minutes = Int(madDuration) % 3600 / 60
+        let seconds = Int(madDuration) % 60
         
         if hours > 0 {
             return String(format: "%d:%02d:%02d", hours, minutes, seconds)
@@ -229,8 +229,23 @@ extension HKWorkout {
     var pace: String {
         return workoutPaceText(
             distanceMiles: madDistanceMiles,
-            durationSeconds: duration
+            durationSeconds: madDuration
         )
+    }
+
+    /// The tracker's moving clock, when a displayed pace may divide by it.
+    /// Nil once the user edited the time: the clock measured the OLD figure,
+    /// and preferring it would print the device's pace under the user's
+    /// corrected time (server twin: `displayMovingSecondsSql`).
+    var madMovingSeconds: Double? {
+        guard TrackedWorkoutLedger.shared.userDuration(forWorkoutId: uuid.uuidString) == nil
+        else { return nil }
+        return metadata?[WorkoutLocationManager.movingSecondsMetadataKey] as? Double
+    }
+
+    /// Recorded as an indoor (treadmill) workout.
+    var isIndoorWorkout: Bool {
+        (metadata?[HKMetadataKeyIndoorWorkout] as? Bool) == true
     }
 }
 
@@ -348,7 +363,7 @@ enum WorkoutFeedFloor {
     static func isSubstantive(_ workout: HKWorkout) -> Bool {
         isSubstantive(
             distance: workout.madDistanceMiles,
-            duration: workout.duration
+            duration: workout.madDuration
         )
     }
 }

@@ -7,7 +7,7 @@ One line per rule. The why, incidents and evidence live in `docs/conventions/bac
 Details: docs/conventions/backend.md § Backend Conventions
 - Keep feed reads bounded: each `UNIFIED_FEED_SQL` arm is a per-owner LATERAL `LIMIT` with the cursor pushed in; hype predicates carry `CONTEXTFUL`; keep `jit = off`. Verify by diffing old vs new output.
 - Photo gate `getPostWindowStatus`: `cameraOpen` (10 min) only for live `photo_source`, else `photoOpen`; gate `POST /posts` AND `PATCH {add_to_feed}`; keep `post_window_closed`, `posted_fresh`.
-- Serve `moving_seconds` only via `displayMovingSecondsSql` (NULL under 50% of `total_duration`, per leg); iOS mirror `DisplayPace`.
+- Serve `moving_seconds` only via `displayMovingSecondsSql` (NULL under 50% of `total_duration`, per leg, or once `original_duration` ≠ `total_duration`); iOS mirror `DisplayPace`/`madMovingSeconds`.
 - Weekly `last_week` reads the SERVED row (`final_value`, else fresh `measure()`); never re-pick a past week.
 - Goal checks use `DAILY_GOAL_TOLERANCE` (0.95), never `>= 1.0`; `user_daily_challenges` stamps what was SERVED; split-based challenge queries also need `countedWorkoutSql('w')`.
 - A day is DONE at 0.95 mi OR 10k steps (`STREAK_QUALIFYING_STEPS`): SQL via `stepGoalDaysSql`/`stepGoalMetSql`, in-memory `dailyGoalMet`; never for posting, feed, meters, challenges; a crossing runs `stepGoalDaysLanded`. Check: `streak-check` §S.

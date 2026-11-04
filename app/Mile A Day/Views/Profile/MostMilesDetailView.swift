@@ -299,7 +299,7 @@ struct WorkoutRow: View {
         let formatter = DateComponentsFormatter()
         formatter.allowedUnits = [.hour, .minute]
         formatter.unitsStyle = .abbreviated
-        return formatter.string(from: workout.duration) ?? "Unknown"
+        return formatter.string(from: workout.madDuration) ?? "Unknown"
     }
 
     // Same accent per type as the feed (ActivityCardView.color) — one color
@@ -315,8 +315,8 @@ struct WorkoutRow: View {
     /// "18:27 /mi" when distance + duration allow it.
     private var paceText: String? {
         let miles = workout.madDistanceMiles
-        guard miles > 0, workout.duration > 0 else { return nil }
-        return "\(RunStatsStickerView.paceText(workout.duration / miles)) /mi"
+        guard miles > 0, workout.madDuration > 0 else { return nil }
+        return "\(RunStatsStickerView.paceText(workout.madDuration / miles)) /mi"
     }
 
     var body: some View {

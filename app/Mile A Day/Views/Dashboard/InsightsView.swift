@@ -1303,7 +1303,7 @@ private struct RoadWorkoutSummaryRow: View {
     }
 
     private var durationText: String {
-        let total = Int(workout.duration.rounded())
+        let total = Int(workout.madDuration.rounded())
         let hours = total / 3600
         let minutes = (total % 3600) / 60
         let seconds = total % 60
@@ -1313,7 +1313,7 @@ private struct RoadWorkoutSummaryRow: View {
 
     private var paceText: String {
         guard distance > 0 else { return "--" }
-        let secondsPerMile = workout.duration / distance
+        let secondsPerMile = workout.madDuration / distance
         let minutes = Int(secondsPerMile) / 60
         let seconds = Int(secondsPerMile) % 60
         return String(format: "%d'%02d\"/mi", minutes, seconds)
