@@ -2,16 +2,20 @@
 //  TreadmillConnectView.swift
 //  Mile A Day
 //
-//  The tracker's "Connect treadmill" chip (indoor workouts only) and the
-//  sheet behind it. All Bluetooth lives in `TreadmillLink`; this file only
-//  draws its state. Nothing here starts Bluetooth until the user taps —
-//  creating the central manager is what raises the permission prompt.
+//  The tracker's treadmill row (indoor workouts only) and the sheet behind
+//  it. All Bluetooth lives in `TreadmillLink`; this file only draws its
+//  state. Nothing here starts Bluetooth until the user taps — creating the
+//  central manager is what raises the permission prompt.
+//
+//  The flow is three steps, shown as such: FIND (hold the phone on the
+//  console, a warmer/colder meter), CONFIRM (press speed or GO once, so we
+//  know it's YOUR machine and not the neighbour's), COUNTING.
 //
 
 import SwiftUI
 import UIKit
 
-// MARK: - Speed formatting
+// MARK: - Formatting
 
 enum TreadmillFormat {
     /// "3.0 mph" / "4.8 km/h" — follows the distance unit preference.
@@ -22,6 +26,10 @@ enum TreadmillFormat {
         }
     }
 
+    static func incline(_ percent: Double) -> String {
+        String(format: "%.1f%%", percent)
+    }
+
     /// `figure.run.treadmill` is newer than some iOS 17 symbol sets; fall
     /// back rather than render a blank box.
     static let glyph: String = UIImage(systemName: "figure.run.treadmill") != nil
@@ -29,11 +37,14 @@ enum TreadmillFormat {
         : "antenna.radiowaves.left.and.right"
 }
 
-// MARK: - Tracker chip
+// MARK: - Tracker row
 
-/// "Connect treadmill" before, "Treadmill · 3.0 mph" while connected. Owns
-/// its sheet so the tracker's body gains one view, not a modifier chain.
-struct TreadmillChip: View {
+/// Unconnected: a quiet "Connect treadmill" chip (most indoor walks aren't
+/// on a treadmill). Mid-handshake: an amber chip that says what to do.
+/// Counting: a full-width card with the console's live numbers, so it's
+/// obvious where the distance is coming from. Owns its sheet so the
+/// tracker's body gains one view, not a modifier chain.
+struct TreadmillTrackerRow: View {
     private let link = TreadmillLink.shared
     @State private var showSheet = false
 
@@ -41,28 +52,14 @@ struct TreadmillChip: View {
         Button {
             showSheet = true
         } label: {
-            HStack(spacing: 6) {
-                if link.isConnected {
-                    Circle()
-                        .fill(Color.green)
-                        .frame(width: 7, height: 7)
-                        .accessibilityHidden(true)
-                } else {
-                    Image(systemName: TreadmillFormat.glyph)
-                        .madFont(size: 12, weight: .bold)
-                        .accessibilityHidden(true)
-                }
-                Text(label)
-                    .madFont(size: 13, weight: .bold, design: .rounded)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
+            if link.isConnected {
+                connectedCard
+            } else {
+                chip
             }
-            .foregroundColor(.white)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 8)
-            .background(Capsule().fill(Color.white.opacity(0.16)))
         }
         .buttonStyle(.plain)
+        .padding(.horizontal, 20)
         .sheet(isPresented: $showSheet) {
             TreadmillConnectSheet()
                 .presentationDetents([.medium, .large])
@@ -71,18 +68,87 @@ struct TreadmillChip: View {
         }
     }
 
-    private var label: String {
-        switch link.phase {
-        case .connected:
-            if let kmh = link.speedKmh {
-                return "Treadmill · \(TreadmillFormat.speed(kmh: kmh))"
+    private var chip: some View {
+        HStack(spacing: 6) {
+            if link.isBusy {
+                Circle()
+                    .fill(Color.orange)
+                    .frame(width: 7, height: 7)
+                    .accessibilityHidden(true)
+            } else {
+                Image(systemName: TreadmillFormat.glyph)
+                    .madFont(size: 12, weight: .bold)
+                    .accessibilityHidden(true)
             }
-            return "Treadmill connected"
-        case .connecting:
-            return "Connecting…"
-        default:
-            return "Connect treadmill"
+            Text(link.isBusy ? "Finish connecting your treadmill" : "Connect treadmill")
+                .madFont(size: 13, weight: .bold, design: .rounded)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
         }
+        .foregroundColor(.white)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(Capsule().fill(Color.white.opacity(0.16)))
+    }
+
+    private var connectedCard: some View {
+        HStack(spacing: 12) {
+            Image(systemName: TreadmillFormat.glyph)
+                .madFont(size: 20, weight: .semibold)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text("Treadmill distance")
+                        .madFont(size: 14, weight: .heavy, design: .rounded)
+                        .lineLimit(1)
+                    LiveDot()
+                }
+                Text(detail)
+                    .madFont(size: 13, weight: .semibold, design: .rounded, monospacedDigit: true)
+                    .opacity(0.8)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+            Spacer(minLength: 8)
+            Image(systemName: "chevron.right")
+                .madFont(size: 12, weight: .bold)
+                .opacity(0.6)
+                .accessibilityHidden(true)
+        }
+        .foregroundColor(.white)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color.white.opacity(0.14))
+        )
+        .accessibilityElement(children: .combine)
+        .accessibilityHint("Shows the connected treadmill")
+    }
+
+    private var detail: String {
+        var parts: [String] = []
+        if let kmh = link.speedKmh { parts.append(TreadmillFormat.speed(kmh: kmh)) }
+        if let incline = link.inclinePercent, incline != 0 {
+            parts.append("\(TreadmillFormat.incline(incline)) incline")
+        }
+        return parts.isEmpty ? "Connected" : parts.joined(separator: " · ")
+    }
+}
+
+/// Small green "LIVE" tag. Static (no pulse), so nothing to gate on
+/// Reduce Motion.
+private struct LiveDot: View {
+    var body: some View {
+        HStack(spacing: 3) {
+            Circle().fill(Color.green).frame(width: 6, height: 6)
+            Text("LIVE")
+                .madFont(size: 9, weight: .heavy, design: .rounded)
+                .tracking(0.8)
+        }
+        .foregroundColor(.green)
+        .accessibilityLabel("Live")
     }
 }
 
@@ -92,13 +158,21 @@ struct TreadmillConnectSheet: View {
     private let link = TreadmillLink.shared
     @Environment(\.dismiss) private var dismiss
     @State private var scanStartedAt = Date()
+    @State private var showList = false
+    /// Set when the proof lands while the sheet is open: celebrate, then
+    /// close on its own. Opening the sheet already-connected never does.
+    @State private var justConfirmed = false
+
+    private enum Step: Int { case find, confirm, counting }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                Text("Connect a treadmill")
+                Text("Connect your treadmill")
                     .madFont(size: 22, weight: .heavy, design: .rounded)
                     .padding(.top, 24)
+
+                stepper
 
                 content
 
@@ -112,14 +186,22 @@ struct TreadmillConnectSheet: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .onAppear {
-            if !link.isConnected, !isConnecting {
+            if !link.isConnected, !link.isBusy {
                 scanStartedAt = Date()
                 link.startScanning()
             }
         }
         .onDisappear {
-            // Leave a live connection alone; stop a scan nobody is watching.
-            if !link.isConnected, !isConnecting { link.stopScanning() }
+            // Leave a connection alone; stop a scan nobody is watching.
+            if !link.isConnected, !link.isBusy { link.stopScanning() }
+        }
+        .onChange(of: link.isConnected) { _, connected in
+            guard connected else { return }
+            MADHaptics.success()
+            justConfirmed = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) {
+                if justConfirmed, link.isConnected { dismiss() }
+            }
         }
         // Auto-connect to the machine the phone is lying on. Polled rather
         // than observed: the candidate needs a hold time, not just a change.
@@ -134,24 +216,63 @@ struct TreadmillConnectSheet: View {
         }
     }
 
-    private var isConnecting: Bool {
-        if case .connecting = link.phase { return true }
-        return false
+    // MARK: Step indicator
+
+    private var step: Step {
+        switch link.phase {
+        case .confirming, .unconfirmed: return .confirm
+        case .connected: return .counting
+        case .connecting: return .confirm
+        default: return .find
+        }
     }
+
+    private var stepper: some View {
+        HStack(spacing: 6) {
+            stepPill("Find", .find)
+            stepPill("Confirm", .confirm)
+            stepPill("Counting", .counting)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Step \(step.rawValue + 1) of 3")
+    }
+
+    private func stepPill(_ title: String, _ pill: Step) -> some View {
+        let reached = step.rawValue >= pill.rawValue
+        return VStack(alignment: .leading, spacing: 5) {
+            Capsule()
+                .fill(reached ? MADTheme.Colors.madRed : Color.primary.opacity(0.12))
+                .frame(height: 4)
+            Text(title)
+                .madFont(size: 11, weight: .bold, design: .rounded)
+                .foregroundColor(reached ? .primary : .secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .animation(.easeOut(duration: 0.25), value: reached)
+    }
+
+    // MARK: Content per phase
 
     @ViewBuilder
     private var content: some View {
         switch link.phase {
         case .idle, .scanning:
-            scanning
+            find
         case .connecting(let name):
             HStack(spacing: 12) {
                 ProgressView()
                 Text("Connecting to \(name)…")
                     .madFont(size: 16, weight: .semibold)
+                    .lineLimit(2)
             }
+        case .confirming(let name):
+            confirm(name: name)
+        case .unconfirmed(let name):
+            unconfirmed(name: name)
         case .connected(let name):
-            connected(name: name)
+            counting(name: name)
         case .failed(let message):
             notice(
                 icon: "exclamationmark.triangle.fill",
@@ -179,55 +300,28 @@ struct TreadmillConnectSheet: View {
         }
     }
 
-    private var scanning: some View {
+    // Step 1
+    private var find: some View {
         VStack(alignment: .leading, spacing: 14) {
-            step(1, "Start the belt on the treadmill.")
-            step(2, "Hold your phone flat on the treadmill's screen. We'll connect to it automatically.")
+            Text("Hold your phone flat on your treadmill's screen.")
+                .madFont(size: 17, weight: .bold)
+                .fixedSize(horizontal: false, vertical: true)
 
-            HStack(spacing: 10) {
-                ProgressView()
-                Text("Looking for treadmills…")
-                    .madFont(size: 14, weight: .medium)
-                    .foregroundColor(.secondary)
-            }
-            .padding(.top, 4)
+            signalMeter
 
             if !link.nearby.isEmpty {
-                Text("Or pick yours")
-                    .madFont(size: 13, weight: .bold)
-                    .foregroundColor(.secondary)
-                    .padding(.top, 6)
-                ForEach(link.nearby.prefix(6)) { machine in
-                    Button {
-                        link.connect(machine.id)
-                    } label: {
-                        HStack(spacing: 12) {
-                            Image(systemName: TreadmillFormat.glyph)
-                                .madFont(size: 16, weight: .semibold)
-                                .accessibilityHidden(true)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(machine.name)
-                                    .madFont(size: 15, weight: .semibold)
-                                    .lineLimit(1)
-                                Text(proximity(machine.rssi))
-                                    .madFont(size: 12, weight: .medium)
-                                    .foregroundColor(.secondary)
-                                    .lineLimit(1)
-                            }
-                            Spacer(minLength: 8)
-                            Image(systemName: "chevron.right")
-                                .madFont(size: 12, weight: .bold)
-                                .foregroundColor(.secondary)
-                                .accessibilityHidden(true)
+                DisclosureGroup(isExpanded: $showList) {
+                    VStack(spacing: 8) {
+                        ForEach(link.nearby.prefix(6)) { machine in
+                            machineRow(machine)
                         }
-                        .padding(12)
-                        .background(
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .fill(Color.primary.opacity(0.06))
-                        )
                     }
-                    .buttonStyle(.plain)
+                    .padding(.top, 8)
+                } label: {
+                    Text("Or pick from a list (\(link.nearby.count) nearby)")
+                        .madFont(size: 14, weight: .semibold)
                 }
+                .tint(.primary)
             } else {
                 TimelineView(.periodic(from: scanStartedAt, by: 1)) { context in
                     if context.date.timeIntervalSince(scanStartedAt) > 10 {
@@ -241,84 +335,202 @@ struct TreadmillConnectSheet: View {
         }
     }
 
-    private func connected(name: String) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
+    /// Warmer/colder: fills as the nearest machine's signal climbs to
+    /// on-console strength, which is also the auto-connect threshold.
+    private var signalMeter: some View {
+        let level = link.nearestSignal
+        return VStack(alignment: .leading, spacing: 8) {
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Color.primary.opacity(0.1))
+                    Capsule()
+                        .fill(level >= 1 ? Color.green : MADTheme.Colors.madRed)
+                        .frame(width: max(10, geo.size.width * level))
+                }
+            }
+            .frame(height: 12)
+            .animation(.easeOut(duration: 0.3), value: level)
+
             HStack(spacing: 8) {
-                Circle().fill(Color.green).frame(width: 9, height: 9)
+                if level < 1 { ProgressView().controlSize(.small) }
+                Text(meterCaption(level))
+                    .madFont(size: 13, weight: .semibold)
+                    .foregroundColor(.secondary)
+                    .lineLimit(2)
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private func meterCaption(_ level: Double) -> String {
+        if link.nearby.isEmpty { return "Looking for treadmills…" }
+        if level >= 1 { return "Found it. Connecting…" }
+        if level >= 0.6 { return "Getting warmer. Keep it right on the screen." }
+        return "Bring your phone closer to the console."
+    }
+
+    private func machineRow(_ machine: TreadmillLink.Nearby) -> some View {
+        Button {
+            link.connect(machine.id)
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: TreadmillFormat.glyph)
+                    .madFont(size: 16, weight: .semibold)
                     .accessibilityHidden(true)
-                Text("Connected to \(name)")
-                    .madFont(size: 15, weight: .semibold)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(machine.name)
+                        .madFont(size: 15, weight: .semibold)
+                        .lineLimit(1)
+                    Text(proximity(machine.rssi))
+                        .madFont(size: 12, weight: .medium)
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.right")
+                    .madFont(size: 12, weight: .bold)
+                    .foregroundColor(.secondary)
+                    .accessibilityHidden(true)
             }
+            .padding(12)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color.primary.opacity(0.06))
+            )
+        }
+        .buttonStyle(.plain)
+    }
 
-            HStack(alignment: .firstTextBaseline, spacing: 18) {
-                metric(
-                    value: link.speedKmh.map { TreadmillFormat.speed(kmh: $0) } ?? "—",
-                    caption: "Belt speed"
-                )
-                metric(value: link.segmentMiles.distanceFormatted, caption: "Counted so far")
-            }
-
-            Text("Check the speed matches your treadmill. If it doesn't, it's a neighbour's machine: disconnect and pick another.")
-                .madFont(size: 13, weight: .medium)
+    // Step 2
+    private func confirm(name: String) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Press speed ▲ or GO on your treadmill once.")
+                .madFont(size: 17, weight: .bold)
+                .fixedSize(horizontal: false, vertical: true)
+            Text("That's how we know \(name) is yours and not the one next to you.")
+                .madFont(size: 14, weight: .medium)
                 .foregroundColor(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
             HStack(spacing: 12) {
-                Button {
-                    link.disconnect()
-                    scanStartedAt = Date()
-                    link.startScanning()
-                } label: {
-                    Text("Disconnect")
-                        .madFont(size: 15, weight: .bold)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
-                        .background(Capsule().fill(Color.primary.opacity(0.08)))
+                ProgressView()
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(link.speedKmh.map { TreadmillFormat.speed(kmh: $0) } ?? "—")
+                        .madFont(size: 28, weight: .bold, design: .rounded, monospacedDigit: true)
+                        .contentTransition(.numericText())
+                        .lineLimit(1)
+                    Text("This treadmill's speed right now")
+                        .madFont(size: 12, weight: .medium)
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                 }
-                .buttonStyle(.plain)
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(Color.primary.opacity(0.06))
+            )
+        }
+    }
 
-                Button {
-                    dismiss()
-                } label: {
-                    Text("Done")
-                        .madFont(size: 15, weight: .bold)
-                        .foregroundColor(.white)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
-                        .background(Capsule().fill(MADTheme.Colors.madRed))
+    private func unconfirmed(name: String) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            notice(
+                icon: "questionmark.circle.fill",
+                title: "We didn't see \(name) change speed. It may be the treadmill next to you.",
+                action: nil
+            )
+            HStack(spacing: 12) {
+                secondaryButton("Try again") { link.rearmConfirmation() }
+                if link.hasUntriedNearby {
+                    primaryButton("Try the next one") { link.tryNextNearest() }
                 }
-                .buttonStyle(.plain)
             }
         }
     }
 
-    private func metric(value: String, caption: String) -> some View {
+    // Step 3
+    private func counting(name: String) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 10) {
+                Image(systemName: "checkmark.circle.fill")
+                    .madFont(size: 22, weight: .bold)
+                    .foregroundColor(.green)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(justConfirmed ? "It's yours!" : "Connected to \(name)")
+                        .madFont(size: 17, weight: .bold)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                    Text("Your mile now counts the treadmill's own distance.")
+                        .madFont(size: 13, weight: .medium)
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                metric(link.speedKmh.map { TreadmillFormat.speed(kmh: $0) } ?? "—", "Speed")
+                metric(link.inclinePercent.map { TreadmillFormat.incline($0) } ?? "—", "Incline")
+                metric(link.segmentMiles.distanceFormatted, "From the belt")
+            }
+
+            HStack(spacing: 12) {
+                secondaryButton("Disconnect") {
+                    justConfirmed = false
+                    link.disconnect()
+                    scanStartedAt = Date()
+                    link.startScanning()
+                }
+                primaryButton("Done") { dismiss() }
+            }
+        }
+    }
+
+    // MARK: Pieces
+
+    private func metric(_ value: String, _ caption: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(value)
-                .madFont(size: 26, weight: .bold, design: .rounded, monospacedDigit: true)
+                .madFont(size: 22, weight: .bold, design: .rounded, monospacedDigit: true)
                 .lineLimit(1)
-                .minimumScaleFactor(0.6)
+                .minimumScaleFactor(0.55)
             Text(caption)
                 .madFont(size: 12, weight: .medium)
                 .foregroundColor(.secondary)
                 .lineLimit(1)
+                .minimumScaleFactor(0.8)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func step(_ n: Int, _ text: String) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 10) {
-            Text("\(n)")
-                .madFont(size: 13, weight: .heavy, design: .rounded)
+    private func primaryButton(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .madFont(size: 15, weight: .bold)
                 .foregroundColor(.white)
-                .frame(width: 22, height: 22)
-                .background(Circle().fill(MADTheme.Colors.madRed))
-            Text(text)
-                .madFont(size: 15, weight: .medium)
-                .fixedSize(horizontal: false, vertical: true)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+                .background(Capsule().fill(MADTheme.Colors.madRed))
         }
+        .buttonStyle(.plain)
+    }
+
+    private func secondaryButton(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .madFont(size: 15, weight: .bold)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+                .background(Capsule().fill(Color.primary.opacity(0.08)))
+        }
+        .buttonStyle(.plain)
     }
 
     private func notice(icon: String, title: String, action: (String, () -> Void)?) -> some View {
@@ -333,15 +545,7 @@ struct TreadmillConnectSheet: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             if let action {
-                Button(action: action.1) {
-                    Text(action.0)
-                        .madFont(size: 15, weight: .bold)
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 10)
-                        .background(Capsule().fill(MADTheme.Colors.madRed))
-                }
-                .buttonStyle(.plain)
+                primaryButton(action.0, action: action.1)
             }
         }
     }

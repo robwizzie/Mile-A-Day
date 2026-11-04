@@ -843,7 +843,7 @@ struct WorkoutTrackingView: View {
                         // over Bluetooth. Renders nothing outdoors, or when the
                         // indoor session fell back to GPS.
                         if isTracking, !isStopping, locationManager.acceptsTreadmill {
-                            TreadmillChip()
+                            TreadmillTrackerRow()
                         }
 
                         distanceDisplay
@@ -1125,7 +1125,11 @@ struct WorkoutTrackingView: View {
             Text("·")
                 .madFont(size: 11, weight: .heavy, design: .rounded)
                 .opacity(0.5)
-            Text(selectedLocationType == .indoor ? "INDOOR" : "OUTDOOR")
+            // TREADMILL once a treadmill is proven and counting, so the
+            // caption says where the number is coming from.
+            Text(selectedLocationType == .indoor
+                 ? (TreadmillLink.shared.isConnected ? "TREADMILL" : "INDOOR")
+                 : "OUTDOOR")
                 .madFont(size: 11, weight: .heavy, design: .rounded)
                 .tracking(1.5)
                 .opacity(0.75)

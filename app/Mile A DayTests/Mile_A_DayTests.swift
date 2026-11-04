@@ -69,4 +69,17 @@ struct TreadmillDataTests {
         #expect(odometer.ingest(totalMeters: 2004, at: t0.addingTimeInterval(8)) == 14)
         #expect(odometer.ingest(totalMeters: 2008, at: t0.addingTimeInterval(9)) == 18)
     }
+
+    @Test func ownershipNeedsASpeedChange() {
+        var check = TreadmillOwnershipCheck()
+        #expect(!check.observe(speedKmh: 4.82)) // baseline
+        #expect(!check.observe(speedKmh: 4.82)) // nobody pressed anything
+        #expect(check.observe(speedKmh: 4.99))  // one press: +0.1 mph
+    }
+
+    @Test func ownershipAcceptsGoFromAStoppedBelt() {
+        var check = TreadmillOwnershipCheck()
+        #expect(!check.observe(speedKmh: nil))
+        #expect(check.observe(speedKmh: 0.8))
+    }
 }

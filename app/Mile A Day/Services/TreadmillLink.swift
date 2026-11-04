@@ -22,7 +22,11 @@
 //  Picking the machine: a gym is a wall of identical `LF…` advertisers. The
 //  sheet asks for the phone to be held on the console and auto-connects only
 //  to a machine that is clearly the strongest signal (`autoPickCandidate`);
-//  everything else is a manual pick from the list, nearest first.
+//  everything else is a manual pick from the list, nearest first. Signal
+//  strength only NOMINATES a machine: no belt distance counts until the user
+//  presses speed or GO and THAT machine's speed changes
+//  (`TreadmillOwnershipCheck`, phase `.confirming`). No change in 20 s →
+//  `.unconfirmed`, with "Try the next one" moving down the list.
 //
 
 import Foundation
@@ -157,6 +161,26 @@ struct TreadmillOdometer: Equatable {
     }
 }
 
+/// Proof the connected machine is the user's own: the user presses speed
+/// up/down (or GO) once, and the belt speed THIS machine reports changes.
+/// A neighbour's treadmill changing speed in that same window is the only
+/// way to fool it. Pure, so the rule is testable.
+struct TreadmillOwnershipCheck: Equatable {
+    /// One press on a Life Fitness console is 0.1 mph = 0.16 km/h.
+    static let minimumChangeKmh = 0.15
+    private var baselineKmh: Double?
+
+    /// Feed each reading's speed; true once it moved from the first one.
+    mutating func observe(speedKmh: Double?) -> Bool {
+        let speed = speedKmh ?? 0
+        guard let baselineKmh else {
+            self.baselineKmh = speed
+            return false
+        }
+        return abs(speed - baselineKmh) >= Self.minimumChangeKmh
+    }
+}
+
 // MARK: - Connection
 
 @Observable
@@ -174,6 +198,13 @@ final class TreadmillLink: NSObject {
         case bluetoothOff
         case scanning
         case connecting(name: String)
+        /// Connected, waiting for the user's speed press to prove it's theirs.
+        /// No belt distance counts yet.
+        case confirming(name: String)
+        /// No speed change seen in `confirmWindow`: likely a neighbour's.
+        /// Still connected so "Try again" doesn't reconnect.
+        case unconfirmed(name: String)
+        /// Proven and counting.
         case connected(name: String)
         /// The machine dropped or never answered; scanning restarts on retry.
         case failed(String)
@@ -201,6 +232,27 @@ final class TreadmillLink: NSObject {
         return false
     }
 
+    /// Mid-handshake: connecting, or connected but not yet proven.
+    var isBusy: Bool {
+        switch phase {
+        case .connecting, .confirming, .unconfirmed: return true
+        default: return false
+        }
+    }
+
+    /// 0…1 "getting warmer" for the nearest machine: −90 dBm (across the
+    /// room) to the on-console strength.
+    var nearestSignal: Double {
+        guard let rssi = nearby.first?.rssi else { return 0 }
+        let low = -90.0, high = Double(Self.onConsoleRSSI)
+        return min(1, max(0, (Double(rssi) - low) / (high - low)))
+    }
+
+    /// Whether another not-yet-tried machine is in the list.
+    var hasUntriedNearby: Bool {
+        nearby.contains { !tried.contains($0.id) }
+    }
+
     @ObservationIgnored private var central: CBCentralManager?
     @ObservationIgnored private var peripherals: [UUID: CBPeripheral] = [:]
     @ObservationIgnored private var active: CBPeripheral?
@@ -209,6 +261,13 @@ final class TreadmillLink: NSObject {
     @ObservationIgnored private var connectTimeout: DispatchWorkItem?
     /// Candidate that has been the clear nearest since this time.
     @ObservationIgnored private var autoPickSince: (id: UUID, at: Date)?
+    @ObservationIgnored private var ownership = TreadmillOwnershipCheck()
+    @ObservationIgnored private var confirmTimeout: DispatchWorkItem?
+    /// Machines tried this sheet session, so "Try the next one" moves on.
+    @ObservationIgnored private var tried: Set<UUID> = []
+
+    /// How long the user has to press a speed button.
+    static let confirmWindow: TimeInterval = 20
 
     /// RSSI a phone lying ON the console reaches; neighbours sit well below.
     static let onConsoleRSSI = -55
@@ -245,6 +304,8 @@ final class TreadmillLink: NSObject {
             central.cancelPeripheralConnection(current)
         }
         active = peripheral
+        tried.insert(id)
+        confirmTimeout?.cancel()
         peripheral.delegate = self
         phase = .connecting(name: Self.displayName(peripheral.name))
         central.connect(peripheral)
@@ -264,6 +325,8 @@ final class TreadmillLink: NSObject {
     /// credited stays credited — the tracker's distance only ratchets.
     func disconnect() {
         connectTimeout?.cancel()
+        confirmTimeout?.cancel()
+        tried = []
         wantsScan = false
         central?.stopScan()
         if let active { central?.cancelPeripheralConnection(active) }
@@ -272,6 +335,28 @@ final class TreadmillLink: NSObject {
         nearby = []
         autoPickSince = nil
         phase = .idle
+    }
+
+    /// Start the speed-press check over on the machine already connected.
+    func rearmConfirmation() {
+        guard let active else { return }
+        armConfirmation(name: Self.displayName(active.name))
+    }
+
+    /// The machine didn't respond to the user's press: drop it and connect
+    /// to the next-nearest one not tried yet. Back to scanning if none.
+    func tryNextNearest() {
+        confirmTimeout?.cancel()
+        if let active { central?.cancelPeripheralConnection(active) }
+        active = nil
+        resetLiveNumbers()
+        if let next = nearby.first(where: { !tried.contains($0.id) }) {
+            connect(next.id)
+        } else {
+            tried = []
+            phase = .idle
+            startScanning()
+        }
     }
 
     /// The nearest machine, when it is unmistakably the one the phone is
@@ -307,6 +392,28 @@ final class TreadmillLink: NSObject {
             withServices: [Self.fitnessMachineService],
             options: [CBCentralManagerScanOptionAllowDuplicatesKey: true]
         )
+    }
+
+    private func armConfirmation(name: String) {
+        ownership = TreadmillOwnershipCheck()
+        phase = .confirming(name: name)
+        confirmTimeout?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, case .confirming(let name) = self.phase else { return }
+            self.phase = .unconfirmed(name: name)
+        }
+        confirmTimeout = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.confirmWindow, execute: work)
+    }
+
+    private func confirmOwnership(name: String) {
+        confirmTimeout?.cancel()
+        // Distance counts from HERE: a fresh odometer, so the belt ground
+        // covered before the proof is never credited.
+        odometer = TreadmillOdometer()
+        segmentMiles = 0
+        WorkoutLocationManager.shared.beginTreadmillSegment()
+        phase = .connected(name: name)
     }
 
     private func resetLiveNumbers() {
@@ -349,6 +456,16 @@ final class TreadmillLink: NSObject {
     private func ingest(_ sample: FTMSTreadmillSample) {
         speedKmh = sample.speedKmh
         inclinePercent = sample.inclinePercent
+        switch phase {
+        case .confirming(let name):
+            guard ownership.observe(speedKmh: sample.speedKmh) else { return }
+            confirmOwnership(name: name)
+            // Fall through so this reading becomes the odometer's baseline.
+        case .connected:
+            break
+        default:
+            return
+        }
         guard let total = sample.totalDistanceMeters else { return }
         let meters = odometer.ingest(totalMeters: total, at: Date())
         let miles = meters / 1609.344
@@ -359,6 +476,7 @@ final class TreadmillLink: NSObject {
 
     private func connectionLost(_ message: String?) {
         connectTimeout?.cancel()
+        confirmTimeout?.cancel()
         active = nil
         resetLiveNumbers()
         if let message {
@@ -441,8 +559,7 @@ extension TreadmillLink: CBCentralManagerDelegate, CBPeripheralDelegate {
         }
         connectTimeout?.cancel()
         resetLiveNumbers()
-        WorkoutLocationManager.shared.beginTreadmillSegment()
-        phase = .connected(name: Self.displayName(peripheral.name))
+        armConfirmation(name: Self.displayName(peripheral.name))
     }
 
     func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
