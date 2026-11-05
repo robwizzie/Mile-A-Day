@@ -3,52 +3,33 @@ import UIKit
 
 /// Launch experience for Mile A Day.
 ///
-/// Design intent: keep the signature "sprint in" entrance, but cleaner and
-/// more alive. A runner sprints in from the left trailed by a soft motion
-/// blur, hands off to the MAD mark at center with a burst of energy, a light
-/// shine sweeps across the logo, and the wordmark resolves beneath it — over
-/// a living, gently drifting backdrop. A heavy haptic lands with the mark and
-/// a soft tick accompanies the wordmark. The tagline rotates each launch.
-/// Ambient motion is disabled under Reduce Motion.
+/// One lap, one mark: a ring draws itself around the centre like a mile being
+/// run (a glowing comet leads the stroke), and the moment the lap closes the
+/// MAD mark springs in with a pulse, a burst of embers and a haptic thump.
+/// "Mile A Day" and a rotating tagline rise in underneath, then the splash
+/// hands off on its own.
+///
+/// Every frame is a pure function of the time since the view appeared
+/// (`TimelineView` + `frame(at:)`), never a chain of `withAnimation` /
+/// `asyncAfter` state flips. That is what keeps the entrance glitch-free: a
+/// first frame rendered before `onAppear`, a safe-area settle or a slow launch
+/// can't leave one layer mid-animation while another restarts, because there
+/// is no animation state to get out of step. The splash also owns its own
+/// exit (`handoffDelay`), so it can't be cut off mid-animation by a timer
+/// that started before it was on screen. `AppStateManager` keeps a later
+/// fallback in case the view never appears.
 struct SplashView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    // Runner sprint (progress 0 = offscreen left, 1 = centered on the mark)
-    @State private var runProgress: CGFloat = 0
-    @State private var runnerOpacity: Double = 0
-    @State private var trailOpacity: Double = 0
-    @State private var runnerScale: CGFloat = 1.0
+    @State private var start: Date?
+    @State private var tagline: String = SplashView.taglines.randomElement() ?? "One day, one mile."
 
-    // Living background drift
-    @State private var driftA = false
-    @State private var driftB = false
+    /// When the splash hands off to the next screen (seconds after appear).
+    static let handoffDelay: TimeInterval = 1.75
+    private static let reducedHandoffDelay: TimeInterval = 0.9
 
-    // Atmosphere / glow
-    @State private var auraOpacity: Double = 0
-    @State private var auraIntroScale: CGFloat = 0.85
-    @State private var auraBreathe: CGFloat = 1.0
-
-    // Logo
-    @State private var logoScale: CGFloat = 0.5
-    @State private var logoOpacity: Double = 0
-
-    // Landing reward
-    @State private var flashScale: CGFloat = 0.3
-    @State private var flashOpacity: Double = 0
-    @State private var pulseScale: CGFloat = 0.6
-    @State private var pulseOpacity: Double = 0
-    @State private var shineX: CGFloat = -120
-
-    // Text
-    @State private var titleOpacity: Double = 0
-    @State private var titleOffset: CGFloat = 14
-    @State private var taglineOpacity: Double = 0
-    @State private var tagline: String = SplashView.taglines.randomElement() ?? "Stay Active. Stay Motivated."
-
-    // MARK: - Content
     private static let taglines = [
-        "Stay Active. Stay Motivated.",
         "One mile closer.",
         "Every mile counts.",
         "Today's mile awaits.",
@@ -57,292 +38,212 @@ struct SplashView: View {
         "Chase the streak."
     ]
 
-    // MARK: - Layout constants (fixed → consistent on every device)
-    private let stageSize: CGFloat = 176
-    private let logoSize: CGFloat = 104
-    private let runnerSize: CGFloat = 48
-    private let echoSpacing: [CGFloat] = [16, 30, 42]
-    private let echoOpacity: [Double] = [0.45, 0.28, 0.15]
+    // MARK: - Timeline (seconds after appear)
+    private enum Beat {
+        static let lapStart: Double = 0.10
+        static let lapClose: Double = 0.80
+        static let markIn: Double = 0.68
+        static let markSettled: Double = 1.12
+        static let burstEnd: Double = 1.35
+        static let titleIn: Double = 1.00
+        static let taglineIn: Double = 1.15
+        static let textSettled: Double = 0.38
+    }
+
+    // MARK: - Layout (fixed so every device gets the same composition)
+    private let ringSize: CGFloat = 148
+    private let ringWidth: CGFloat = 7
+    private let logoSize: CGFloat = 88
+    private let sparkCount = 10
 
     // MARK: - Palette
     private var isDark: Bool { colorScheme == .dark }
-    private var accentRed: Color { MADTheme.Colors.madRed }
-    private var accentBright: Color { Color(red: 1.0, green: 0.44, blue: 0.54) }
-
-    private var titleColor: Color {
-        isDark ? .white : Color(red: 0.11, green: 0.11, blue: 0.13)
+    private let red = MADTheme.Colors.madRed
+    private let orange = Color(red: 1.0, green: 0.55, blue: 0.24)
+    private var background: Color {
+        isDark ? Color(red: 0.05, green: 0.03, blue: 0.04) : Color(red: 0.98, green: 0.97, blue: 0.97)
     }
-    private var subtitleColor: Color {
-        isDark ? .white.opacity(0.62) : Color(red: 0.42, green: 0.40, blue: 0.44)
-    }
-
-    // MARK: - Living background
-
-    private var backgroundView: some View {
-        ZStack {
-            (isDark ? Color(red: 0.05, green: 0.03, blue: 0.04)
-                    : Color(red: 0.97, green: 0.96, blue: 0.96))
-
-            LinearGradient(
-                colors: isDark
-                    ? [Color(red: 0.13, green: 0.06, blue: 0.08),
-                       Color(red: 0.06, green: 0.03, blue: 0.05),
-                       Color(red: 0.03, green: 0.02, blue: 0.03)]
-                    : [Color(red: 0.99, green: 0.98, blue: 0.98),
-                       Color(red: 0.95, green: 0.94, blue: 0.95),
-                       Color(red: 0.92, green: 0.91, blue: 0.93)],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-
-            // Two slow-drifting warm glows — ambient life
-            driftGlow(size: 340, opacity: isDark ? 0.34 : 0.15)
-                .offset(x: driftA ? -36 : -96, y: driftA ? -180 : -220)
-            driftGlow(size: 300, opacity: isDark ? 0.22 : 0.10)
-                .offset(x: driftB ? 92 : 46, y: driftB ? 214 : 258)
-
-            // Depth vignette
-            RadialGradient(
-                colors: [.clear, .black.opacity(isDark ? 0.34 : 0.05)],
-                center: .center, startRadius: 130, endRadius: 440
-            )
-        }
-        .ignoresSafeArea()
-    }
-
-    private func driftGlow(size: CGFloat, opacity: Double) -> some View {
-        Circle()
-            .fill(
-                RadialGradient(
-                    colors: [accentRed.opacity(opacity), accentRed.opacity(0)],
-                    center: .center, startRadius: 0, endRadius: size / 2
-                )
-            )
-            .frame(width: size, height: size)
-            .blur(radius: 46)
-    }
+    private var titleColor: Color { isDark ? .white : Color(red: 0.11, green: 0.11, blue: 0.13) }
+    private var subtitleColor: Color { isDark ? .white.opacity(0.6) : Color(red: 0.42, green: 0.40, blue: 0.44) }
+    private var trackColor: Color { isDark ? .white.opacity(0.08) : .black.opacity(0.06) }
 
     var body: some View {
-        GeometryReader { geo in
-            let startX = -(geo.size.width / 2 + 80)
-            let runnerX = startX * (1 - runProgress)
-
-            ZStack {
-                backgroundView
-
-                VStack(spacing: 40) {
-                    stage(runnerX: runnerX)
-                    textBlock
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .padding(.horizontal, 32)
-            }
-            .frame(width: geo.size.width, height: geo.size.height)
+        TimelineView(.animation(minimumInterval: nil, paused: start == nil)) { context in
+            let t = start.map { context.date.timeIntervalSince($0) } ?? 0
+            frame(at: t)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(background.ignoresSafeArea())
+        .onAppear(perform: begin)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Mile A Day")
+    }
+
+    // MARK: - Frame
+
+    @ViewBuilder
+    private func frame(at t: Double) -> some View {
+        if reduceMotion {
+            // No motion: the finished composition, faded in once.
+            composition(at: 10)
+                .opacity(Self.progress(t, 0, 0.3))
+        } else {
+            composition(at: t)
+        }
+    }
+
+    private func composition(at t: Double) -> some View {
+        VStack(spacing: 36) {
+            lap(at: t)
+            text(at: t)
+        }
+        .padding(.horizontal, 32)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(glow(at: t))
+    }
+
+    /// Warm light behind the mark, brightening as the lap runs.
+    private func glow(at t: Double) -> some View {
+        let p = Self.easeOut(Self.progress(t, 0, Beat.lapClose))
+        return RadialGradient(
+            colors: [red.opacity((isDark ? 0.30 : 0.12) * p), .clear],
+            center: .center, startRadius: 0, endRadius: 260
+        )
+        .offset(y: -40)
         .ignoresSafeArea()
-        .onAppear { startAnimations() }
     }
 
-    // MARK: - Runner + logo stage
+    // MARK: - Lap + mark
 
-    private func stage(runnerX: CGFloat) -> some View {
-        ZStack {
-            // Breathing glow that blooms as the mark lands
+    private func lap(at t: Double) -> some View {
+        let lap = Self.easeInOut(Self.progress(t, Beat.lapStart, Beat.lapClose))
+        let burst = Self.easeOut(Self.progress(t, Beat.lapClose, Beat.burstEnd))
+        let closed = t >= Beat.lapClose
+        let mark = Self.progress(t, Beat.markIn, Beat.markSettled)
+        let radius = ringSize / 2
+
+        return ZStack {
+            // Track
             Circle()
-                .fill(
-                    RadialGradient(
-                        colors: [accentRed.opacity(isDark ? 0.40 : 0.20), accentRed.opacity(0)],
-                        center: .center, startRadius: 0, endRadius: 190
-                    )
-                )
-                .frame(width: 360, height: 360)
-                .scaleEffect(auraIntroScale)
-                .scaleEffect(auraBreathe)
-                .opacity(auraOpacity)
-                .blur(radius: 14)
+                .stroke(trackColor, lineWidth: ringWidth)
+                .opacity(Self.progress(t, 0, 0.25))
 
-            // Motion-blur echoes (converge on center as the runner slows)
-            ForEach(0..<echoSpacing.count, id: \.self) { i in
-                Image(systemName: "figure.run")
-                    .font(.system(size: runnerSize, weight: .medium))
-                    .foregroundColor(accentRed)
-                    .scaleEffect(runnerScale)
-                    .opacity(trailOpacity * echoOpacity[i])
-                    .blur(radius: 1.5)
-                    .offset(x: runnerX - echoSpacing[i] * (1 - runProgress))
+            // The lap being run
+            Circle()
+                .trim(from: 0, to: lap)
+                .stroke(
+                    AngularGradient(colors: [red, orange, red], center: .center),
+                    style: StrokeStyle(lineWidth: ringWidth, lineCap: .round)
+                )
+                .rotationEffect(.degrees(-90))
+
+            // Comet head leading the stroke; fades as the lap closes
+            Circle()
+                .fill(.white)
+                .frame(width: ringWidth + 3, height: ringWidth + 3)
+                .shadow(color: orange, radius: 8)
+                .offset(y: -radius)
+                .rotationEffect(.degrees(360 * lap))
+                .opacity(lap > 0 ? 1 - Self.progress(t, Beat.lapClose - 0.08, Beat.lapClose + 0.1) : 0)
+
+            // Pulse ring when the lap closes
+            Circle()
+                .stroke(orange, lineWidth: 2)
+                .scaleEffect(1 + 0.32 * burst)
+                .opacity(closed ? 0.8 * (1 - burst) : 0)
+
+            // Ember burst
+            ForEach(0..<sparkCount, id: \.self) { i in
+                let angle = Angle.degrees(Double(i) * 360 / Double(sparkCount) + 18)
+                let distance = radius + 10 + 34 * CGFloat(burst)
+                Circle()
+                    .fill(i.isMultiple(of: 2) ? orange : red)
+                    .frame(width: 5, height: 5)
+                    .scaleEffect(1 - 0.6 * burst)
+                    .offset(x: CGFloat(cos(angle.radians)) * distance, y: CGFloat(sin(angle.radians)) * distance)
+                    .opacity(closed ? 1 - burst : 0)
             }
 
-            // Lead runner
-            Image(systemName: "figure.run")
-                .font(.system(size: runnerSize, weight: .semibold))
-                .foregroundColor(accentRed)
-                .scaleEffect(runnerScale)
-                .opacity(runnerOpacity)
-                .offset(x: runnerX)
-
-            // Landing energy flash
-            Circle()
-                .fill(
-                    RadialGradient(
-                        colors: [accentBright.opacity(0.9), accentBright.opacity(0)],
-                        center: .center, startRadius: 0, endRadius: 120
-                    )
-                )
-                .frame(width: 220, height: 220)
-                .scaleEffect(flashScale)
-                .opacity(flashOpacity)
-                .blur(radius: 6)
-
-            // Impact ring
-            Circle()
-                .stroke(accentBright, lineWidth: 2)
-                .frame(width: stageSize * 0.86, height: stageSize * 0.86)
-                .scaleEffect(pulseScale)
-                .opacity(pulseOpacity)
-
-            // MAD mark with a light shine sweep
+            // The mark springs in as the lap closes
             Image("mad-logo")
                 .resizable()
                 .aspectRatio(contentMode: .fit)
                 .frame(width: logoSize, height: logoSize)
-                .overlay(shineOverlay)
-                .scaleEffect(logoScale)
-                .opacity(logoOpacity)
-                .shadow(color: accentRed.opacity(isDark ? 0.35 : 0.18), radius: 22, x: 0, y: 10)
+                .clipShape(RoundedRectangle(cornerRadius: logoSize * 0.22, style: .continuous))
+                .scaleEffect(0.4 + 0.6 * Self.easeOutBack(mark))
+                .opacity(Self.progress(t, Beat.markIn, Beat.markIn + 0.14))
         }
-        .frame(width: stageSize, height: stageSize)
-    }
-
-    private var shineOverlay: some View {
-        LinearGradient(
-            colors: [.white.opacity(0), .white.opacity(0.55), .white.opacity(0)],
-            startPoint: .top, endPoint: .bottom
-        )
-        .frame(width: logoSize * 0.42)
-        .rotationEffect(.degrees(24))
-        .offset(x: shineX)
-        .frame(width: logoSize, height: logoSize)
-        .mask(
-            Image("mad-logo")
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .frame(width: logoSize, height: logoSize)
-        )
-        .allowsHitTesting(false)
+        .frame(width: ringSize, height: ringSize)
     }
 
     // MARK: - Text
 
-    private var textBlock: some View {
-        VStack(spacing: MADTheme.Spacing.sm) {
-            Text("MILE A DAY")
+    private func text(at t: Double) -> some View {
+        let title = Self.easeOut(Self.progress(t, Beat.titleIn, Beat.titleIn + Beat.textSettled))
+        let line = Self.easeOut(Self.progress(t, Beat.taglineIn, Beat.taglineIn + Beat.textSettled))
+
+        return VStack(spacing: MADTheme.Spacing.sm) {
+            Text("Mile A Day")
                 .font(.system(size: 38, weight: .black, design: .rounded))
-                .tracking(4)
                 .foregroundColor(titleColor)
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
-                .opacity(titleOpacity)
-                .offset(y: titleOffset)
+                .opacity(title)
+                .offset(y: 12 * (1 - title))
 
             Text(tagline)
                 .font(.system(size: 16, weight: .medium, design: .rounded))
                 .foregroundColor(subtitleColor)
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
-                .opacity(taglineOpacity)
-                .offset(y: titleOffset)
+                .opacity(line)
+                .offset(y: 10 * (1 - line))
         }
         .multilineTextAlignment(.center)
     }
 
-    // MARK: - Animation timeline (settles well before the 2.5s dismiss)
+    // MARK: - Lifecycle
 
-    private func startAnimations() {
-        // Living background drift (skip under Reduce Motion)
+    private func begin() {
+        guard start == nil else { return }
+        start = Date()
+
+        let handoff = reduceMotion ? Self.reducedHandoffDelay : Self.handoffDelay
         if !reduceMotion {
-            withAnimation(.easeInOut(duration: 8).repeatForever(autoreverses: true)) { driftA = true }
-            withAnimation(.easeInOut(duration: 11).repeatForever(autoreverses: true)) { driftB = true }
-        }
-
-        // Prepare haptics for low latency
-        let landingHaptic = UIImpactFeedbackGenerator(style: .heavy)
-        landingHaptic.prepare()
-        let tickHaptic = UIImpactFeedbackGenerator(style: .light)
-        tickHaptic.prepare()
-
-        // Phase 1 — runner sprints in from the left and decelerates to center
-        withAnimation(.easeIn(duration: 0.12)) {
-            runnerOpacity = 1.0
-            trailOpacity = 1.0
-        }
-        withAnimation(.easeOut(duration: 0.72).delay(0.04)) {
-            runProgress = 1.0
-        }
-
-        // Phase 2 — hand off to the mark (~0.6s, as the sprint settles)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
-            // Runner + trail dissolve and shrink into the mark
-            withAnimation(.easeIn(duration: 0.18)) {
-                runnerOpacity = 0
-                trailOpacity = 0
-                runnerScale = 0.5
+            let thump = UIImpactFeedbackGenerator(style: .heavy)
+            let tick = UIImpactFeedbackGenerator(style: .light)
+            thump.prepare()
+            tick.prepare()
+            DispatchQueue.main.asyncAfter(deadline: .now() + Beat.lapClose) {
+                thump.impactOccurred(intensity: 0.9)
             }
-
-            // Glow blooms, then breathes
-            withAnimation(.easeOut(duration: 0.55)) {
-                auraOpacity = 1.0
-                auraIntroScale = 1.0
-            }
-            if !reduceMotion {
-                withAnimation(.easeInOut(duration: 2.6).repeatForever(autoreverses: true).delay(0.55)) {
-                    auraBreathe = 1.08
-                }
-            }
-
-            // Logo punches in — haptic thump lands with it
-            withAnimation(.spring(response: 0.5, dampingFraction: 0.62)) {
-                logoScale = 1.0
-                logoOpacity = 1.0
-            }
-            landingHaptic.impactOccurred(intensity: 1.0)
-
-            // Energy flash
-            withAnimation(.easeOut(duration: 0.28)) {
-                flashScale = 1.5
-                flashOpacity = 0.85
-            }
-            withAnimation(.easeIn(duration: 0.4).delay(0.2)) {
-                flashOpacity = 0
-            }
-
-            // Impact ring
-            withAnimation(.easeOut(duration: 0.5)) {
-                pulseScale = 1.22
-                pulseOpacity = 0.85
-            }
-            withAnimation(.easeIn(duration: 0.45).delay(0.25)) {
-                pulseOpacity = 0
-            }
-
-            // Shine sweeps across the mark once it has settled
-            if !reduceMotion {
-                withAnimation(.easeInOut(duration: 0.6).delay(0.35)) {
-                    shineX = logoSize
-                }
+            DispatchQueue.main.asyncAfter(deadline: .now() + Beat.titleIn + 0.1) {
+                tick.impactOccurred(intensity: 0.5)
             }
         }
+        DispatchQueue.main.asyncAfter(deadline: .now() + handoff) {
+            AppStateManager.shared.completeSplash()
+        }
+    }
 
-        // Phase 3 — wordmark resolves beneath the mark, with a soft tick
-        withAnimation(.easeOut(duration: 0.5).delay(1.05)) {
-            titleOpacity = 1.0
-            titleOffset = 0
-        }
-        withAnimation(.easeOut(duration: 0.4).delay(1.3)) {
-            taglineOpacity = 1.0
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.15) {
-            tickHaptic.impactOccurred(intensity: 0.6)
-        }
+    // MARK: - Easing (pure functions of t)
+
+    /// 0→1 as `t` goes from `from` to `to`, clamped.
+    private static func progress(_ t: Double, _ from: Double, _ to: Double) -> Double {
+        guard to > from else { return t >= to ? 1 : 0 }
+        return min(max((t - from) / (to - from), 0), 1)
+    }
+
+    private static func easeOut(_ x: Double) -> Double { 1 - pow(1 - x, 3) }
+
+    private static func easeInOut(_ x: Double) -> Double {
+        x < 0.5 ? 4 * x * x * x : 1 - pow(-2 * x + 2, 3) / 2
+    }
+
+    /// Overshoots slightly then settles: the "spring" of the mark landing.
+    private static func easeOutBack(_ x: Double) -> Double {
+        let c1 = 1.70158, c3 = c1 + 1
+        return 1 + c3 * pow(x - 1, 3) + c1 * pow(x - 1, 2)
     }
 }
 

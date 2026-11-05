@@ -44,6 +44,9 @@ class AppStateManager: ObservableObject {
     /// Complete the splash screen and move to next appropriate state
     func completeSplash() {
         DispatchQueue.main.async {
+            // SplashView hands off when its animation ends; the timer below is
+            // only a fallback. Whichever comes second must not re-route.
+            guard self.currentState == .splash else { return }
             withAnimation(MADTheme.Animation.standard) {
                 if self.isFirstLaunch {
                     self.currentState = .onboarding
@@ -280,9 +283,11 @@ class AppStateManager: ObservableObject {
         }
     }
     
-    /// Start the splash screen timer
+    /// Fallback exit from the splash. `SplashView` normally hands off itself
+    /// (`SplashView.handoffDelay`) once it has actually been on screen; this
+    /// only fires if the view never appeared, so it sits well after that.
     private func startSplashTimer() {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.5) {
             self.completeSplash()
         }
     }
