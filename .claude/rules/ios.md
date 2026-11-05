@@ -26,7 +26,7 @@ Details: docs/conventions/ios.md § HealthKit
 - Splits only via `SplitCalculator`: a sample > ½ mi is timed from the route (`splitsFromRoute`, pauses excluded); no route + a whole-mile sample ⇒ `[]`, never interpolated averages; the file is also a Watch member, so the route path stays `#if !os(watchOS)`.
 - Never write `hk.retroactiveStreak` raw to UI/widgets/watch: go through `updateUserWithHealthKitData` (`vettedHealthKitStreak`) / `max(hk, user.streak)`.
 - Never claim HealthKit READ auth (`HealthAccessMonitor`); offer "Grant access" only on `.needsRequest`; keep `healthKitReadTypes/WriteTypes` non-private.
-- One settings page, `MADSettingsView`, behind the Dashboard gear; it owns its alerts, sheets and account actions.
+- One settings page, `MADSettingsView`, pushed (`navigationDestination`) from the Dashboard gear and the own-profile banner gear; it owns its alerts, sheets and account actions.
 - Recalibrate's running state is `WorkoutSyncService.recalibration` (drives `SyncStatusBanner` + the Settings row), never view `@State`.
 - `PostGridLayout` is client-only (`compact`/`large`/`calendar`); the calendar groups by `local_date` (else `created_at`) and reuses `gridThumbnail`/`openReader`.
 - `PostGridFilter` is `all`/`collabs`; grid prefs and pins apply to the OWNER's grid only (visitors get defaults); name the filter that emptied a grid; nil server fields mean "not offered"; add FeedEntry CodingKeys cases.
@@ -41,7 +41,8 @@ Details: docs/conventions/ios.md § HealthKit
 
 ## Key Patterns
 Details: docs/conventions/ios.md § Key Patterns
-- Profiles compose from `ProfileHero.swift`; `NextMilestoneChip` gets the loaded badges; friend screen re-fetches `GET /users/:id`; the banner PATCH can only CLEAR `profile_banner_url`.
+- Profiles compose from `ProfileHero.swift`; friend screen re-fetches `GET /users/:id` (empty inline nav title); the banner PATCH can only CLEAR `profile_banner_url`.
+- Profiles + Friends tab say each fact once: the goal ring (`GoalRingAvatar`) owns today (no chip under it, no done/saved `ProfileStatTiles` tile, no day headline in `FriendFlameyCard`); friend rows = ring + today's distance; cards via `profileCard()` (= `DashboardCardSurface`), labels via sentence-case `ProfileCardLabel`; Stats = `ProfileStatsCard` with `ProfileStat.bestPace/bestDay/sevenDayAverage` + `HallOfStreaksSection` on BOTH profiles; one `NudgeToast`; Friends header = one "Add friends" button, requests via `pendingRequestsRow`; the profile Friends tile opens `UserFriendsListView` (A–Z, searchable).
 - Feed tab spacing comes from `FeedLayout` (one `gutter`); feed posts are `.stacked` (`\.feedCardChrome`: text rows on the gutter via `textInset`, media edge to edge, posts split by `postSpacing`), `.card` elsewhere; media faces clip to `\.feedMediaCornerRadius`, never a literal; surfaces only via `FeedCardSurface`.
 - The feed's top row is `TodayBoardView` (stories rail + `fetchFriendsActivityToday` + `BuddySessionService.friendsOutNow`), one tile per friend; previews read `StoryGroup.previewURL` (server-gated); a walking tile is `TodayTileStyle.liveGround` (blue glow) + dark `LiveTileChip` + ringed face + distance along the bottom, and opens THAT person (`LiveFriendSheet`, sized to content via `.presentationDetents([.height(contentHeight)])`, one row like `FriendDaySheet`: Hype + round Profile, Join under, "See everyone" → `OutNowSheet`) via `OutNowContainer`, polled 20s while anyone is out; story "Race" writes `ghostTargetV1.<activity>` then `requestOpenTracker` after dismiss.
 - Nudge state is ONE app-wide `NudgeStatusStore` (every `FriendService.nudgeStatuses` proxies it; `nudgeFriend` marks optimistically + rolls back; Flamey pokes mark it too); never keep a per-view nudged set. Done / nudged board tiles open `FriendDaySheet`, never the profile directly.
@@ -77,7 +78,7 @@ Details: docs/conventions/ios.md § Key Patterns
 - Use `@Observable` (iOS 17+ Observation framework) for new view models.
 - A buddy caption follows the slide (`currentCaption`); `publish` re-resolves a nil workout id; `createAutoPost` sends session + crew.
 - Size a dressed Flamey on share cards via `ShareFlameyEnvelope`; reaching items need a row there.
-- Profile stats never divide by the streak (`activeDayStats`); each fact has one owner surface; long lists cap at 3 + "See all".
+- Profile stats never divide by the streak (`ProfileStat.sevenDayAverage`, `activeDayStats`); each fact has one owner surface; long lists cap at 3 + "See all".
 - Show join policy via `BuddyJoinPolicyControl`; read `joinPolicyRaw`, never a closed enum.
 - Two friends starting end in one walk (`twinWalk`); follow `merged_into`; never restore invitees.
 - Mid-walk invites use `buddy.invite(userIds:)`, never `updateSession`; route `buddy_join_request` like `buddy_joined`; declare `ClientFeatures.buddyJoinRequestV1`.

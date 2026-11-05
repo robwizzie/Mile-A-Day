@@ -218,7 +218,7 @@ struct ShoeDefaultsCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
-            ProfileCardLabel(text: "DEFAULT SHOES")
+            ProfileCardLabel(text: "Default shoes")
                 .padding(.horizontal, 4)
             VStack(spacing: 0) {
                 ForEach(Array(ShoeActivity.allCases.enumerated()), id: \.element) { index, activity in

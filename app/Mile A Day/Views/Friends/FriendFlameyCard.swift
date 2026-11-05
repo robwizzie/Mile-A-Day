@@ -304,8 +304,8 @@ struct FriendFlameyCard: View {
             .padding(.horizontal, 14)
             .padding(.top, 6)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(cardGlow)
             .profileCard()
+            .animation(.easeInOut(duration: 0.2), value: pokeQuip)
             .sheet(isPresented: $showWardrobe) {
                 FriendFlameyWardrobeSheet(facts: facts, badges: badges, catalogBadges: catalogBadges)
             }
@@ -351,20 +351,24 @@ struct FriendFlameyCard: View {
 
     private func info(kind: FlameMood.Kind, look: FlameyLook) -> some View {
         VStack(alignment: .leading, spacing: 7) {
-            Text(facts.title.uppercased())
-                .font(.system(size: 11, weight: .heavy, design: .rounded))
-                .tracking(1.2)
-                .foregroundColor(Color(red: 1.0, green: 0.72, blue: 0.35))
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
-            // A poke's reply takes the headline's place for a moment — his
-            // voice, said beside him rather than in a bubble over his head.
-            Text(pokeQuip.map { "“\($0)”" } ?? FriendFlameyDay.headline(kind, streak: streak))
-                .animation(.easeInOut(duration: 0.2), value: pokeQuip)
+            // His name is the headline. The card used to add a line about
+            // their day ("Mile done today"), but the goal ring at the top of
+            // the profile owns today, and his face already shows the mood.
+            Text(facts.title)
                 .font(.system(size: 18, weight: .heavy, design: .rounded))
                 .foregroundColor(.white)
-                .lineLimit(2)
-                .fixedSize(horizontal: false, vertical: true)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+            // A poke's reply shows here for a moment: his voice, said beside
+            // him rather than in a bubble over his head.
+            if let pokeQuip {
+                Text("“\(pokeQuip)”")
+                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                    .foregroundColor(Color(red: 1.0, green: 0.72, blue: 0.35))
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .transition(.opacity)
+            }
             wearingChip(look: look)
             HStack(spacing: 5) {
                 Image(systemName: "hand.tap.fill")
@@ -415,26 +419,11 @@ struct FriendFlameyCard: View {
             .foregroundColor(.white.opacity(0.92))
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
-            .background(
-                Capsule()
-                    .fill(Color.white.opacity(0.07))
-                    .overlay(Capsule().strokeBorder(Color.white.opacity(0.12), lineWidth: 1))
-            )
+            .background(Capsule().fill(Color.white.opacity(0.07)))
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
         .accessibilityLabel("What \(facts.title) is wearing")
-    }
-
-    /// A warm ember glow behind him, inside the flat card chrome.
-    private var cardGlow: some View {
-        RadialGradient(
-            colors: [Color.orange.opacity(0.20), Color(red: 0.8, green: 0.2, blue: 0.1).opacity(0.06), .clear],
-            center: UnitPoint(x: 0.17, y: 0.72),
-            startRadius: 4,
-            endRadius: 150
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
     // MARK: Poke
