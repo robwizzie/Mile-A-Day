@@ -9,6 +9,7 @@ import {
   joinAndroidWaitlistController,
   getPublicDeskController,
   deskInterestController,
+  getShowcaseController,
 } from "../controllers/publicController.js";
 import { deskInterestLimiter, publicDeskLimiter } from "../middleware/rateLimit.js";
 
@@ -43,6 +44,8 @@ router.post("/android-waitlist", joinAndroidWaitlistController);
 // The website's live desk twin (community aggregates only) and its
 // "I'd buy one" form.
 router.get("/desk", publicDeskLimiter, getPublicDeskController);
+// Onboarding's example feed photos (an owner-chosen allowlist of posts).
+router.get("/showcase", publicDeskLimiter, getShowcaseController);
 router.post("/desk-interest", deskInterestLimiter, deskInterestController);
 
 // Unknown /public/* paths should 404 here, not fall through to the auth

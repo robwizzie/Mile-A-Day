@@ -6,6 +6,7 @@ import {
   normalizeWaitlistEmail,
 } from "../services/waitlistService.js";
 import { getPublicDeskFeed } from "../services/displayService.js";
+import { getShowcasePhotos } from "../services/showcaseService.js";
 import {
   addDeskInterest,
   cleanInterestName,
@@ -95,5 +96,17 @@ export async function deskInterestController(req: Request, res: Response) {
   } catch (error) {
     console.error("Failed to save desk interest:", error);
     res.status(500).json({ error: "Failed to save" });
+  }
+}
+
+/** GET /public/showcase — example feed photos for onboarding (devices not yet
+ *  signed in). An owner-chosen allowlist only; see showcaseService. */
+export async function getShowcaseController(_req: Request, res: Response) {
+  try {
+    res.setHeader("Cache-Control", "public, max-age=600");
+    res.json({ photos: await getShowcasePhotos() });
+  } catch (error) {
+    console.error("Failed to load showcase photos:", error);
+    res.json({ photos: [] });
   }
 }
