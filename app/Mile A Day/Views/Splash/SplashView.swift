@@ -1,79 +1,67 @@
 import SwiftUI
 import UIKit
 
-/// Launch experience for Mile A Day.
+/// Launch experience for Mile A Day: split-flap into the app.
 ///
-/// One lap, one mark: a ring draws itself around the centre like a mile being
-/// run (a glowing comet leads the stroke), and the moment the lap closes the
-/// MAD mark springs in with a pulse, a burst of embers and a haptic thump.
-/// "Mile A Day" and a rotating tagline rise in underneath, then the splash
-/// hands off on its own.
+/// Three red flap tiles rattle through numbers like a departures board and
+/// land, one after another, on M · A · D (a tick each). They merge into the
+/// app icon with a thump. Then:
+/// - heading into the app, the icon rises and shrinks while the home
+///   screen's flat cards fade in beneath it, so the splash becomes the
+///   dashboard it hands off to;
+/// - heading into onboarding or sign-in (no dashboard yet), "Mile A Day"
+///   rises under the icon instead.
 ///
 /// Every frame is a pure function of the time since the view appeared
 /// (`TimelineView` + `frame(at:)`), never a chain of `withAnimation` /
-/// `asyncAfter` state flips. That is what keeps the entrance glitch-free: a
-/// first frame rendered before `onAppear`, a safe-area settle or a slow launch
-/// can't leave one layer mid-animation while another restarts, because there
-/// is no animation state to get out of step. The splash also owns its own
-/// exit (`handoffDelay`), so it can't be cut off mid-animation by a timer
-/// that started before it was on screen. `AppStateManager` keeps a later
-/// fallback in case the view never appears.
+/// `asyncAfter` state flips, so a first frame before `onAppear`, a safe-area
+/// settle or a slow launch can't leave one layer out of step with another.
+/// The splash owns its own exit (`handoffDelay`); `AppStateManager` keeps a
+/// later fallback in case the view never appears.
 struct SplashView: View {
-    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var start: Date?
-    @State private var tagline: String = SplashView.taglines.randomElement() ?? "One day, one mile."
+    /// Decided once on appear: does the splash end on the dashboard?
+    @State private var intoApp = false
 
-    /// When the splash hands off to the next screen (seconds after appear).
-    static let handoffDelay: TimeInterval = 1.75
+    static let handoffDelay: TimeInterval = 2.05
+    private static let wordmarkHandoffDelay: TimeInterval = 1.9
     private static let reducedHandoffDelay: TimeInterval = 0.9
-
-    private static let taglines = [
-        "One mile closer.",
-        "Every mile counts.",
-        "Today's mile awaits.",
-        "Lace up. Let's move.",
-        "One day, one mile.",
-        "Chase the streak."
-    ]
 
     // MARK: - Timeline (seconds after appear)
     private enum Beat {
-        static let lapStart: Double = 0.10
-        static let lapClose: Double = 0.80
-        static let markIn: Double = 0.68
-        static let markSettled: Double = 1.12
-        static let burstEnd: Double = 1.35
-        static let titleIn: Double = 1.00
-        static let taglineIn: Double = 1.15
-        static let textSettled: Double = 0.38
+        static let tilesIn: Double = 0.15
+        /// Tile i lands at `firstLanding + i * landingGap`.
+        static let firstLanding: Double = 0.55
+        static let landingGap: Double = 0.15
+        static let flash: Double = 0.12
+        static let mergeStart: Double = 1.05
+        static let mergeEnd: Double = 1.35
+        static let riseStart: Double = 1.45
+        static let riseEnd: Double = 2.0
+        static let wordmarkIn: Double = 1.3
+        static let taglineIn: Double = 1.45
+        static let textSettle: Double = 0.35
     }
 
-    // MARK: - Layout (fixed so every device gets the same composition)
-    private let ringSize: CGFloat = 148
-    private let ringWidth: CGFloat = 7
-    private let logoSize: CGFloat = 88
-    private let sparkCount = 10
+    private static let letters: [Character] = ["M", "A", "D"]
+    private static let digits: [Character] = Array("0123456789")
 
-    // MARK: - Palette
-    private var isDark: Bool { colorScheme == .dark }
+    // MARK: - Palette (the app's own: dark ember background, madRed)
     private let red = MADTheme.Colors.madRed
-    private let orange = Color(red: 1.0, green: 0.55, blue: 0.24)
-    private var background: Color {
-        isDark ? Color(red: 0.05, green: 0.03, blue: 0.04) : Color(red: 0.98, green: 0.97, blue: 0.97)
-    }
-    private var titleColor: Color { isDark ? .white : Color(red: 0.11, green: 0.11, blue: 0.13) }
-    private var subtitleColor: Color { isDark ? .white.opacity(0.6) : Color(red: 0.42, green: 0.40, blue: 0.44) }
-    private var trackColor: Color { isDark ? .white.opacity(0.08) : .black.opacity(0.06) }
+    private let tileFill = Color(red: 0.165, green: 0.09, blue: 0.114)
+    private let seam = Color(red: 0.05, green: 0.02, blue: 0.04)
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: nil, paused: start == nil)) { context in
-            let t = start.map { context.date.timeIntervalSince($0) } ?? 0
-            frame(at: t)
+        GeometryReader { geo in
+            TimelineView(.animation(minimumInterval: nil, paused: start == nil)) { context in
+                let t = start.map { context.date.timeIntervalSince($0) } ?? 0
+                frame(at: reduceMotion ? 10 : t, size: geo.size)
+                    .opacity(reduceMotion ? Self.progress(t, 0, 0.3) : 1)
+            }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(background.ignoresSafeArea())
+        .background(MADTheme.Colors.appBackgroundGradient.ignoresSafeArea())
         .onAppear(perform: begin)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Mile A Day")
@@ -81,144 +69,152 @@ struct SplashView: View {
 
     // MARK: - Frame
 
-    @ViewBuilder
-    private func frame(at t: Double) -> some View {
-        if reduceMotion {
-            // No motion: the finished composition, faded in once.
-            composition(at: 10)
-                .opacity(Self.progress(t, 0, 0.3))
-        } else {
-            composition(at: t)
-        }
-    }
+    private func frame(at t: Double, size: CGSize) -> some View {
+        let width = min(size.width, 440)
+        let tileWidth = width * 0.2
+        let tileHeight = width * 0.27
+        let gap = width * 0.03
+        let iconSize = width * 0.27
+        let center = CGPoint(x: size.width / 2, y: size.height * 0.42)
 
-    private func composition(at t: Double) -> some View {
-        VStack(spacing: 36) {
-            lap(at: t)
-            text(at: t)
-        }
-        .padding(.horizontal, 32)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(glow(at: t))
-    }
-
-    /// Warm light behind the mark, brightening as the lap runs.
-    private func glow(at t: Double) -> some View {
-        let p = Self.easeOut(Self.progress(t, 0, Beat.lapClose))
-        return RadialGradient(
-            colors: [red.opacity((isDark ? 0.30 : 0.12) * p), .clear],
-            center: .center, startRadius: 0, endRadius: 260
-        )
-        .offset(y: -40)
-        .ignoresSafeArea()
-    }
-
-    // MARK: - Lap + mark
-
-    private func lap(at t: Double) -> some View {
-        let lap = Self.easeInOut(Self.progress(t, Beat.lapStart, Beat.lapClose))
-        let burst = Self.easeOut(Self.progress(t, Beat.lapClose, Beat.burstEnd))
-        let closed = t >= Beat.lapClose
-        let mark = Self.progress(t, Beat.markIn, Beat.markSettled)
-        let radius = ringSize / 2
+        let merge = Self.easeInOut(Self.progress(t, Beat.mergeStart, Beat.mergeEnd))
+        let rise = intoApp ? Self.easeInOut(Self.progress(t, Beat.riseStart, Beat.riseEnd)) : 0
+        let iconY = center.y + (size.height * 0.12 - center.y) * CGFloat(rise)
+        let iconScale = (0.6 + 0.4 * Self.easeOutBack(merge)) * (1 - 0.55 * rise)
 
         return ZStack {
-            // Track
-            Circle()
-                .stroke(trackColor, lineWidth: ringWidth)
-                .opacity(Self.progress(t, 0, 0.25))
+            // Soft red light behind the mark; fades as the app takes over.
+            RadialGradient(colors: [red.opacity(0.22 * merge * (1 - rise)), .clear],
+                           center: UnitPoint(x: 0.5, y: center.y / max(size.height, 1)),
+                           startRadius: 0, endRadius: width * 0.7)
 
-            // The lap being run
-            Circle()
-                .trim(from: 0, to: lap)
-                .stroke(
-                    AngularGradient(colors: [red, orange, red], center: .center),
-                    style: StrokeStyle(lineWidth: ringWidth, lineCap: .round)
-                )
-                .rotationEffect(.degrees(-90))
-
-            // Comet head leading the stroke; fades as the lap closes
-            Circle()
-                .fill(.white)
-                .frame(width: ringWidth + 3, height: ringWidth + 3)
-                .shadow(color: orange, radius: 8)
-                .offset(y: -radius)
-                .rotationEffect(.degrees(360 * lap))
-                .opacity(lap > 0 ? 1 - Self.progress(t, Beat.lapClose - 0.08, Beat.lapClose + 0.1) : 0)
-
-            // Pulse ring when the lap closes
-            Circle()
-                .stroke(orange, lineWidth: 2)
-                .scaleEffect(1 + 0.32 * burst)
-                .opacity(closed ? 0.8 * (1 - burst) : 0)
-
-            // Ember burst
-            ForEach(0..<sparkCount, id: \.self) { i in
-                let angle = Angle.degrees(Double(i) * 360 / Double(sparkCount) + 18)
-                let distance = radius + 10 + 34 * CGFloat(burst)
-                Circle()
-                    .fill(i.isMultiple(of: 2) ? orange : red)
-                    .frame(width: 5, height: 5)
-                    .scaleEffect(1 - 0.6 * burst)
-                    .offset(x: CGFloat(cos(angle.radians)) * distance, y: CGFloat(sin(angle.radians)) * distance)
-                    .opacity(closed ? 1 - burst : 0)
+            if intoApp && rise > 0 {
+                dashboardCards(size: size, opacity: rise)
             }
 
-            // The mark springs in as the lap closes
+            // The flaps, sliding together and fading as they merge.
+            ForEach(0..<3, id: \.self) { i in
+                tile(i, at: t, width: tileWidth, height: tileHeight)
+                    .position(x: center.x + CGFloat(i - 1) * (tileWidth + gap) * CGFloat(1 - merge),
+                              y: center.y)
+                    .opacity(Self.progress(t, 0, Beat.tilesIn) * (1 - merge))
+            }
+
             Image("mad-logo")
                 .resizable()
                 .aspectRatio(contentMode: .fit)
-                .frame(width: logoSize, height: logoSize)
-                .clipShape(RoundedRectangle(cornerRadius: logoSize * 0.22, style: .continuous))
-                .scaleEffect(0.4 + 0.6 * Self.easeOutBack(mark))
-                .opacity(Self.progress(t, Beat.markIn, Beat.markIn + 0.14))
+                .frame(width: iconSize, height: iconSize)
+                .clipShape(RoundedRectangle(cornerRadius: iconSize * 0.23, style: .continuous))
+                .scaleEffect(CGFloat(iconScale))
+                .opacity(merge)
+                .position(x: center.x, y: iconY)
+
+            if !intoApp {
+                wordmark(at: t)
+                    .position(x: center.x, y: center.y + iconSize / 2 + width * 0.16)
+            }
         }
-        .frame(width: ringSize, height: ringSize)
+        .frame(width: size.width, height: size.height)
     }
 
-    // MARK: - Text
+    /// One flap tile: cycles digits until its landing, then shows its letter
+    /// with a short red flash. The flip is a vertical squash on each change.
+    private func tile(_ i: Int, at t: Double, width: CGFloat, height: CGFloat) -> some View {
+        let landing = Beat.firstLanding + Double(i) * Beat.landingGap
+        let landed = t >= landing
+        let character: Character
+        let flip: Double
+        if landed {
+            character = Self.letters[i]
+            flip = max(0, 1 - (t - landing) * 8)
+        } else {
+            let k = Int(t * 28) + i * 3
+            character = Self.digits[(k * 7 + i) % Self.digits.count]
+            flip = (t * 28).truncatingRemainder(dividingBy: 1)
+        }
+        let flash = landed ? max(0, 1 - (t - landing) / Beat.flash) : 0
 
-    private func text(at t: Double) -> some View {
-        let title = Self.easeOut(Self.progress(t, Beat.titleIn, Beat.titleIn + Beat.textSettled))
-        let line = Self.easeOut(Self.progress(t, Beat.taglineIn, Beat.taglineIn + Beat.textSettled))
+        return ZStack {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(tileFill)
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(red.opacity(flash))
+            Text(String(character))
+                .font(.system(size: height * 0.62, weight: .black, design: .rounded))
+                .foregroundColor(.white.opacity(landed ? 1 : 0.85))
+                .scaleEffect(x: 1, y: CGFloat(1 - flip * 0.5))
+            Rectangle()
+                .fill(seam)
+                .frame(height: 2)
+        }
+        .frame(width: width, height: height)
+    }
 
+    /// The home screen's flat cards (`DashboardCardSurface`'s fill and radius)
+    /// in roughly the dashboard's layout, so the hand-off lands on it.
+    private func dashboardCards(size: CGSize, opacity: Double) -> some View {
+        let gutter = size.width * 0.06
+        let card = Color.white.opacity(0.045)
+        let shape = RoundedRectangle(cornerRadius: 18, style: .continuous)
+        return VStack(spacing: size.height * 0.02) {
+            shape.fill(card).frame(height: size.height * 0.26)
+            HStack(spacing: gutter) {
+                shape.fill(card)
+                shape.fill(card)
+            }
+            .frame(height: size.height * 0.13)
+            shape.fill(card).frame(height: size.height * 0.1)
+            Capsule().fill(red).frame(height: size.height * 0.06)
+        }
+        .frame(width: size.width - gutter * 2)
+        .position(x: size.width / 2, y: size.height * 0.53)
+        .opacity(opacity)
+        .offset(y: CGFloat(1 - opacity) * 24)
+    }
+
+    private func wordmark(at t: Double) -> some View {
+        let title = Self.easeOut(Self.progress(t, Beat.wordmarkIn, Beat.wordmarkIn + Beat.textSettle))
+        let line = Self.easeOut(Self.progress(t, Beat.taglineIn, Beat.taglineIn + Beat.textSettle))
         return VStack(spacing: MADTheme.Spacing.sm) {
             Text("Mile A Day")
                 .font(.system(size: 38, weight: .black, design: .rounded))
-                .foregroundColor(titleColor)
+                .foregroundColor(.white)
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
                 .opacity(title)
-                .offset(y: 12 * (1 - title))
-
-            Text(tagline)
+                .offset(y: CGFloat(10 * (1 - title)))
+            Text("Day 1 starts today.")
                 .font(.system(size: 16, weight: .medium, design: .rounded))
-                .foregroundColor(subtitleColor)
+                .foregroundColor(.white.opacity(0.6))
                 .lineLimit(1)
-                .minimumScaleFactor(0.7)
                 .opacity(line)
-                .offset(y: 10 * (1 - line))
+                .offset(y: CGFloat(8 * (1 - line)))
         }
-        .multilineTextAlignment(.center)
+        .padding(.horizontal, 32)
     }
 
     // MARK: - Lifecycle
 
     private func begin() {
         guard start == nil else { return }
+        intoApp = AppStateManager.shared.splashLeadsToMain
         start = Date()
 
-        let handoff = reduceMotion ? Self.reducedHandoffDelay : Self.handoffDelay
+        let handoff = reduceMotion
+            ? Self.reducedHandoffDelay
+            : (intoApp ? Self.handoffDelay : Self.wordmarkHandoffDelay)
         if !reduceMotion {
-            let thump = UIImpactFeedbackGenerator(style: .heavy)
             let tick = UIImpactFeedbackGenerator(style: .light)
-            thump.prepare()
+            let thump = UIImpactFeedbackGenerator(style: .heavy)
             tick.prepare()
-            DispatchQueue.main.asyncAfter(deadline: .now() + Beat.lapClose) {
-                thump.impactOccurred(intensity: 0.9)
+            thump.prepare()
+            for i in 0..<3 {
+                DispatchQueue.main.asyncAfter(deadline: .now() + Beat.firstLanding + Double(i) * Beat.landingGap) {
+                    tick.impactOccurred(intensity: 0.6)
+                }
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + Beat.titleIn + 0.1) {
-                tick.impactOccurred(intensity: 0.5)
+            DispatchQueue.main.asyncAfter(deadline: .now() + Beat.mergeStart + 0.1) {
+                thump.impactOccurred(intensity: 0.9)
             }
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + handoff) {
@@ -240,19 +236,13 @@ struct SplashView: View {
         x < 0.5 ? 4 * x * x * x : 1 - pow(-2 * x + 2, 3) / 2
     }
 
-    /// Overshoots slightly then settles: the "spring" of the mark landing.
+    /// Overshoots slightly then settles: the icon landing.
     private static func easeOutBack(_ x: Double) -> Double {
         let c1 = 1.70158, c3 = c1 + 1
         return 1 + c3 * pow(x - 1, 3) + c1 * pow(x - 1, 2)
     }
 }
 
-#Preview("Dark") {
+#Preview {
     SplashView()
-        .preferredColorScheme(.dark)
-}
-
-#Preview("Light") {
-    SplashView()
-        .preferredColorScheme(.light)
 }

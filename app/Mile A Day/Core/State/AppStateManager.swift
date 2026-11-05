@@ -46,6 +46,13 @@ class AppStateManager: ObservableObject {
     // MARK: - Public Methods
     
     /// Complete the splash screen and move to next appropriate state
+    /// Whether the splash will hand off straight into the app (the same
+    /// test `completeSplash` routes on), so it can end on the home screen's
+    /// cards instead of the wordmark.
+    var splashLeadsToMain: Bool {
+        !isFirstLaunch && isAuthenticated && userDefaults.bool(forKey: hasCompletedFullSetupKey)
+    }
+
     func completeSplash() {
         DispatchQueue.main.async {
             // SplashView hands off when its animation ends; the timer below is
