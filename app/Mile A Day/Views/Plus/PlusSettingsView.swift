@@ -92,7 +92,7 @@ struct PlusSettingsView: View {
                 Spacer(minLength: 0)
             }
             .padding(MADTheme.Spacing.md)
-            .madLiquidGlass()
+            .background(DashboardCardSurface(style: .fun))
         } else {
             VStack(spacing: MADTheme.Spacing.sm) {
                 PlusLookShowcase(size: 92)
@@ -142,7 +142,7 @@ struct PlusSettingsView: View {
             }
             .frame(maxWidth: .infinity)
             .padding(MADTheme.Spacing.md)
-            .madLiquidGlass()
+            .background(DashboardCardSurface(style: .fun))
         }
     }
 
@@ -172,7 +172,7 @@ struct PlusSettingsView: View {
             }
         }
         .padding(MADTheme.Spacing.md)
-        .madLiquidGlass()
+        .background(DashboardCardSurface(style: .fun))
     }
 
     private var giftSubtitle: String {
@@ -182,9 +182,8 @@ struct PlusSettingsView: View {
 
     private var giftsList: some View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
-            Text("YOUR GIFTS")
-                .madFont(size: 11, weight: .heavy, design: .rounded)
-                .tracking(1.2)
+            Text("Your gifts")
+                .madFont(size: 15, weight: .semibold, design: .rounded)
                 .foregroundColor(.secondary)
             ForEach(gifts) { gift in
                 Button {
@@ -208,7 +207,7 @@ struct PlusSettingsView: View {
             }
         }
         .padding(MADTheme.Spacing.md)
-        .madLiquidGlass()
+        .background(DashboardCardSurface(style: .fun))
     }
 
     private func giftState(_ gift: PlusGift) -> String {
@@ -269,14 +268,13 @@ struct PlusSettingsView: View {
             }
         }
         .padding(MADTheme.Spacing.md)
-        .madLiquidGlass()
+        .background(DashboardCardSurface(style: .fun))
     }
 
     private var perksCard: some View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
-            Text(store.isPlus ? "WHAT YOU GET" : "WHAT'S INCLUDED")
-                .madFont(size: 11, weight: .heavy, design: .rounded)
-                .tracking(1.2)
+            Text(store.isPlus ? "What you get" : "What's included")
+                .madFont(size: 15, weight: .semibold, design: .rounded)
                 .foregroundColor(.secondary)
             PlusTokenComparison(onDark: false)
             Divider().overlay(Color.white.opacity(0.06))
@@ -300,7 +298,7 @@ struct PlusSettingsView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(MADTheme.Spacing.md)
-        .madLiquidGlass()
+        .background(DashboardCardSurface(style: .fun))
     }
 
     private var legal: some View {
@@ -318,7 +316,7 @@ struct PlusSettingsView: View {
             MADHaptics.tap()
             action()
         } label: {
-            MADSettingsRow(icon: icon, title: title, subtitle: subtitle, iconColor: tint)
+            SettingsRow(icon: icon, title: title, subtitle: subtitle, tint: tint)
         }
         .buttonStyle(.plain)
     }

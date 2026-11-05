@@ -193,11 +193,11 @@ struct SyncStatusBanner: View {
     private func recalibrationTitle(_ progress: WorkoutSyncService.RecalibrationProgress) -> String {
         switch progress.stage {
         case .reading, .uploading, .recomputing:
-            return "Recalibrating your streak…"
+            return "Fixing your streak…"
         case .done(let streak):
-            return "Streak recalibrated — \(SyncCopy.count(streak)) \(streak == 1 ? "day" : "days")"
+            return "Streak checked — \(SyncCopy.count(streak)) \(streak == 1 ? "day" : "days")"
         case .failed:
-            return "Recalibrate didn't finish"
+            return "Streak fix didn't finish"
         }
     }
 

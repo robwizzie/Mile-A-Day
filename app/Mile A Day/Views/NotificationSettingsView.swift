@@ -1,9 +1,15 @@
 import SwiftUI
 import UserNotifications
 
+/// Alerts only: what Mile A Day tells you about, and when.
+///
+/// This page used to hold the privacy controls too (who can see my workouts,
+/// feed sharing, route maps, flyovers, Stealth Mode, the profile grid), and
+/// Privacy linked here for them, so the same settings had two doors. Those now
+/// live on `PrivacyHubView` and save from there; this page sends only the
+/// alert keys (`NotificationPreferences.alertPayload`).
 struct NotificationSettingsView: View {
     @State private var prefs = NotificationPreferences.load()
-    @State private var showStealthSheet = false
     /// At-risk streak Live Activity master switch (default on; the activity
     /// only appears when the streak is genuinely about to die).
     @State private var streakRiskActivityEnabled = StreakRiskActivityManager.isEnabled
@@ -26,8 +32,6 @@ struct NotificationSettingsView: View {
             }
         )
     }
-    /// Local master switch for the post-run photo prompt + auto-sharing the mile.
-    @AppStorage("autoShareRunsToFeed") private var autoShareRunsToFeed = true
     @ObservedObject private var notificationService = MADNotificationService.shared
     @StateObject private var friendService = FriendService()
 
@@ -105,276 +109,64 @@ struct NotificationSettingsView: View {
 
             ScrollView {
                 VStack(spacing: MADTheme.Spacing.lg) {
-                    // Friend Activity — promoted to a hero card at the very top.
-                    // Audience controls for who hears about your activity (and
-                    // whose you hear about). Separate from the boolean activity
-                    // prefs below, which still gate whether anything sends.
-                    NavigationLink(destination: FriendActivitySettingsView()) {
-                        HStack(spacing: MADTheme.Spacing.md) {
-                            Image(systemName: "person.2.wave.2.fill")
-                                .font(.system(size: 18, weight: .semibold))
-                                .foregroundColor(.white)
-                                .frame(width: 44, height: 44)
-                                .background(RoundedRectangle(cornerRadius: 12).fill(MADTheme.Colors.madRed))
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Friend Activity")
-                                    .font(.system(size: 16, weight: .bold, design: .rounded))
-                                    .foregroundColor(.white)
-                                Text("Who hears about your runs, walks & PBs")
-                                    .font(.system(size: 12, design: .rounded))
-                                    .foregroundColor(.white.opacity(0.6))
-                                    .multilineTextAlignment(.leading)
-                            }
-                            Spacer(minLength: 4)
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundColor(.white.opacity(0.4))
-                        }
-                        .padding(MADTheme.Spacing.md)
-                        .background(
-                            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                                .fill(MADTheme.Colors.madRed.opacity(0.12))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                                        .strokeBorder(MADTheme.Colors.madRed.opacity(0.45), lineWidth: 1.5)
-                                )
-                        )
-                    }
-                    .buttonStyle(.plain)
-
-                    // Activity Notifications
-                    settingsSection(title: "YOUR ACTIVITY", icon: "figure.run", iconColor: .green) {
+                    SettingsSection("Your activity") {
                         settingsToggle("When I complete a mile", isOn: $prefs.mileCompletedEnabled)
-                        settingsDivider
-                        settingsToggle("When a friend completes a mile", isOn: $prefs.friendCompletedEnabled)
-                        settingsDivider
-                        settingsToggle("When a friend hits a personal best", isOn: $prefs.friendPersonalBestEnabled,
-                            description: "Fastest mile or most miles in a day")
                         settingsDivider
                         settingsToggle("Step goal", isOn: $prefs.stepGoalEnabled,
                             description: "When you reach 10,000 steps in a day")
                     }
 
-                    // Social Notifications
-                    settingsSection(title: "SOCIAL", icon: "person.2.fill", iconColor: .blue) {
-                        settingsToggle("Friend requests", isOn: $prefs.friendRequestReceivedEnabled)
-                        settingsDivider
-                        settingsToggle("Friend request reminders", isOn: $prefs.friendRequestReminderEnabled,
-                            description: "An occasional nudge about requests you haven't answered")
-                        settingsDivider
-                        settingsToggle("Friend request accepted", isOn: $prefs.friendRequestAcceptedEnabled)
-                        settingsDivider
-                        settingsToggle("Friend nudges", isOn: $prefs.friendNudgeEnabled)
-                        settingsDivider
-                        settingsToggle("Buddy walks & runs", isOn: $prefs.buddyInvitesEnabled,
-                            description: "Friends can invite you to walk or run together. Turn off to stop the invites and drop out of their picker")
-                    }
+                    friendsSection
 
-                    // Privacy — the coarse gate. Sits above the sharing toggles
-                    // because it decides WHO gets in at all; those decide what
-                    // they then see.
-                    settingsSection(title: "WHO CAN SEE MY WORKOUTS", icon: "eye.fill", iconColor: .purple) {
-                        VStack(spacing: 0) {
-                            ForEach(Array(WorkoutVisibility.allCases.enumerated()), id: \.element.id) { index, option in
-                                if index > 0 { settingsDivider }
-                                visibilityOption(option)
-                            }
-                        }
-                        Text("Applies to your routes, photos and posts. Blocked people never see them, whatever you pick.")
-                            .font(.system(size: 11, design: .rounded))
-                            .foregroundColor(.white.opacity(0.35))
-                            .fixedSize(horizontal: false, vertical: true)
-                            .padding(.top, 2)
-                    }
-
-                    // Feed & Stories (v2)
-                    settingsSection(title: "FEED & STORIES", icon: "square.stack.fill", iconColor: MADTheme.Colors.madRed) {
-                        settingsToggle("Share my walks & runs to the feed", isOn: $prefs.shareWorkoutsToFeed,
-                            description: "Friends see your activity in the unified feed")
-                        settingsDivider
-                        flyoverVisibilityRow
-                        settingsDivider
-                        settingsToggle("Share route maps", isOn: $prefs.shareRouteMaps,
-                            description: "Show existing GPS paths on feed cards. If a walk has no route at all, check Health Access and Apple's Route switch")
-                        settingsDivider
-                        stealthModeRow
-                        settingsDivider
-                        settingsToggle("Share when I'm out right now", isOn: $prefs.shareLivePresence,
-                            description: "Friends tracking at the same time see you're out on a walk or run — never your location")
-                        settingsDivider
-                        settingsToggle("Photo prompt after a run", isOn: $autoShareRunsToFeed,
-                            description: "Ask for a photo of your mile when you finish. Turn it off and nothing is posted automatically at all")
-                        settingsDivider
-                        settingsToggle("Post my route when I skip", isOn: $prefs.autoPostWithoutPhoto,
-                            description: "Skipping the photo still puts your route and stats on the feed. Turn off to keep the feed to walks you actually photographed")
-                        settingsDivider
-                        settingsToggle("New posts from friends", isOn: $prefs.friendPostsEnabled,
-                            description: "Get notified when a friend shares a photo")
-                    }
-
-                    settingsSection(title: "PROFILE GRID", icon: "square.grid.3x3.fill", iconColor: .teal) {
-                        settingsToggle("Only show routes with photos", isOn: photoOnlyProfileGridBinding,
-                            description: "Your Posts grid shows a route workout only when that workout has a photo. Photo-less route cards can still appear in friends' feeds.")
-                        settingsDivider
-                        settingsToggle("Tagged posts on my grid", isOn: $prefs.taggedPostsOnProfile,
-                            description: "Add collabs friends tag you in to your Posts grid. Turn off and they stay in your Tagged tab only.")
-                    }
-
-                    settingsSection(title: "RECAPS & CHALLENGES", icon: "sparkles", iconColor: .orange) {
+                    SettingsSection("Recaps & challenges") {
                         settingsToggle("Weekly recap", isOn: $prefs.weeklyRecapEnabled,
-                            description: "A Sunday summary of your week's miles, ready to share")
+                            description: "A Sunday summary of your week, ready to share")
                         settingsDivider
                         settingsToggle("Weekly challenge", isOn: $prefs.weeklyChallengeEnabled,
-                            description: "Sunday's new challenge, a nudge before the week runs out, and when you finish one")
-                    }
-
-                    // Competition Notifications — collapsed behind a master
-                    // toggle; the 8 individual alerts live on a drill-in screen
-                    // so they don't dominate this page.
-                    settingsSection(title: "COMPETITIONS", icon: "trophy.fill", iconColor: .yellow) {
-                        settingsToggle("Competition notifications", isOn: competitionsMasterBinding,
-                            description: "Invites, status, cheers, and milestones")
+                            description: "The new challenge, a nudge before it ends, and when you finish")
+                        settingsDivider
+                        // Competition alerts collapse behind a master toggle;
+                        // the 8 individual alerts live on a drill-in screen.
+                        settingsToggle("Competitions", isOn: competitionsMasterBinding,
+                            description: "Invites, status, cheers and milestones")
 
                         if anyCompetitionEnabled {
                             settingsDivider
 
                             NavigationLink(destination: CompetitionNotificationSettingsView(prefs: $prefs, onSave: saveAndApply)) {
-                                HStack {
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text("Customize what & when")
-                                            .font(MADTheme.Typography.body)
-                                            .foregroundColor(.white)
-                                        Text("Fine-tune the 8 competition alerts")
-                                            .font(.system(size: 11, design: .rounded))
-                                            .foregroundColor(.white.opacity(0.4))
-                                    }
-                                    Spacer()
-                                    Image(systemName: "chevron.right")
-                                        .font(.system(size: 11, weight: .semibold))
-                                        .foregroundColor(.white.opacity(0.3))
-                                }
+                                SettingsRow(
+                                    icon: "slider.horizontal.3",
+                                    title: "Choose competition alerts"
+                                )
                             }
                             .buttonStyle(.plain)
                         }
                     }
 
-                    // Friend-Specific Settings
-                    settingsSection(title: "FRIEND-SPECIFIC", icon: "person.crop.circle.badge.minus", iconColor: .purple) {
-                        Button {
-                            withAnimation(.easeInOut(duration: 0.2)) {
-                                showFriendSettings.toggle()
-                            }
-                        } label: {
-                            HStack {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text("Manage friend notifications")
-                                        .font(MADTheme.Typography.body)
-                                        .foregroundColor(.white)
-                                    Text("Mute specific friends or notification types")
-                                        .font(.system(size: 11, design: .rounded))
-                                        .foregroundColor(.white.opacity(0.4))
-                                }
-                                Spacer()
-                                Image(systemName: showFriendSettings ? "chevron.up" : "chevron.down")
-                                    .font(.system(size: 11, weight: .semibold))
-                                    .foregroundColor(.white.opacity(0.3))
-                            }
-                        }
-                        .buttonStyle(.plain)
+                    muteFriendsSection
 
-                        if showFriendSettings {
-                            settingsDivider
+                    scheduleSection
 
-                            if isLoadingFriendSettings {
-                                HStack {
-                                    ProgressView()
-                                        .scaleEffect(0.8)
-                                        .tint(MADTheme.Colors.madRed)
-                                    Text("Loading...")
-                                        .font(.system(size: 12, design: .rounded))
-                                        .foregroundColor(.white.opacity(0.4))
-                                }
-                                .padding(.vertical, MADTheme.Spacing.sm)
-                            } else if friendService.friends.isEmpty {
-                                Text("No friends to configure")
-                                    .font(.system(size: 12, design: .rounded))
-                                    .foregroundColor(.white.opacity(0.4))
-                                    .padding(.vertical, MADTheme.Spacing.sm)
-                            } else {
-                                friendNotificationList
-                            }
-                        }
-                    }
-
-                    // Schedule — daily reminder + Do Not Disturb together, since
-                    // both are time-based and least-frequently changed.
-                    settingsSection(title: "SCHEDULE", icon: "clock.fill", iconColor: .orange) {
-                        settingsToggle("Daily reminder", isOn: $prefs.dailyReminderEnabled,
-                            description: "A nudge to get your mile in")
-
-                        if prefs.dailyReminderEnabled {
-                            DatePicker("Reminder Time", selection: reminderTimeBinding, displayedComponents: .hourAndMinute)
-                                .font(MADTheme.Typography.body)
-                                .datePickerStyle(.compact)
-                                .tint(MADTheme.Colors.madRed)
-                        }
-
-                        settingsDivider
-
-                        settingsToggle("Streak countdown on Lock Screen", isOn: streakRiskBinding,
-                            description: "A Live Activity with the time left when your streak is at risk in the evening")
-
-                        settingsDivider
-
-                        settingsToggle("Do Not Disturb", isOn: $prefs.dndEnabled,
-                            description: "Silence notifications during scheduled hours")
-
-                        if prefs.dndEnabled {
-                            DatePicker("Start", selection: dndStartBinding, displayedComponents: .hourAndMinute)
-                                .font(MADTheme.Typography.body)
-                                .datePickerStyle(.compact)
-                                .tint(MADTheme.Colors.madRed)
-
-                            DatePicker("End", selection: dndEndBinding, displayedComponents: .hourAndMinute)
-                                .font(MADTheme.Typography.body)
-                                .datePickerStyle(.compact)
-                                .tint(MADTheme.Colors.madRed)
-
-                            Text("Notifications received during DND will appear in your inbox")
-                                .font(.system(size: 11, design: .rounded))
-                                .foregroundColor(.white.opacity(0.35))
-                                .padding(.top, 2)
-                        }
-                    }
-
-                    // Reset to Defaults
+                    // Resets the alerts only: the privacy half of the stored
+                    // prefs belongs to Privacy and is carried over untouched.
                     Button {
                         withAnimation(.easeInOut(duration: 0.2)) {
-                            prefs = .default
+                            var reset = NotificationPreferences.default
+                            reset.takeSharing(from: prefs)
+                            reset.routePrivacyMeters = prefs.routePrivacyMeters
+                            prefs = reset
                         }
                         MADHaptics.action()
                     } label: {
-                        HStack(spacing: MADTheme.Spacing.sm) {
-                            Image(systemName: "arrow.counterclockwise")
-                                .font(.system(size: 12, weight: .semibold))
-                            Text("Reset to Defaults")
-                                .font(.system(size: 13, weight: .medium, design: .rounded))
-                        }
-                        .foregroundColor(.white.opacity(0.4))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, MADTheme.Spacing.md)
-                        .background(
-                            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
-                                .fill(Color.white.opacity(0.04))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
-                                        .stroke(Color.white.opacity(0.08), lineWidth: 1)
-                                )
-                        )
+                        Text("Reset to defaults")
+                            .madFont(size: 14, weight: .medium, design: .rounded)
+                            .foregroundColor(.secondary)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, MADTheme.Spacing.sm)
                     }
                     .buttonStyle(.plain)
 
-                    Spacer(minLength: MADTheme.Spacing.xxl)
+                    Spacer(minLength: MADTheme.Spacing.xl)
                 }
                 .padding(MADTheme.Spacing.md)
             }
@@ -402,11 +194,7 @@ struct NotificationSettingsView: View {
                 .foregroundColor(.green)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
-                .background(
-                    Capsule()
-                        .fill(Color.green.opacity(0.15))
-                        .overlay(Capsule().stroke(Color.green.opacity(0.2), lineWidth: 1))
-                )
+                .background(Capsule().fill(Color.green.opacity(0.15)))
                 .padding(.bottom, MADTheme.Spacing.xl)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
@@ -414,192 +202,144 @@ struct NotificationSettingsView: View {
         .task {
             await friendService.refreshAllData()
             await loadFriendSettingsAsync()
-            await loadVisibilityFromServer()
+            await loadServerSettings()
         }
     }
 
-    // MARK: - Settings Section
-    private func settingsSection<Content: View>(
-        title: String,
-        icon: String,
-        iconColor: Color,
-        @ViewBuilder content: () -> Content
-    ) -> some View {
-        VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
-            HStack(spacing: MADTheme.Spacing.sm) {
-                Image(systemName: icon)
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundColor(iconColor)
+    // MARK: - Sections
 
-                Text(title)
-                    .font(MADTheme.Typography.caption)
-                    .fontWeight(.semibold)
-                    .foregroundColor(.secondary)
-                    .tracking(0.5)
+    private var friendsSection: some View {
+        SettingsSection("Friends") {
+            // Audience controls for who hears about your activity (and whose
+            // you hear about).
+            NavigationLink(destination: FriendActivitySettingsView()) {
+                SettingsRow(
+                    icon: "person.2.wave.2.fill",
+                    title: "Friend activity",
+                    subtitle: "Who hears about your runs, walks and PBs",
+                    tint: MADTheme.Colors.madRed
+                )
+            }
+            .buttonStyle(.plain)
+            settingsDivider
+            settingsToggle("When a friend completes a mile", isOn: $prefs.friendCompletedEnabled)
+            settingsDivider
+            settingsToggle("When a friend hits a personal best", isOn: $prefs.friendPersonalBestEnabled,
+                description: "Fastest mile or most miles in a day")
+            settingsDivider
+            settingsToggle("New posts from friends", isOn: $prefs.friendPostsEnabled)
+            settingsDivider
+            settingsToggle("Friend requests", isOn: $prefs.friendRequestReceivedEnabled)
+            settingsDivider
+            settingsToggle("Friend request reminders", isOn: $prefs.friendRequestReminderEnabled,
+                description: "A nudge about requests you haven't answered")
+            settingsDivider
+            settingsToggle("Friend request accepted", isOn: $prefs.friendRequestAcceptedEnabled)
+            settingsDivider
+            settingsToggle("Friend nudges", isOn: $prefs.friendNudgeEnabled)
+            settingsDivider
+            settingsToggle("Buddy walks & runs", isOn: $prefs.buddyInvitesEnabled,
+                description: "Off stops invites and takes you out of friends' pickers")
+        }
+    }
+
+    private var muteFriendsSection: some View {
+        SettingsSection("Mute friends") {
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    showFriendSettings.toggle()
+                }
+            } label: {
+                HStack {
+                    Text("Mute a friend's alerts")
+                        .madFont(size: 16, weight: .medium, design: .rounded)
+                        .foregroundColor(.primary)
+                    Spacer()
+                    Image(systemName: "chevron.down")
+                        .madFont(size: 12, weight: .semibold, maxScale: 1.5)
+                        .foregroundColor(.secondary)
+                        .rotationEffect(.degrees(showFriendSettings ? 180 : 0))
+                        .accessibilityHidden(true)
+                }
+                .padding(.vertical, 8)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if showFriendSettings {
+                settingsDivider
+
+                if isLoadingFriendSettings {
+                    HStack {
+                        ProgressView()
+                            .scaleEffect(0.8)
+                            .tint(MADTheme.Colors.madRed)
+                        Text("Loading...")
+                            .font(.system(size: 12, design: .rounded))
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(.vertical, MADTheme.Spacing.sm)
+                } else if friendService.friends.isEmpty {
+                    Text("No friends yet")
+                        .font(.system(size: 12, design: .rounded))
+                        .foregroundColor(.secondary)
+                        .padding(.vertical, MADTheme.Spacing.sm)
+                } else {
+                    friendNotificationList
+                        .padding(.top, MADTheme.Spacing.sm)
+                }
+            }
+        }
+    }
+
+    /// Daily reminder + Do Not Disturb together: both are time-based and the
+    /// least often changed.
+    private var scheduleSection: some View {
+        SettingsSection("Schedule") {
+            settingsToggle("Daily reminder", isOn: $prefs.dailyReminderEnabled,
+                description: "A nudge to get your mile in")
+
+            if prefs.dailyReminderEnabled {
+                DatePicker("Reminder time", selection: reminderTimeBinding, displayedComponents: .hourAndMinute)
+                    .font(MADTheme.Typography.body)
+                    .datePickerStyle(.compact)
+                    .tint(MADTheme.Colors.madRed)
+                    .padding(.bottom, 6)
             }
 
-            content()
+            settingsDivider
+
+            settingsToggle("Streak countdown on Lock Screen", isOn: streakRiskBinding,
+                description: "Time left when your streak is at risk in the evening")
+
+            settingsDivider
+
+            settingsToggle("Do Not Disturb", isOn: $prefs.dndEnabled,
+                description: "Silence alerts during set hours. They wait in your inbox")
+
+            if prefs.dndEnabled {
+                DatePicker("Start", selection: dndStartBinding, displayedComponents: .hourAndMinute)
+                    .font(MADTheme.Typography.body)
+                    .datePickerStyle(.compact)
+                    .tint(MADTheme.Colors.madRed)
+
+                DatePicker("End", selection: dndEndBinding, displayedComponents: .hourAndMinute)
+                    .font(MADTheme.Typography.body)
+                    .datePickerStyle(.compact)
+                    .tint(MADTheme.Colors.madRed)
+                    .padding(.bottom, 6)
+            }
         }
-        .padding(MADTheme.Spacing.md)
-        .madLiquidGlass()
     }
 
-    // MARK: - Settings Toggle
-    private var photoOnlyProfileGridBinding: Binding<Bool> {
-        Binding(
-            get: { !prefs.autoPostsOnProfile },
-            set: { prefs.autoPostsOnProfile = !$0 }
-        )
-    }
+    // MARK: - Rows
 
     private func settingsToggle(_ label: String, isOn: Binding<Bool>, description: String? = nil) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Toggle(label, isOn: isOn)
-                .font(MADTheme.Typography.body)
-                .tint(MADTheme.Colors.madRed)
-
-            if let description = description {
-                Text(description)
-                    .font(.system(size: 11, design: .rounded))
-                    .foregroundColor(.white.opacity(0.35))
-                    .padding(.leading, 2)
-            }
-        }
+        SettingsToggleRow(title: label, subtitle: description, isOn: isOn)
     }
 
     private var settingsDivider: some View {
-        Divider().overlay(Color.white.opacity(0.06))
-    }
-
-    /// Friends / Only me for the cinematic flyover — a compact two-chip row
-    /// (each option's sentence lives in the enum, shown for the selected one).
-    private var flyoverVisibilityRow: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Route flyovers")
-                .font(MADTheme.Typography.body)
-                .foregroundColor(.white)
-            HStack(spacing: 8) {
-                ForEach(FlyoverVisibility.allCases) { option in
-                    let selected = prefs.flyoverVisibility == option
-                    Button {
-                        guard !selected else { return }
-                        MADHaptics.tap()
-                        withAnimation(.easeInOut(duration: 0.15)) {
-                            prefs.flyoverVisibility = option
-                        }
-                    } label: {
-                        Text(option.title)
-                            .font(.system(size: 13, weight: .bold, design: .rounded))
-                            .foregroundColor(selected ? .white : .white.opacity(0.55))
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 7)
-                            .background(Capsule().fill(selected
-                                ? MADTheme.Colors.madRed.opacity(0.85)
-                                : Color.white.opacity(0.07)))
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            Text(prefs.flyoverVisibility.subtitle)
-                .font(.system(size: 11, design: .rounded))
-                .foregroundColor(.white.opacity(0.35))
-                .padding(.leading, 2)
-        }
-    }
-
-    /// Stealth Mode lives in its own sheet (enabling asks "also hide routes
-    /// from…"), so this is a launcher, not a toggle: ONE owner of the server
-    /// call, and this screen's Save never sends stealth keys.
-    private var stealthModeRow: some View {
-        let isOn = StealthModeStore.shared.isOn
-        return Button {
-            MADHaptics.tap()
-            showStealthSheet = true
-        } label: {
-            HStack(alignment: .top, spacing: 12) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Stealth Mode")
-                        .font(MADTheme.Typography.body)
-                        .foregroundColor(.white)
-                    Text(isOn
-                        ? "On — walks recorded now are hidden from friends for good"
-                        : "Routes recorded while it's on are never uploaded and can never be shown, even after you turn it off. Share route maps (above) only hides maps for display.")
-                        .font(.system(size: 11, design: .rounded))
-                        .foregroundColor(.white.opacity(0.35))
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Spacer()
-                Text(isOn ? "On" : "Off")
-                    .font(.system(size: 13, weight: .bold, design: .rounded))
-                    .foregroundColor(isOn ? .white : .white.opacity(0.5))
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundColor(.white.opacity(0.3))
-            }
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .sheet(isPresented: $showStealthSheet) { StealthModeView() }
-    }
-
-    // MARK: - Visibility picker
-
-    /// Accent per option — green reads "open", red reads "shut". The tint is
-    /// what carries the state at a glance, before you read a word.
-    private func visibilityTint(_ option: WorkoutVisibility) -> Color {
-        switch option {
-        case .public: return .green
-        case .friends: return .blue
-        case .private: return MADTheme.Colors.madRed
-        }
-    }
-
-    /// One choice in the visibility picker. A row rather than a segmented
-    /// control because each option needs a sentence to be honest about what it
-    /// does — nobody should have to guess what "Everyone" reaches.
-    private func visibilityOption(_ option: WorkoutVisibility) -> some View {
-        let selected = prefs.workoutVisibility == option
-        let tint = visibilityTint(option)
-        return Button {
-            guard !selected else { return }
-            MADHaptics.tap()
-            withAnimation(.easeInOut(duration: 0.15)) {
-                prefs.workoutVisibility = option
-            }
-        } label: {
-            HStack(spacing: MADTheme.Spacing.md) {
-                ZStack {
-                    Circle()
-                        .fill(selected ? tint.opacity(0.22) : Color.white.opacity(0.06))
-                        .frame(width: 34, height: 34)
-                    Image(systemName: option.icon)
-                        .font(.system(size: 14, weight: .bold))
-                        .foregroundColor(selected ? tint : .white.opacity(0.4))
-                }
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(option.title)
-                        .font(MADTheme.Typography.body)
-                        .foregroundColor(.white)
-                    Text(option.subtitle)
-                        .font(.system(size: 11, design: .rounded))
-                        .foregroundColor(.white.opacity(0.35))
-                        .multilineTextAlignment(.leading)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                Spacer(minLength: MADTheme.Spacing.sm)
-
-                Image(systemName: selected ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundColor(selected ? tint : .white.opacity(0.2))
-            }
-            .padding(.vertical, 10)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+        SettingsDivider(inset: 0)
     }
 
     // MARK: - Friend Notification List
@@ -619,71 +359,19 @@ struct NotificationSettingsView: View {
 
     private func saveAndApply() {
         MADHaptics.action()
-        prefs.save()
+        prefs.saveAlerts()
         // Daily reminder is now backend-driven (server cron + APNs push). Clear
         // any legacy local-notification still pending from older app versions —
         // the backend respects `daily_reminder_enabled` and `daily_reminder_hour`
         // which are synced below as part of the prefs payload.
         UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [MADNotificationService.Identifier.dailyReminder])
 
-        // Sync preferences to the backend so push notification filtering works
+        // Sync the ALERT keys to the backend so push filtering works. The
+        // privacy keys are Privacy's to send (`sharingPayload`).
+        let saved = prefs
         Task {
             do {
-                let backendSettings: [String: Any] = [
-                    "nudges_enabled": prefs.friendNudgeEnabled && prefs.competitionNudgeEnabled,
-                    "flexes_enabled": prefs.competitionFlexEnabled,
-                    "hypes_enabled": prefs.hypeEnabled,
-                    "step_goal_enabled": prefs.stepGoalEnabled,
-                    "friend_activity_enabled": prefs.friendCompletedEnabled,
-                    "friend_personal_best_enabled": prefs.friendPersonalBestEnabled,
-                    "competition_invites_enabled": prefs.competitionInviteEnabled,
-                    "competition_updates_enabled": prefs.competitionAcceptedEnabled && prefs.competitionStartEnabled && prefs.competitionFinishEnabled,
-                    "competition_milestones_enabled": prefs.competitionMilestonesEnabled,
-                    "quiet_hours_start": prefs.dndEnabled ? prefs.dndStartHour : NSNull(),
-                    "quiet_hours_end": prefs.dndEnabled ? prefs.dndEndHour : NSNull(),
-                    "daily_reminder_enabled": prefs.dailyReminderEnabled,
-                    "daily_reminder_hour": prefs.dailyReminderHour,
-                    "timezone_offset_minutes": TimeZone.current.secondsFromGMT() / 60,
-                    "share_workouts_to_feed": prefs.shareWorkoutsToFeed,
-                    "friend_posts_enabled": prefs.friendPostsEnabled,
-                    "share_route_maps": prefs.shareRouteMaps,
-                    "share_live_presence": prefs.shareLivePresence,
-                    "weekly_recap_enabled": prefs.weeklyRecapEnabled,
-                    // Must reach the server: these are sent by a cron and by
-                    // the sync path, so a local-only flag could never silence
-                    // them (App Review 4.5.4).
-                    "weekly_challenge_enabled": prefs.weeklyChallengeEnabled,
-                    // Must reach the server: the profile grid is built by a SQL
-                    // query, so a local-only flag would change nothing at all.
-                    "tagged_posts_on_profile": prefs.taggedPostsOnProfile,
-                    // Enforced locally (the app builds that card), sent so the
-                    // choice survives a reinstall and follows a new phone.
-                    "auto_post_without_photo": prefs.autoPostWithoutPhoto,
-                    // Server-enforced: the profile grid is built by SQL, and
-                    // this choice must affect visitors too.
-                    "auto_posts_on_profile": prefs.autoPostsOnProfile,
-                    // Must reach the server: the reminder is sent by a cron, so
-                    // a local-only flag could never actually silence it.
-                    "friend_request_reminder_enabled": prefs.friendRequestReminderEnabled,
-                    "workout_visibility": prefs.workoutVisibility.rawValue,
-                    // Server-enforced at the feed projection (flyover_allowed).
-                    "flyover_visibility": prefs.flyoverVisibility.rawValue,
-                    // Must reach the server: this doesn't only mute a push, it
-                    // decides whether you appear in friends' buddy pickers at
-                    // all — which is a SQL query, not a client decision.
-                    "buddy_invites_enabled": prefs.buddyInvitesEnabled,
-                ]
-                _ = try await friendService.updateNotificationSettings(backendSettings)
-                // The profile grid is server-built, so it can't notice this on
-                // its own — and it's usually still alive right behind this
-                // screen. Told only after the server has actually taken the
-                // change, or the reload would re-fetch the old grid.
-                await MainActor.run {
-                    NotificationCenter.default.post(
-                        name: NSNotification.Name("MAD_ProfileGridSettingsChanged"),
-                        object: nil
-                    )
-                }
+                _ = try await friendService.updateNotificationSettings(saved.alertPayload)
             } catch {
                 print("[NotifSettings] ❌ Failed to sync preferences to backend: \(error)")
             }
@@ -696,65 +384,24 @@ struct NotificationSettingsView: View {
         }
     }
 
-    /// Pull the settings the SERVER actually enforces.
-    ///
-    /// Most of this screen is local-first, which is fine for a notification
-    /// preference — but visibility is a privacy control, and showing "Friends
-    /// only" to someone the server has as "Everyone" would be a lie about who
-    /// can see their photos. Tagged-posts-on-profile is here for the same
-    /// reason from the other direction: the profile grid is built by a SQL
-    /// query, so the server's value is the one that decides what's on it.
-    private func loadVisibilityFromServer() async {
+    /// Pull the settings the SERVER enforces (buddy invites gate a SQL query,
+    /// so the server's value wins over whatever this install last wrote), and
+    /// keep the stored privacy half honest while we have the response.
+    private func loadServerSettings() async {
         guard let settings = try? await friendService.getNotificationSettings()
         else { return }
         // Free hydration point for the Stealth window log (server wins).
         StealthModeStore.shared.apply(settings)
         // …and for hide-start-&-end's local mirror (share cards, own maps).
         RoutePrivacySync.adopt(settings)
-        let visibility = settings.workout_visibility.flatMap(WorkoutVisibility.init(rawValue:))
-        let taggedOnProfile = settings.tagged_posts_on_profile
         await MainActor.run {
-            var changed = false
-            if let visibility, prefs.workoutVisibility != visibility {
-                prefs.workoutVisibility = visibility
-                changed = true
+            if prefs.adoptServerValues(settings) {
+                // Keep the stored copy honest too, so a later Save can't push
+                // a stale value back over the server's.
+                var stored = NotificationPreferences.load()
+                stored.adoptServerValues(settings)
+                stored.save()
             }
-            // Server-enforced like workout_visibility — its value wins.
-            if let flyoverRaw = settings.flyover_visibility,
-               let flyover = FlyoverVisibility(rawValue: flyoverRaw),
-               prefs.flyoverVisibility != flyover {
-                prefs.flyoverVisibility = flyover
-                changed = true
-            }
-            if let taggedOnProfile, prefs.taggedPostsOnProfile != taggedOnProfile {
-                prefs.taggedPostsOnProfile = taggedOnProfile
-                changed = true
-            }
-            // Same reason as the two above: this one gates a SQL query (who
-            // shows up in a friend's buddy picker), so the server's value wins
-            // over whatever this install last wrote.
-            if let buddyInvites = settings.buddy_invites_enabled,
-                prefs.buddyInvitesEnabled != buddyInvites {
-                prefs.buddyInvitesEnabled = buddyInvites
-                changed = true
-            }
-            // A different reason from the three above — nothing server-side
-            // enforces this one — but the same conclusion: it is stored
-            // remotely so it carries to a new phone, and a fresh install has to
-            // adopt it rather than silently start posting route cards again.
-            if let autoPost = settings.auto_post_without_photo,
-                prefs.autoPostWithoutPhoto != autoPost {
-                prefs.autoPostWithoutPhoto = autoPost
-                changed = true
-            }
-            if let autoOnProfile = settings.auto_posts_on_profile,
-                prefs.autoPostsOnProfile != autoOnProfile {
-                prefs.autoPostsOnProfile = autoOnProfile
-                changed = true
-            }
-            // Keep the local copy honest too, so a later Save of some unrelated
-            // toggle can't push the stale value back over the server's.
-            if changed { prefs.save() }
         }
     }
 
@@ -776,6 +423,7 @@ struct NotificationSettingsView: View {
     }
 
 }
+
 
 // MARK: - Friend Notification Row
 
