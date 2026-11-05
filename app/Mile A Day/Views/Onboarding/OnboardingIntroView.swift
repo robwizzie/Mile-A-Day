@@ -330,7 +330,7 @@ private struct IntroStepPage: View {
 
 private struct IntroShownKey: EnvironmentKey { static let defaultValue = true }
 private struct IntroActiveKey: EnvironmentKey { static let defaultValue = true }
-private extension EnvironmentValues {
+extension EnvironmentValues {
     var introShown: Bool {
         get { self[IntroShownKey.self] }
         set { self[IntroShownKey.self] = newValue }
@@ -342,7 +342,7 @@ private extension EnvironmentValues {
 }
 
 /// Gentle float, a pure function of the clock. Paused off-page / Reduce Motion.
-private struct IntroBob: ViewModifier {
+struct IntroBob: ViewModifier {
     var amplitude: CGFloat = 6
     var period: Double = 3.2
     var phase: Double = 0
@@ -358,7 +358,7 @@ private struct IntroBob: ViewModifier {
 }
 
 /// Pops in (scale + fade) with a stagger once the page is shown.
-private struct IntroPop: ViewModifier {
+struct IntroPop: ViewModifier {
     var delay: Double = 0
     @Environment(\.introShown) private var shown
 
@@ -370,7 +370,7 @@ private struct IntroPop: ViewModifier {
     }
 }
 
-private extension View {
+extension View {
     func introBob(_ amplitude: CGFloat = 6, period: Double = 3.2, phase: Double = 0) -> some View {
         modifier(IntroBob(amplitude: amplitude, period: period, phase: phase))
     }
@@ -378,7 +378,7 @@ private extension View {
 }
 
 /// A white pill label floating over the hero ("🔥 128 days").
-private struct IntroChip: View {
+struct IntroChip: View {
     let text: String
     var tint: Color = Color(red: 0.12, green: 0.08, blue: 0.09)
 
@@ -395,7 +395,7 @@ private struct IntroChip: View {
     }
 }
 
-private func introMiles(_ miles: Double) -> String {
+func introMiles(_ miles: Double) -> String {
     let unit = DistanceUnits.current
     return String(format: "%.2f %@", miles * unit.perMile, unit.abbreviation)
 }
@@ -481,23 +481,25 @@ private struct IntroFeedArt: View {
     var body: some View {
         let width = min(height * 0.52, 190)
         ZStack {
-            card(2, width: width)
+            card(2, width: width * 0.86)
                 .rotationEffect(.degrees(9))
-                .offset(x: width * 0.62, y: 10)
+                .offset(x: width * 0.66, y: 14)
                 .introPop(0.2)
-            card(1, width: width)
+            card(1, width: width * 0.86)
                 .rotationEffect(.degrees(-9))
-                .offset(x: -width * 0.62, y: 10)
+                .offset(x: -width * 0.66, y: 14)
                 .introPop(0.12)
-            card(0, width: width)
+            // The front one is a real feed post: who, their streak, the
+            // photo, the caption and the hype button, like in the app.
+            IntroFeedPost(photo: photos.first, height: height)
                 .introPop(0)
                 .introBob(4, period: 3.6)
 
-            // Top-left: top-right belongs to Skip, the bottom to the names.
+            // Lower left, over the side print: clear of Skip and the post.
             IntroChip(text: "🔥 Hyped by 12")
                 .introBob(6, period: 3.0, phase: 0.4)
                 .introPop(0.35)
-                .offset(x: -width * 0.6, y: -width * 0.74)
+                .offset(x: -width * 0.72, y: width * 0.52)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -549,8 +551,16 @@ private struct IntroPhotoCard: View {
         .accessibilityHidden(true)
     }
 
+    /// Just the photo (or drawn sample), for the feed post to reuse.
+    static func photoFace(photo: ShowcasePhoto?, slot: Int, width: CGFloat, height: CGFloat) -> some View {
+        IntroPhotoCard(photo: photo, slot: slot, width: width)
+            .image
+            .frame(width: width, height: height)
+            .clipped()
+    }
+
     @ViewBuilder
-    private var image: some View {
+    fileprivate var image: some View {
         if let url = photo?.imageURL {
             AsyncImage(url: url, transaction: Transaction(animation: .easeOut(duration: 0.25))) { phase in
                 if case .success(let image) = phase {
@@ -572,6 +582,87 @@ private struct IntroPhotoCard: View {
                 .foregroundColor(.white.opacity(0.9))
                 .offset(y: -width * 0.08)
         }
+    }
+}
+
+/// A feed post in miniature, from a real showcase photo (drawn sample when
+/// none loaded): avatar + name + streak, the photo, caption and hype row.
+private struct IntroFeedPost: View {
+    let photo: ShowcasePhoto?
+    let height: CGFloat
+
+    var body: some View {
+        // Width first (a card that reads as a post), photo fills what's left.
+        let width = min(height * 0.82, 200)
+        let photoHeight = max(70, min(width * 1.1, height - 80))
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 7) {
+                avatar
+                Text(photo?.username ?? "maya")
+                    .madFont(size: 13, weight: .bold, design: .rounded, maxScale: 1.1)
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+                if let streak = streakShown {
+                    Text("🔥 \(streak)")
+                        .madFont(size: 12, weight: .heavy, design: .rounded, maxScale: 1.1)
+                        .foregroundColor(Color(red: 1.0, green: 0.6, blue: 0.25))
+                        .lineLimit(1)
+                        .fixedSize()
+                }
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 40)
+
+            IntroPhotoCard.photoFace(photo: photo, slot: 0, width: width, height: photoHeight)
+
+            HStack(spacing: 6) {
+                Text("🔥 Hype")
+                    .madFont(size: 12, weight: .bold, design: .rounded, maxScale: 1.1)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 4)
+                    .background(Capsule().fill(MADTheme.Colors.madRed))
+                Text(photo?.caption ?? "Sunset mile 🌅")
+                    .madFont(size: 12, weight: .medium, design: .rounded, maxScale: 1.1)
+                    .opacity(0.8)
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 40)
+        }
+        .foregroundColor(.white)
+        .frame(width: width)
+        .background(Color(red: 0.10, green: 0.07, blue: 0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .shadow(color: .black.opacity(0.35), radius: 16, y: 8)
+        .accessibilityHidden(true)
+    }
+
+    /// The real post's streak; the sample's when nothing loaded.
+    private var streakShown: Int? {
+        guard let photo else { return 128 }
+        return photo.streak
+    }
+
+    @ViewBuilder
+    private var avatar: some View {
+        let fallback = Circle().fill(MADTheme.Colors.madRed)
+            .overlay(Text(String((photo?.username ?? "m").prefix(1)).uppercased())
+                .madFont(size: 12, weight: .heavy, design: .rounded, maxScale: 1))
+        Group {
+            if let url = photo?.avatarURL {
+                AsyncImage(url: url) { phase in
+                    if case .success(let image) = phase {
+                        image.resizable().scaledToFill()
+                    } else {
+                        fallback
+                    }
+                }
+            } else {
+                fallback
+            }
+        }
+        .frame(width: 24, height: 24)
+        .clipShape(Circle())
     }
 }
 
@@ -749,9 +840,11 @@ struct ShowcasePhoto: Decodable, Identifiable, Equatable {
     let distance: Double?
     let streak: Int?
     let username: String
+    let profile_image_url: String?
 
     var id: String { post_id }
     var imageURL: URL? { ProfileImageService.fullImageURL(for: media_url) }
+    var avatarURL: URL? { ProfileImageService.fullImageURL(for: profile_image_url) }
 }
 
 @MainActor
@@ -775,7 +868,7 @@ final class ShowcasePhotoStore: ObservableObject {
             let (data, response) = try await URLSession.shared.data(from: url)
             guard (response as? HTTPURLResponse)?.statusCode == 200 else { return }
             let decoded = try JSONDecoder().decode(Response.self, from: data).photos
-            photos = Array(decoded.prefix(3))
+            photos = Array(decoded.prefix(3))  // front post + two prints
             for photo in photos {
                 if let imageURL = photo.imageURL {
                     _ = try? await URLSession.shared.data(from: imageURL)

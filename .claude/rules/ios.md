@@ -27,6 +27,7 @@ Details: docs/conventions/ios.md § HealthKit
 - Never write `hk.retroactiveStreak` raw to UI/widgets/watch: go through `updateUserWithHealthKitData` (`vettedHealthKitStreak`) / `max(hk, user.streak)`.
 - Never claim HealthKit READ auth (`HealthAccessMonitor`); offer "Grant access" only on `.needsRequest`; keep `healthKitReadTypes/WriteTypes` non-private.
 - One settings page, `MADSettingsView`, behind the Dashboard gear; it owns its alerts, sheets and account actions.
+- Onboarding: splash frames are a pure function of time (`SplashView`, `TimelineView`) and it hands off itself (`handoffDelay`); the tour is `OnboardingIntroView` (also the dashboard replay), setup screens use `OnboardingStepScaffold`; example photos only from `/public/showcase` (`ShowcasePhotoStore`, drawn fallback); the system notification prompt waits for `NotificationPrePromptView` (`NotificationPrePrompt.hold/release/notNow`).
 - Recalibrate's running state is `WorkoutSyncService.recalibration` (drives `SyncStatusBanner` + the Settings row), never view `@State`.
 - `PostGridLayout` is client-only (`compact`/`large`/`calendar`); the calendar groups by `local_date` (else `created_at`) and reuses `gridThumbnail`/`openReader`.
 - `PostGridFilter` is `all`/`collabs`; grid prefs and pins apply to the OWNER's grid only (visitors get defaults); name the filter that emptied a grid; nil server fields mean "not offered"; add FeedEntry CodingKeys cases.

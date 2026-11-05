@@ -3,190 +3,19 @@ import AuthenticationServices
 
 struct AuthenticationView: View {
     @Environment(\.appStateManager) var appStateManager
-    @Environment(\.colorScheme) private var colorScheme
     @EnvironmentObject var userManager: UserManager
     @StateObject private var appleSignInManager = AppleSignInManager()
-    @State private var logoScale: CGFloat = 0.8
-    @State private var contentOpacity: Double = 0
-    @State private var buttonsOffset: CGFloat = 40
     @State private var showError = false
     @State private var legalSheetURL: URL?
 
-    private var backgroundColor: LinearGradient {
-        colorScheme == .dark
-            ? LinearGradient(
-                colors: [
-                    Color(red: 0.12, green: 0.06, blue: 0.08),
-                    Color(red: 0.06, green: 0.03, blue: 0.04)
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            : LinearGradient(
-                colors: [
-                    Color(red: 0.98, green: 0.97, blue: 0.97),
-                    Color(red: 0.94, green: 0.93, blue: 0.94)
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-    }
-
-    private var titleColor: Color {
-        colorScheme == .dark ? .white : Color(red: 0.12, green: 0.12, blue: 0.14)
-    }
-
-    private var subtitleColor: Color {
-        colorScheme == .dark ? .white.opacity(0.7) : Color(red: 0.45, green: 0.43, blue: 0.47)
-    }
-
-    private var tertiaryTextColor: Color {
-        colorScheme == .dark ? .white.opacity(0.5) : Color(red: 0.6, green: 0.58, blue: 0.62)
-    }
-
-    private var appleButtonBackground: Color {
-        colorScheme == .dark ? .white : .black
-    }
-
-    private var appleButtonForeground: Color {
-        colorScheme == .dark ? .black : .white
-    }
-
     var body: some View {
-        ZStack {
-            backgroundColor
-                .ignoresSafeArea()
-
-            VStack(spacing: 0) {
-                Spacer(minLength: 16)
-
-                // Logo and title
-                VStack(spacing: MADTheme.Spacing.xl) {
-                    // Logo with glow
-                    ZStack {
-                        Circle()
-                            .fill(MADTheme.Colors.madRed.opacity(colorScheme == .dark ? 0.15 : 0.08))
-                            .frame(width: 180, height: 180)
-                            .blur(radius: 35)
-
-                        Image("mad-logo")
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
-                            .frame(width: 120, height: 120)
-                            .scaleEffect(logoScale)
-                            .shadow(
-                                color: MADTheme.Colors.madRed.opacity(colorScheme == .dark ? 0.3 : 0.15),
-                                radius: 25,
-                                x: 0,
-                                y: 10
-                            )
-                    }
-
-                    VStack(spacing: MADTheme.Spacing.sm) {
-                        Text("Welcome to")
-                            .font(.system(size: 18, weight: .medium, design: .rounded))
-                            .foregroundColor(subtitleColor)
-
-                        Text("MILE A DAY")
-                            .font(.system(size: 34, weight: .black, design: .rounded))
-                            .foregroundColor(titleColor)
-                            .tracking(2)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.6)
-
-                        Text("Your daily fitness journey starts here")
-                            .font(.system(size: 16, weight: .regular, design: .rounded))
-                            .foregroundColor(subtitleColor)
-                            .multilineTextAlignment(.center)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .padding(.top, 2)
-                    }
-                }
-                .opacity(contentOpacity)
-
-                Spacer(minLength: 16)
-                Spacer(minLength: 16)
-
-                // Sign in button
-                VStack(spacing: MADTheme.Spacing.md) {
-                    Button(action: {
-                        handleAppleSignIn()
-                    }) {
-                        HStack(spacing: 10) {
-                            if appleSignInManager.isLoading {
-                                ProgressView()
-                                    .progressViewStyle(CircularProgressViewStyle(tint: appleButtonForeground))
-                                    .scaleEffect(0.8)
-                            } else {
-                                Image(systemName: "applelogo")
-                                    .font(.system(size: 20, weight: .medium))
-                            }
-
-                            Text(appleSignInManager.isLoading ? "Signing in..." : "Continue with Apple")
-                                .font(.system(size: 17, weight: .semibold, design: .rounded))
-                        }
-                        .foregroundColor(appleButtonForeground)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 16)
-                        .background(
-                            RoundedRectangle(cornerRadius: 14)
-                                .fill(appleButtonBackground)
-                        )
-                        .shadow(
-                            color: Color.black.opacity(colorScheme == .dark ? 0.4 : 0.15),
-                            radius: 12,
-                            x: 0,
-                            y: 6
-                        )
-                    }
-                    .disabled(appleSignInManager.isLoading)
-
-                    Text("Sign in to track your runs and compete with friends")
-                        .font(.system(size: 14, weight: .regular, design: .rounded))
-                        .foregroundColor(tertiaryTextColor)
-                        .multilineTextAlignment(.center)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .padding(.horizontal, MADTheme.Spacing.lg)
-                .offset(y: buttonsOffset)
-                .opacity(contentOpacity)
-
-                Spacer(minLength: 12)
-
-                // Terms and privacy
-                VStack(spacing: MADTheme.Spacing.xs) {
-                    Text("By continuing, you agree to our")
-                        .font(.system(size: 12, weight: .regular))
-                        .foregroundColor(tertiaryTextColor)
-
-                    HStack(spacing: MADTheme.Spacing.xs) {
-                        Button("Terms of Service") {
-                            legalSheetURL = URL(string: "https://mileaday.run/terms")
-                        }
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(subtitleColor)
-                        .underline()
-
-                        Text("and")
-                            .font(.system(size: 12, weight: .regular))
-                            .foregroundColor(tertiaryTextColor)
-
-                        Button("Privacy Policy") {
-                            legalSheetURL = URL(string: "https://mileaday.run/privacy")
-                        }
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(subtitleColor)
-                        .underline()
-                    }
-                    .fixedSize()
-                }
-                .opacity(contentOpacity)
-                .padding(.bottom, MADTheme.Spacing.xl)
-            }
-        }
-        .onAppear {
-            startAnimations()
-        }
+        OnboardingStepScaffold(
+            colors: [Color(red: 0.93, green: 0.33, blue: 0.30), Color(red: 0.62, green: 0.12, blue: 0.22)],
+            headline: "Save your streak",
+            message: "Sign in so your streak, photos and friends follow you to any iPhone.",
+            art: { height in AuthHeroArt(height: height) },
+            actions: { actions }
+        )
         .alert("Sign In Error", isPresented: $showError) {
             Button("OK") { }
         } message: {
@@ -201,17 +30,41 @@ struct AuthenticationView: View {
         }
     }
 
-    private func startAnimations() {
-        withAnimation(.spring(response: 0.7, dampingFraction: 0.75).delay(0.2)) {
-            logoScale = 1.0
-        }
+    private var actions: some View {
+        VStack(spacing: 14) {
+            // Sign in with Apple, styled per the HIG: white on a dark
+            // background, Apple logo + "Continue with Apple", full width.
+            Button(action: handleAppleSignIn) {
+                HStack(spacing: 8) {
+                    if appleSignInManager.isLoading {
+                        ProgressView().tint(.black)
+                    } else {
+                        Image(systemName: "applelogo")
+                            .font(.system(size: 19, weight: .medium))
+                    }
+                    Text(appleSignInManager.isLoading ? "Signing in..." : "Continue with Apple")
+                        .madFont(size: 18, weight: .semibold, maxScale: 1.3)
+                }
+                .foregroundColor(.black)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 17)
+                .background(Capsule().fill(.white))
+            }
+            .disabled(appleSignInManager.isLoading)
 
-        withAnimation(.easeOut(duration: 0.5).delay(0.3)) {
-            contentOpacity = 1.0
-        }
-
-        withAnimation(.easeOut(duration: 0.5).delay(0.5)) {
-            buttonsOffset = 0
+            VStack(spacing: 2) {
+                Text("By continuing, you agree to our")
+                    .foregroundColor(.white.opacity(0.45))
+                HStack(spacing: 4) {
+                    Button("Terms") { legalSheetURL = URL(string: "https://mileaday.run/terms") }
+                        .foregroundColor(.white.opacity(0.8))
+                    Text("and").foregroundColor(.white.opacity(0.45))
+                    Button("Privacy Policy") { legalSheetURL = URL(string: "https://mileaday.run/privacy") }
+                        .foregroundColor(.white.opacity(0.8))
+                }
+                .fixedSize()
+            }
+            .madFont(size: 12, weight: .medium, design: .rounded, maxScale: 1.3)
         }
     }
 
@@ -235,6 +88,26 @@ struct AuthenticationView: View {
                 }
             }
         }
+    }
+}
+
+/// Flamey blazing, ready for day one.
+private struct AuthHeroArt: View {
+    let height: CGFloat
+
+    var body: some View {
+        let flame = min(height * 0.7, 220)
+        ZStack {
+            FlameBuddyView(health: .blazing, size: flame, showsMoodBubble: false)
+                .frame(width: flame, height: flame)
+                .introPop(0.05)
+                .introBob(5, period: 3.6)
+            IntroChip(text: "🔥 Day 1 starts today")
+                .introBob(5, period: 3.0, phase: 0.3)
+                .introPop(0.25)
+                .offset(x: flame * 0.55, y: -flame * 0.38)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 

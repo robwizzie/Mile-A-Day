@@ -1,6 +1,7 @@
 import SwiftUI
 import Combine
 import HealthKit
+import UserNotifications
 
 /// App State Manager
 /// Manages the overall app flow: Splash -> Onboarding -> Auth -> Main App
@@ -15,6 +16,9 @@ class AppStateManager: ObservableObject {
         case usernameSetup
         case personalization
         case healthAccess
+        /// Flamey asks before the system notification prompt (only while
+        /// permission is undecided).
+        case notifications
         /// Mile A Day+ offer, once, after setup. Skippable; never a gate.
         case plusOffer
         case main
@@ -53,6 +57,8 @@ class AppStateManager: ObservableObject {
                 } else if !self.isAuthenticated {
                     self.currentState = .authentication
                 } else if self.userDefaults.bool(forKey: self.hasCompletedFullSetupKey) {
+                    // Quit on the pre-prompt? The app asks the system way now.
+                    NotificationPrePrompt.release()
                     self.currentState = .main
                 } else {
                     self.routeToIncompleteSetupStep()
@@ -78,6 +84,13 @@ class AppStateManager: ObservableObject {
     func completeAuthentication(userManager: UserManager) {
         userDefaults.set(true, forKey: isAuthenticatedKey)
         isAuthenticated = true
+
+        // Heading into setup: hold the system notification prompt for
+        // Flamey's pre-prompt (the request below then only reads status).
+        // A returning user going straight to the app is asked as before.
+        if !(userManager.currentUser.hasUsername && isHealthKitAuthorized()) {
+            NotificationPrePrompt.hold()
+        }
 
         // Now that user is authenticated, enable HealthKit background delivery
         MADBackgroundService.shared.enableBackgroundDeliveryAfterAuth()
@@ -105,6 +118,7 @@ class AppStateManager: ObservableObject {
                     if self.isHealthKitAuthorized() {
                         // Returning user with everything set up
                         self.userDefaults.set(true, forKey: self.hasCompletedFullSetupKey)
+                        NotificationPrePrompt.release()
                         self.currentState = .main
                         // Initial sync (if needed) runs in the background — user can
                         // continue using the app while workouts upload. After the
@@ -161,13 +175,34 @@ class AppStateManager: ObservableObject {
         // A MainActor task (not DispatchQueue.main) because PlusStore is
         // main-actor isolated.
         Task { @MainActor in
+            let settings = await UNUserNotificationCenter.current().notificationSettings()
             withAnimation(MADTheme.Animation.standard) {
-                if PlusStore.shared.isPlus {
-                    self.enterMain()
+                if settings.authorizationStatus == .notDetermined {
+                    self.currentState = .notifications
                 } else {
-                    self.currentState = .plusOffer
+                    NotificationPrePrompt.release()
+                    self.routeToPlusOfferOrMain()
                 }
             }
+        }
+    }
+
+    /// Flamey's notification pre-prompt was answered (either way).
+    func completeNotifications() {
+        NotificationPrePrompt.release()
+        Task { @MainActor in
+            withAnimation(MADTheme.Animation.standard) {
+                self.routeToPlusOfferOrMain()
+            }
+        }
+    }
+
+    /// A Founding Runner (already Plus) skips the offer.
+    @MainActor private func routeToPlusOfferOrMain() {
+        if PlusStore.shared.isPlus {
+            enterMain()
+        } else {
+            currentState = .plusOffer
         }
     }
 
@@ -181,6 +216,7 @@ class AppStateManager: ObservableObject {
     }
 
     @MainActor private func enterMain() {
+        NotificationPrePrompt.release()
         currentState = .main
         // Initial sync runs in the background — non-blocking.
         WorkoutSyncService.shared.startInitialSyncIfNeeded()
@@ -245,6 +281,7 @@ class AppStateManager: ObservableObject {
         } else {
             // Everything is actually complete — set the flag and go to main
             self.userDefaults.set(true, forKey: hasCompletedFullSetupKey)
+            NotificationPrePrompt.release()
             self.currentState = .main
         }
     }

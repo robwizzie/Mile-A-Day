@@ -7,136 +7,20 @@ struct HealthAccessView: View {
     @State private var wasDenied = false
 
     var body: some View {
-        ZStack {
-            LinearGradient(
-                colors: [
-                    Color(red: 0.12, green: 0.06, blue: 0.08),
-                    Color(red: 0.06, green: 0.03, blue: 0.04)
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .ignoresSafeArea()
-
-            // Scrolls when the content is taller than the screen (SE/mini-class
-            // devices) instead of relying on Spacers that collapse and clip text.
-            GeometryReader { geo in
-            ScrollView(showsIndicators: false) {
-            VStack(spacing: MADTheme.Spacing.xl) {
-                Spacer(minLength: MADTheme.Spacing.lg)
-
-                // Icon
-                ZStack {
-                    Circle()
-                        .fill(MADTheme.Colors.madRed.opacity(0.1))
-                        .frame(width: 120, height: 120)
-
-                    Image(systemName: "heart.text.square.fill")
-                        .font(.system(size: 56))
-                        .foregroundColor(MADTheme.Colors.madRed)
-                }
-
-                // Title & description
-                VStack(spacing: MADTheme.Spacing.md) {
-                    Text("Health Data Access")
-                        .font(MADTheme.Typography.title1)
-                        .fontWeight(.bold)
-                        .foregroundColor(MADTheme.Colors.primaryText)
-
-                    Text("Mile A Day needs access to your Health data to track your runs and keep your streak going.")
-                        .font(MADTheme.Typography.body)
-                        .foregroundColor(MADTheme.Colors.secondaryText)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, MADTheme.Spacing.md)
-                }
-
-                // Feature list
-                VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
-                    featureRow(icon: "arrow.triangle.2.circlepath", text: "Automatically count runs & walks from your Apple Watch, treadmills, and other fitness apps")
-                    featureRow(icon: "figure.run", text: "Track a run in the app — outdoors with GPS or indoors on a treadmill")
-                    featureRow(icon: "flame.fill", text: "Measure your distance, calories, and personal records")
-                    featureRow(icon: "bolt.fill", text: "Keep your daily streak alive")
-                }
-                .padding(MADTheme.Spacing.lg)
-                .background(
-                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
-                        .fill(MADTheme.Colors.cardBackground)
-                )
-
-                if wasDenied {
-                    VStack(spacing: MADTheme.Spacing.sm) {
-                        Text("Health access is required for this app to function.")
-                            .font(MADTheme.Typography.caption)
-                            .foregroundColor(MADTheme.Colors.error)
-                            .multilineTextAlignment(.center)
-                            .fixedSize(horizontal: false, vertical: true)
-
-                        Text("Please enable Health access in Settings > Privacy & Security > Health > Mile A Day.")
-                            .font(MADTheme.Typography.caption)
-                            .foregroundColor(MADTheme.Colors.secondaryText)
-                            .multilineTextAlignment(.center)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    .padding(.horizontal, MADTheme.Spacing.md)
-                }
-
-                Spacer(minLength: MADTheme.Spacing.lg)
+        OnboardingStepScaffold(
+            colors: [Color(red: 0.98, green: 0.36, blue: 0.42), Color(red: 0.70, green: 0.14, blue: 0.30)],
+            chip: "Almost there",
+            headline: "Connect Apple Health",
+            message: wasDenied
+                ? "Health isn't available right now. Turn it on in Settings › Privacy & Security › Health › Mile A Day so your miles count."
+                : "Mile A Day reads your walks and runs from Apple Health, so every mile counts: your Watch, a treadmill or any app. Your health data never leaves your account.",
+            art: { height in HealthHeroArt(height: height) },
+            actions: {
+                OnboardingPrimaryButton(title: wasDenied ? "Open Settings" : "Connect Health",
+                                        isLoading: isRequesting,
+                                        action: requestAccess)
             }
-            .padding(.horizontal, MADTheme.Spacing.lg)
-            .frame(maxWidth: .infinity, minHeight: geo.size.height)
-            }
-            .scrollBounceBehavior(.basedOnSize)
-            }
-        }
-        // Button lives in the bottom safe-area inset so it can never be pushed
-        // off screen by tall content above it.
-        .safeAreaInset(edge: .bottom) {
-            VStack(spacing: MADTheme.Spacing.md) {
-                Button(action: requestAccess) {
-                    HStack {
-                        if isRequesting {
-                            ProgressView()
-                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                                .scaleEffect(0.8)
-                        } else {
-                            Text(wasDenied ? "Open Settings" : "Continue")
-                                .font(MADTheme.Typography.headline)
-                                .fontWeight(.semibold)
-                        }
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, MADTheme.Spacing.md)
-                    .background(
-                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
-                            .fill(MADTheme.Colors.madRed)
-                    )
-                    .foregroundColor(.white)
-                }
-                .disabled(isRequesting)
-
-                Text("Without Health access, Mile A Day cannot track your workouts or streaks.")
-                    .font(MADTheme.Typography.caption)
-                    .foregroundColor(MADTheme.Colors.secondaryText)
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .padding(.horizontal, MADTheme.Spacing.lg)
-            .padding(.bottom, MADTheme.Spacing.md)
-        }
-    }
-
-    private func featureRow(icon: String, text: String) -> some View {
-        HStack(spacing: MADTheme.Spacing.md) {
-            Image(systemName: icon)
-                .font(.system(size: 20))
-                .foregroundColor(MADTheme.Colors.madRed)
-                .frame(width: 28)
-
-            Text(text)
-                .font(MADTheme.Typography.body)
-                .foregroundColor(MADTheme.Colors.primaryText)
-                .fixedSize(horizontal: false, vertical: true)
-        }
+        )
     }
 
     private func requestAccess() {
@@ -187,6 +71,43 @@ struct HealthAccessView: View {
                 }
             }
         }
+    }
+}
+
+/// A heart in a mile ring with the kinds of activity Health brings in.
+private struct HealthHeroArt: View {
+    let height: CGFloat
+
+    var body: some View {
+        let ring = min(height * 0.62, 200)
+        ZStack {
+            Circle()
+                .stroke(.white.opacity(0.18), lineWidth: 10)
+                .frame(width: ring, height: ring)
+                .introPop(0)
+            Circle()
+                .trim(from: 0, to: 0.85)
+                .stroke(.white, style: StrokeStyle(lineWidth: 10, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+                .frame(width: ring, height: ring)
+                .introPop(0.05)
+            Image(systemName: "heart.fill")
+                .font(.system(size: ring * 0.34, weight: .bold))
+                .foregroundColor(.white)
+                .introPop(0.1)
+                .introBob(4, period: 1.2)
+                .accessibilityHidden(true)
+
+            IntroChip(text: "🚶 Walks").introBob(5, period: 3.0, phase: 0.1).introPop(0.2)
+                .offset(x: -ring * 0.62, y: -ring * 0.32)
+            IntroChip(text: "🏃 Runs").introBob(5, period: 3.3, phase: 0.4).introPop(0.28)
+                .offset(x: ring * 0.62, y: -ring * 0.18)
+            IntroChip(text: "👟 Steps").introBob(5, period: 3.6, phase: 0.7).introPop(0.36)
+                .offset(x: -ring * 0.5, y: ring * 0.42)
+            IntroChip(text: "⌚️ Watch").introBob(5, period: 3.1, phase: 0.9).introPop(0.44)
+                .offset(x: ring * 0.55, y: ring * 0.38)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
