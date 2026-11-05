@@ -290,6 +290,13 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
     private var pauseAnchorTreadmillMiles: Double?
     private var treadmillJoinMiles: Double = 0
     private var hasTreadmillSegment = false
+    /// Set when a treadmill stretch ENDS mid-workout (data went quiet, the
+    /// machine dropped, the user disconnected): the indoor span credited at
+    /// that moment plus the pedometer span then. From there the pedometer
+    /// counts ON TOP of the treadmill's distance instead of having to catch
+    /// up to it — without this the number would freeze until the phone's
+    /// own step count passed the belt's.
+    private var pedometerRejoin: (base: Double, pedometerAt: Double)?
     /// True once any belt distance reached this session. Survives
     /// `stopTracking()` on purpose — the save reads it afterwards (stamped as
     /// `distanceSourceMetadataKey`); reset only by the next `startTracking`.
@@ -519,6 +526,7 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
         pauseAnchorPedometerMiles = isPaused ? 0 : nil
         resetTreadmillSegment()
         hasTreadmillSegment = false
+        pedometerRejoin = nil
         usedTreadmill = false
 
         armTrackingWatchdog(force: !isPaused)
@@ -813,6 +821,9 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
     /// when it connected; the outer max keeps the class invariant.
     private func applyIndoorDistance() {
         var span = countablePedometerMiles
+        if let rejoin = pedometerRejoin {
+            span = max(span, rejoin.base + max(0, countablePedometerMiles - rejoin.pedometerAt))
+        }
         if hasTreadmillSegment {
             span = max(span, treadmillJoinMiles + countableTreadmillMiles)
         }
@@ -840,6 +851,17 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
         resetTreadmillSegment()
         treadmillJoinMiles = max(0, currentDistance - pedometerOffset)
         hasTreadmillSegment = true
+    }
+
+    /// The treadmill stopped counting mid-workout: hand the distance to the
+    /// pedometer from exactly where the belt left it.
+    func endTreadmillSegment() {
+        guard isTracking, hasTreadmillSegment else { return }
+        hasTreadmillSegment = false
+        pedometerRejoin = (
+            base: max(0, currentDistance - pedometerOffset),
+            pedometerAt: countablePedometerMiles
+        )
     }
 
     /// Belt distance since `beginTreadmillSegment`, miles (main thread).
@@ -1064,6 +1086,7 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
         // The treadmill only ever serves a live workout; let the machine go
         // so the next person (or their own app) can connect.
         hasTreadmillSegment = false
+        pedometerRejoin = nil
         resetTreadmillSegment()
         TreadmillLink.shared.disconnect()
     }

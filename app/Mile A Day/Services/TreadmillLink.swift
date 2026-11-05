@@ -122,24 +122,65 @@ struct FTMSTreadmillSample: Equatable {
     }
 }
 
-/// Turns a stream of console TOTAL distances into "metres the belt moved
-/// since we connected". Pure, so the reset and glitch rules are testable.
+/// Turns a stream of Treadmill Data readings into "metres the belt moved
+/// since counting started". Pure, so every rule is testable.
+///
+/// Two sources, never mixed within one segment:
+/// - TOTAL DISTANCE (preferred): the console's own odometer, as deltas.
+///   Once a machine has sent it, readings without it (the other half of a
+///   split "More Data" pair) add nothing.
+/// - SPEED × TIME: for machines that never send a total (the field is
+///   optional in FTMS). Each reading credits the previous speed over the
+///   time since the previous reading; gaps longer than `maxIntegrationGap`
+///   credit nothing (the data stopped, not the belt — the tracker falls
+///   back to the pedometer then).
 struct TreadmillOdometer: Equatable {
     private(set) var segmentMeters: Double = 0
     private var lastTotal: Int?
-    private var lastAt: Date?
+    private var lastTotalAt: Date?
+    private var lastReadingAt: Date?
+    private var lastSpeedKmh: Double?
+    private var sawTotal = false
 
     /// Belt speed no runner reaches (~32 km/h) plus slack for a late packet.
     static let maxMetersPerSecond: Double = 9
+    /// Longest silence speed integration bridges.
+    static let maxIntegrationGap: TimeInterval = 5
 
-    /// Feed one reading; returns the (monotonic) segment.
+    /// Feed one reading (either field may be absent); returns the
+    /// (monotonic) segment.
+    @discardableResult
+    mutating func ingest(totalMeters: Int?, speedKmh: Double?, at now: Date) -> Double {
+        defer {
+            lastReadingAt = now
+            if let speedKmh { lastSpeedKmh = speedKmh }
+        }
+        if let totalMeters {
+            sawTotal = true
+            return ingestTotal(totalMeters, at: now)
+        }
+        guard !sawTotal,
+              let previousAt = lastReadingAt,
+              let kmh = lastSpeedKmh ?? speedKmh, kmh > 0 else { return segmentMeters }
+        let seconds = now.timeIntervalSince(previousAt)
+        guard seconds > 0, seconds <= Self.maxIntegrationGap else { return segmentMeters }
+        let metersPerSecond = min(kmh / 3.6, Self.maxMetersPerSecond)
+        segmentMeters += metersPerSecond * seconds
+        return segmentMeters
+    }
+
+    /// Total-only convenience (tests, and machines that always send it).
     @discardableResult
     mutating func ingest(totalMeters: Int, at now: Date) -> Double {
+        ingest(totalMeters: totalMeters, speedKmh: nil, at: now)
+    }
+
+    private mutating func ingestTotal(_ totalMeters: Int, at now: Date) -> Double {
         defer {
             lastTotal = totalMeters
-            lastAt = now
+            lastTotalAt = now
         }
-        guard let previous = lastTotal, let previousAt = lastAt else {
+        guard let previous = lastTotal, let previousAt = lastTotalAt else {
             // First reading is the baseline: the console's earlier distance
             // belongs to whatever happened before we connected.
             return segmentMeters
@@ -171,8 +212,10 @@ struct TreadmillOwnershipCheck: Equatable {
     private var baselineKmh: Double?
 
     /// Feed each reading's speed; true once it moved from the first one.
+    /// A reading WITHOUT speed (the second half of a split "More Data"
+    /// pair) says nothing — reading it as 0 would fake a change.
     mutating func observe(speedKmh: Double?) -> Bool {
-        let speed = speedKmh ?? 0
+        guard let speed = speedKmh else { return false }
         guard let baselineKmh else {
             self.baselineKmh = speed
             return false
@@ -224,8 +267,20 @@ final class TreadmillLink: NSObject {
     /// Live console numbers while connected.
     private(set) var speedKmh: Double?
     private(set) var inclinePercent: Double?
-    /// Belt distance since this connection, miles.
+    /// Belt distance since counting started (current stretch), miles.
     private(set) var segmentMiles: Double = 0
+    /// Belt distance from earlier stretches of THIS workout (before the data
+    /// went quiet and came back). Display only: the tracker owns the total.
+    private(set) var bankedMiles: Double = 0
+    /// Belt miles this workout, for the sheet's "From the belt".
+    var beltMiles: Double { bankedMiles + segmentMiles }
+    /// Counting, but no reading for `staleAfter`: the tracker is on the
+    /// pedometer until data comes back.
+    private(set) var isStale = false
+    /// The machine went away mid-workout; offer to reconnect.
+    private(set) var lostDuringWorkout = false
+    /// Scanned for `searchTimeout` without connecting to anything.
+    private(set) var searchTimedOut = false
 
     var isConnected: Bool {
         if case .connected = phase { return true }
@@ -265,6 +320,14 @@ final class TreadmillLink: NSObject {
     @ObservationIgnored private var confirmTimeout: DispatchWorkItem?
     /// Machines tried this sheet session, so "Try the next one" moves on.
     @ObservationIgnored private var tried: Set<UUID> = []
+    @ObservationIgnored private var lastSampleAt: Date?
+    @ObservationIgnored private var staleTimer: Timer?
+    @ObservationIgnored private var scanStartedAt: Date?
+
+    /// No reading for this long while counting = stale.
+    static let staleAfter: TimeInterval = 10
+    /// How long the wizard looks before offering a normal indoor walk.
+    static let searchTimeout: TimeInterval = 20
 
     /// How long the user has to press a speed button.
     static let confirmWindow: TimeInterval = 20
@@ -282,6 +345,8 @@ final class TreadmillLink: NSObject {
     /// Bluetooth permission prompt, so it only happens on the user's tap.
     func startScanning() {
         wantsScan = true
+        searchTimedOut = false
+        scanStartedAt = Date()
         if central == nil {
             central = CBCentralManager(delegate: self, queue: .main)
             return // scanning starts in centralManagerDidUpdateState
@@ -298,6 +363,8 @@ final class TreadmillLink: NSObject {
 
     func connect(_ id: UUID) {
         guard let central, let peripheral = peripherals[id] else { return }
+        searchTimedOut = false
+        lostDuringWorkout = false
         central.stopScan()
         wantsScan = false
         if let current = active, current.identifier != id {
@@ -331,10 +398,35 @@ final class TreadmillLink: NSObject {
         central?.stopScan()
         if let active { central?.cancelPeripheralConnection(active) }
         active = nil
+        // A user's mid-workout Disconnect: the pedometer takes over from the
+        // distance already counted. (At workout end the tracker has already
+        // closed its segment, so this is a no-op then.)
+        WorkoutLocationManager.shared.endTreadmillSegment()
+        stopStaleWatch()
         resetLiveNumbers()
+        bankedMiles = 0
+        lostDuringWorkout = false
+        searchTimedOut = false
         nearby = []
         autoPickSince = nil
         phase = .idle
+    }
+
+    /// Called by the wizard's poll loop: after `searchTimeout` of scanning
+    /// with nothing connected, stop auto-connecting and offer a normal
+    /// indoor walk instead.
+    func checkSearchTimeout(now: Date = Date()) {
+        guard phase == .scanning, !searchTimedOut,
+              let scanStartedAt, now.timeIntervalSince(scanStartedAt) >= Self.searchTimeout
+        else { return }
+        searchTimedOut = true
+    }
+
+    /// "Keep looking" after a timeout.
+    func keepLooking() {
+        searchTimedOut = false
+        scanStartedAt = Date()
+        if phase != .scanning { startScanning() }
     }
 
     /// The indoor workout just started tracking. A machine proven in the
@@ -343,6 +435,8 @@ final class TreadmillLink: NSObject {
         guard isConnected else { return }
         odometer = TreadmillOdometer()
         segmentMiles = 0
+        bankedMiles = 0
+        isStale = false
         WorkoutLocationManager.shared.beginTreadmillSegment()
     }
 
@@ -423,6 +517,46 @@ final class TreadmillLink: NSObject {
         segmentMiles = 0
         WorkoutLocationManager.shared.beginTreadmillSegment()
         phase = .connected(name: name)
+        startStaleWatch()
+    }
+
+    /// Every 2 s while counting: no reading for `staleAfter` → hand the
+    /// distance to the pedometer (`endTreadmillSegment`) until data returns.
+    /// Rides a RunLoop timer, which keeps firing while the indoor workout's
+    /// location keep-alive holds the process up.
+    private func startStaleWatch() {
+        staleTimer?.invalidate()
+        lastSampleAt = Date()
+        let timer = Timer(timeInterval: 2, repeats: true) { [weak self] _ in
+            guard let self, self.isConnected, !self.isStale,
+                  let last = self.lastSampleAt,
+                  Date().timeIntervalSince(last) > Self.staleAfter else { return }
+            self.goStale()
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        staleTimer = timer
+    }
+
+    private func stopStaleWatch() {
+        staleTimer?.invalidate()
+        staleTimer = nil
+        isStale = false
+    }
+
+    private func goStale() {
+        isStale = true
+        bankedMiles += segmentMiles
+        segmentMiles = 0
+        WorkoutLocationManager.shared.endTreadmillSegment()
+    }
+
+    /// Data came back after going stale: a fresh stretch, counted on top of
+    /// whatever the pedometer credited meanwhile.
+    private func resumeFromStale() {
+        isStale = false
+        odometer = TreadmillOdometer()
+        segmentMiles = 0
+        WorkoutLocationManager.shared.beginTreadmillSegment()
     }
 
     private func resetLiveNumbers() {
@@ -430,6 +564,7 @@ final class TreadmillLink: NSObject {
         inclinePercent = nil
         segmentMiles = 0
         odometer = TreadmillOdometer()
+        lastSampleAt = nil
     }
 
     private func noteAdvertisement(_ peripheral: CBPeripheral, advertisement: [String: Any], rssi: Int) {
@@ -463,20 +598,26 @@ final class TreadmillLink: NSObject {
     }
 
     private func ingest(_ sample: FTMSTreadmillSample) {
-        speedKmh = sample.speedKmh
-        inclinePercent = sample.inclinePercent
+        lastSampleAt = Date()
+        // A split "More Data" reading omits speed (and maybe incline): keep
+        // showing the last known values rather than blanking them.
+        if let speed = sample.speedKmh { speedKmh = speed }
+        if let incline = sample.inclinePercent { inclinePercent = incline }
         switch phase {
         case .confirming(let name):
             guard ownership.observe(speedKmh: sample.speedKmh) else { return }
             confirmOwnership(name: name)
             // Fall through so this reading becomes the odometer's baseline.
         case .connected:
-            break
+            if isStale { resumeFromStale() }
         default:
             return
         }
-        guard let total = sample.totalDistanceMeters else { return }
-        let meters = odometer.ingest(totalMeters: total, at: Date())
+        let meters = odometer.ingest(
+            totalMeters: sample.totalDistanceMeters,
+            speedKmh: sample.speedKmh,
+            at: Date()
+        )
         let miles = meters / 1609.344
         guard miles > segmentMiles else { return }
         segmentMiles = miles
@@ -486,6 +627,13 @@ final class TreadmillLink: NSObject {
     private func connectionLost(_ message: String?) {
         connectTimeout?.cancel()
         confirmTimeout?.cancel()
+        if isConnected, WorkoutLocationManager.shared.acceptsTreadmill {
+            // Mid-workout: the pedometer carries on from here.
+            lostDuringWorkout = true
+            bankedMiles += segmentMiles
+            WorkoutLocationManager.shared.endTreadmillSegment()
+        }
+        stopStaleWatch()
         active = nil
         resetLiveNumbers()
         if let message {

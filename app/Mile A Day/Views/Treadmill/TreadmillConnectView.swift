@@ -70,7 +70,7 @@ struct TreadmillTrackerRow: View {
 
     private var chip: some View {
         HStack(spacing: 6) {
-            if link.isBusy {
+            if link.isBusy || link.lostDuringWorkout {
                 Circle()
                     .fill(Color.orange)
                     .frame(width: 7, height: 7)
@@ -80,7 +80,7 @@ struct TreadmillTrackerRow: View {
                     .madFont(size: 12, weight: .bold)
                     .accessibilityHidden(true)
             }
-            Text(link.isBusy ? "Finish connecting your treadmill" : "Connect treadmill")
+            Text(chipLabel)
                 .madFont(size: 13, weight: .bold, design: .rounded)
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
@@ -91,6 +91,12 @@ struct TreadmillTrackerRow: View {
         .background(Capsule().fill(Color.white.opacity(0.16)))
     }
 
+    private var chipLabel: String {
+        if link.isBusy { return "Finish connecting your treadmill" }
+        if link.lostDuringWorkout { return "Treadmill lost · Reconnect" }
+        return "Connect treadmill"
+    }
+
     private var connectedCard: some View {
         HStack(spacing: 12) {
             Image(systemName: TreadmillFormat.glyph)
@@ -98,10 +104,10 @@ struct TreadmillTrackerRow: View {
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
-                    Text("Treadmill distance")
+                    Text(link.isStale ? "Treadmill went quiet" : "Treadmill distance")
                         .madFont(size: 14, weight: .heavy, design: .rounded)
                         .lineLimit(1)
-                    LiveDot()
+                    if !link.isStale { LiveDot() }
                 }
                 Text(detail)
                     .madFont(size: 13, weight: .semibold, design: .rounded, monospacedDigit: true)
@@ -128,6 +134,8 @@ struct TreadmillTrackerRow: View {
     }
 
     private var detail: String {
+        // Say what's counting, not just that something broke.
+        if link.isStale { return "Counting with your phone until it's back" }
         var parts: [String] = []
         if let kmh = link.speedKmh { parts.append(TreadmillFormat.speed(kmh: kmh)) }
         if let incline = link.inclinePercent, incline != 0 {
@@ -474,7 +482,7 @@ struct TreadmillConnectSheet: View {
             HStack(alignment: .firstTextBaseline, spacing: 12) {
                 metric(link.speedKmh.map { TreadmillFormat.speed(kmh: $0) } ?? "—", "Speed")
                 metric(link.inclinePercent.map { TreadmillFormat.incline($0) } ?? "—", "Incline")
-                metric(link.segmentMiles.distanceFormatted, "From the belt")
+                metric(link.beltMiles.distanceFormatted, "From the belt")
             }
 
             HStack(spacing: 12) {
@@ -559,20 +567,24 @@ struct TreadmillConnectSheet: View {
 
 // MARK: - Start wizard step
 
-/// The treadmill step of the start wizard, reached from the "Treadmill" card
-/// on the Where step. Same chrome as every other step (and as buddy setup):
-/// the tracker renders the top bar and the glyph-over-question header from
+/// The treadmill step of the start wizard: Indoor → "Connect to the
+/// treadmill". Same chrome as every other step (and as buddy setup): the
+/// tracker renders the top bar and the glyph-over-question header from
 /// `TreadmillWizardCopy`; this is the panel under it.
 ///
-/// Pressing GO to start the belt is something the user does anyway, so here
-/// it doubles as the proof the machine is theirs: the step moves on by
-/// itself the moment THAT treadmill's speed changes.
+/// One instruction per screen, and a way out on every one:
+/// - FIND: hold the phone on the console; it connects by itself.
+/// - PRESS GO: starting the belt is also the proof it's YOUR machine, so
+///   the step moves on by itself the moment that treadmill's speed changes.
+/// - Nothing found in `TreadmillLink.searchTimeout`: say so plainly and
+///   offer the normal indoor workout, with the promise that the distance
+///   can be fixed at the end (the recap's Treadmill Distance card).
 struct TreadmillWizardPanel: View {
+    let activityNoun: String
     let onConfirmed: () -> Void
     let onSkip: () -> Void
 
     private let link = TreadmillLink.shared
-    @State private var scanStartedAt = Date()
     @State private var showList = false
     /// Proof landed while this step was on screen: celebrate, then advance.
     /// Re-entering the step already connected waits for "Continue" instead.
@@ -581,19 +593,20 @@ struct TreadmillWizardPanel: View {
     var body: some View {
         VStack(spacing: 16) {
             content
-            Button(action: onSkip) {
-                Text("Skip, use motion sensors instead")
-                    .madFont(size: 15, weight: .semibold, design: .rounded)
-                    .foregroundColor(.white.opacity(0.8))
-                    .underline()
-                    .padding(.vertical, 6)
+            if showsSkipLink {
+                Button(action: onSkip) {
+                    Text("Track with my phone instead")
+                        .madFont(size: 15, weight: .semibold, design: .rounded)
+                        .foregroundColor(.white.opacity(0.8))
+                        .underline()
+                        .padding(.vertical, 6)
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
         }
         .foregroundColor(.white)
         .onAppear {
             if !link.isConnected, !link.isBusy {
-                scanStartedAt = Date()
                 link.startScanning()
             }
         }
@@ -608,7 +621,11 @@ struct TreadmillWizardPanel: View {
         .task {
             while !Task.isCancelled {
                 try? await Task.sleep(for: .milliseconds(500))
-                if link.phase == .scanning, let id = link.autoPickCandidate() {
+                link.checkSearchTimeout()
+                // No auto-connect behind a "couldn't find it" screen: the
+                // user is reading a choice, not waiting.
+                if link.phase == .scanning, !link.searchTimedOut,
+                   let id = link.autoPickCandidate() {
                     MADHaptics.action()
                     link.connect(id)
                 }
@@ -616,11 +633,23 @@ struct TreadmillWizardPanel: View {
         }
     }
 
+    /// The timed-out screen carries its own primary "track with my phone";
+    /// a second, underlined copy of it would just be noise.
+    private var showsSkipLink: Bool {
+        if link.isConnected { return false }
+        if case .scanning = link.phase, link.searchTimedOut { return false }
+        return true
+    }
+
     @ViewBuilder
     private var content: some View {
         switch link.phase {
         case .idle, .scanning:
-            find
+            if link.searchTimedOut {
+                notFound
+            } else {
+                find
+            }
         case .connecting:
             WizardPanel {
                 HStack(spacing: 12) {
@@ -634,7 +663,7 @@ struct TreadmillWizardPanel: View {
         case .unconfirmed(let name):
             VStack(spacing: 12) {
                 WizardPanel {
-                    Text("\(name) didn't change speed. It may be the one next to you.")
+                    Text("\(name) didn't change speed, so it may be the one next to you.")
                         .madFont(size: 15, weight: .medium, design: .rounded)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -651,18 +680,15 @@ struct TreadmillWizardPanel: View {
                 }
             }
         case .failed(let message):
-            problem(message, action: ("Try again", {
-                scanStartedAt = Date()
-                link.startScanning()
-            }))
+            problem(message, action: ("Try again", { link.startScanning() }))
         case .unauthorized:
-            problem("Bluetooth access is off for Mile A Day. Turn it on in Settings to connect a treadmill.",
+            problem("Bluetooth is off for Mile A Day, so we can't look for treadmills. You can turn it on in Settings, or track with your phone.",
                     action: ("Open Settings", {
                         guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
                         UIApplication.shared.open(url)
                     }))
         case .bluetoothOff:
-            problem("Bluetooth is off. Turn it on in Control Center, then come back.", action: nil)
+            problem("Bluetooth is turned off. Switch it on in Control Center, or track with your phone.", action: nil)
         }
     }
 
@@ -693,48 +719,65 @@ struct TreadmillWizardPanel: View {
             }
 
             if !link.nearby.isEmpty {
-                DisclosureGroup(isExpanded: $showList) {
-                    VStack(spacing: 8) {
-                        ForEach(link.nearby.prefix(6)) { machine in
-                            Button {
-                                link.connect(machine.id)
-                            } label: {
-                                WizardPanel(prominent: false, cornerRadius: 14, padding: 12) {
-                                    HStack(spacing: 10) {
-                                        Text(machine.name)
-                                            .madFont(size: 15, weight: .semibold, design: .rounded)
-                                            .lineLimit(1)
-                                        Spacer(minLength: 8)
-                                        Text(machine.rssi >= TreadmillLink.onConsoleRSSI ? "Right here"
-                                             : machine.rssi >= -70 ? "Close by" : "Further away")
-                                            .madFont(size: 12, weight: .medium, design: .rounded)
-                                            .opacity(0.75)
-                                            .lineLimit(1)
-                                    }
-                                }
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                    .padding(.top, 8)
-                } label: {
-                    Text("Or pick from a list (\(link.nearby.count) nearby)")
-                        .madFont(size: 14, weight: .semibold, design: .rounded)
-                        .opacity(0.85)
-                }
-                .tint(.white)
-            } else {
-                TimelineView(.periodic(from: scanStartedAt, by: 1)) { context in
-                    if context.date.timeIntervalSince(scanStartedAt) > 10 {
-                        Text("No treadmills found yet. Not every treadmill shares its data over Bluetooth.")
-                            .madFont(size: 13, weight: .medium, design: .rounded)
-                            .opacity(0.8)
-                            .multilineTextAlignment(.center)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
+                nearbyList
             }
         }
+    }
+
+    /// Nothing connected after the search window. Plain words: what
+    /// happened, what we'll do instead, and that it can be made exact later.
+    private var notFound: some View {
+        VStack(spacing: 12) {
+            WizardPanel {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("We'll track your \(activityNoun) with your phone's motion sensors instead.")
+                        .madFont(size: 15, weight: .bold, design: .rounded)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text("It can be a little off on a treadmill. At the end you can type in the distance from the treadmill's screen.")
+                        .madFont(size: 14, weight: .medium, design: .rounded)
+                        .opacity(0.85)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            WizardPrimaryButton(title: "Start a normal indoor \(activityNoun)", action: onSkip)
+            quietButton("Keep looking") { link.keepLooking() }
+            if !link.nearby.isEmpty {
+                nearbyList
+            }
+        }
+    }
+
+    private var nearbyList: some View {
+        DisclosureGroup(isExpanded: $showList) {
+            VStack(spacing: 8) {
+                ForEach(link.nearby.prefix(6)) { machine in
+                    Button {
+                        link.connect(machine.id)
+                    } label: {
+                        WizardPanel(prominent: false, cornerRadius: 14, padding: 12) {
+                            HStack(spacing: 10) {
+                                Text(machine.name)
+                                    .madFont(size: 15, weight: .semibold, design: .rounded)
+                                    .lineLimit(1)
+                                Spacer(minLength: 8)
+                                Text(machine.rssi >= TreadmillLink.onConsoleRSSI ? "Right here"
+                                     : machine.rssi >= -70 ? "Close by" : "Further away")
+                                    .madFont(size: 12, weight: .medium, design: .rounded)
+                                    .opacity(0.75)
+                                    .lineLimit(1)
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.top, 8)
+        } label: {
+            Text("Or pick from a list (\(link.nearby.count) nearby)")
+                .madFont(size: 14, weight: .semibold, design: .rounded)
+                .opacity(0.85)
+        }
+        .tint(.white)
     }
 
     private var meterCaption: String {
@@ -796,26 +839,32 @@ struct TreadmillWizardPanel: View {
     }
 }
 
-/// The question above `TreadmillWizardPanel`, per phase — one sentence that
-/// says what to do right now.
+/// The question above `TreadmillWizardPanel`: one sentence that says what to
+/// do right now. Never promises every treadmill: "many", not "all".
 enum TreadmillWizardCopy {
-    static func title(_ phase: TreadmillLink.Phase) -> String {
-        switch phase {
+    static func title(_ link: TreadmillLink, activityNoun: String) -> String {
+        switch link.phase {
+        case .idle, .scanning:
+            return link.searchTimedOut ? "Couldn't find your treadmill" : "Hold your phone on the treadmill"
         case .confirming: return "Press GO on the treadmill"
         case .unconfirmed: return "Is this your treadmill?"
         case .connected: return "It's yours!"
         case .connecting: return "Found a treadmill"
-        default: return "Hold your phone on the treadmill"
+        case .failed, .unauthorized, .bluetoothOff: return "Couldn't connect"
         }
     }
 
-    static func subtitle(_ phase: TreadmillLink.Phase) -> String {
-        switch phase {
+    static func subtitle(_ link: TreadmillLink, activityNoun: String) -> String {
+        switch link.phase {
+        case .idle, .scanning:
+            return link.searchTimedOut
+                ? "Many gym treadmills can connect, but not all of them. That's normal."
+                : "Lay it flat on the treadmill's screen. Many gym treadmills can connect, but not all."
         case .confirming: return "Belt already moving? Tap speed ▲ once. That's how we know it's yours."
         case .unconfirmed: return "Press GO or speed ▲ on yours, or try the next one."
-        case .connected: return "Your mile will count the treadmill's own distance."
+        case .connected: return "Your \(activityNoun) will count the treadmill's own distance."
         case .connecting: return "Hang on a second…"
-        default: return "Lay it flat on the treadmill's screen. We'll find it."
+        case .failed, .unauthorized, .bluetoothOff: return "You can still track this \(activityNoun) with your phone."
         }
     }
 }

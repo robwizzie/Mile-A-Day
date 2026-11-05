@@ -19,6 +19,9 @@ struct WorkoutRecapView: View {
     let healthManager: HealthKitManager
     var workoutId: String? = nil
     var isIndoor: Bool = false
+    /// Distance counted from a connected treadmill (vs the phone's motion
+    /// sensors). Only changes the wording of the distance card.
+    var distanceFromTreadmill: Bool = false
     /// Quarter-by-quarter against the ghost, empty when this wasn't a race.
     /// Defaulted so every existing construction site is unaffected.
     var raceSplits: [BestEffortStore.RaceSplit] = []
@@ -173,6 +176,7 @@ struct WorkoutRecapView: View {
                             currentDistance: distance,
                             duration: duration,
                             workoutType: activityName == "Run" ? "running" : "walking",
+                            fromTreadmill: distanceFromTreadmill,
                             healthManager: healthManager,
                             onSaved: onDistanceAdjusted
                         )
@@ -506,6 +510,9 @@ private struct TreadmillDistanceAdjustmentCard: View {
     let currentDistance: Double
     let duration: TimeInterval
     let workoutType: String
+    /// Counted from a connected treadmill, so it should already match its
+    /// screen; otherwise it came from motion sensors and may be off.
+    let fromTreadmill: Bool
     let healthManager: HealthKitManager
     var onSaved: ((Double) -> Void)?
 
@@ -560,6 +567,15 @@ private struct TreadmillDistanceAdjustmentCard: View {
                     .foregroundColor(.white.opacity(0.7))
                     .monospacedDigit()
             }
+
+            // One plain sentence: where this number came from, and that the
+            // treadmill's screen is the thing to copy if it differs.
+            Text(fromTreadmill
+                 ? "Counted from the treadmill. If its screen shows a different distance, type that in."
+                 : "Measured with your phone's motion sensors, which can be a little off on a treadmill. Type in the distance from the treadmill's screen for an exact record.")
+                .font(.system(size: 13, weight: .medium, design: .rounded))
+                .foregroundColor(.white.opacity(0.75))
+                .fixedSize(horizontal: false, vertical: true)
 
             HStack(spacing: 10) {
                 TextField("0.00", text: $distanceString)
