@@ -3,6 +3,7 @@ import { sendPush } from "./pushNotificationService.js";
 import { challengeForNotification } from "./dailyChallengeService.js";
 import { standing } from "./h2hMatchupService.js";
 import { stepGoalMetSql } from "./streakFeatureCore.js";
+import { userOffsetMinutesOrNullSql } from "./dailyResetTime.js";
 
 const db = PostgresService.getInstance();
 
@@ -350,10 +351,7 @@ export async function sendPendingDailyReminders(): Promise<void> {
 			SELECT
 				u.user_id,
 				u.goal_miles,
-				COALESCE(
-					ns.timezone_offset_minutes,
-					(SELECT timezone_offset FROM workouts WHERE user_id = u.user_id ORDER BY device_end_date DESC LIMIT 1)
-				) AS tz_offset,
+				${userOffsetMinutesOrNullSql("u.user_id")} AS tz_offset,
 				COALESCE(ns.daily_reminder_enabled, TRUE) AS daily_reminder_enabled,
 				COALESCE(ns.daily_reminder_hour, 18) AS daily_reminder_hour
 			FROM users u

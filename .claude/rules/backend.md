@@ -67,6 +67,7 @@ Details: docs/conventions/backend.md § Database
 - Raw parameterized SQL and Drizzle share one pool; new code may use the ORM.
 - Connection string comes from `DATABASE_URL`.
 - `server.ts` must `import 'dotenv/config'` as its FIRST line.
+- A user's local now/today offset is ALWAYS `userOffsetMinutesSql(col)` / `USER_OFFSET_MINUTES_P1_SQL` / `userOffsetMinutesOrNullSql` (`dailyResetTime.ts`); never inline `SELECT timezone_offset FROM workouts … ORDER BY device_end_date DESC LIMIT 1`. A workout's own `local_date` is its own.
 
 ## Drizzle ORM + Migrations
 Details: docs/conventions/backend.md § Drizzle ORM + Migrations
@@ -109,7 +110,7 @@ Details: docs/conventions/backend.md § Competition Resolution
 ## Hypes & Posts
 Details: docs/conventions/backend.md § Hypes & Posts
 - 'mile' hypes key on `<userId>:<localDate>`; match via `mileHypeKeyMatchSql`.
-- `/friends/activity/today` serves `current_streak` (`effectiveStreakSql`) and `minutes_left_today` (`minutesLeftTodaySql`: offset from `notification_settings.timezone_offset_minutes` first, the latest workout's only as fallback) additively; the nudge push words what's at stake via `nudgeCopy(getStreakStakes)` (same type/data).
+- `/friends/activity/today` serves `current_streak` (`effectiveStreakSql`) and `minutes_left_today` (`minutesLeftTodaySql`, offset via `userOffsetMinutesSql`) additively; the nudge push words what's at stake via `nudgeCopy(getStreakStakes)` (same type/data).
 - Keep the `express.json` limit at 2mb.
 - `posts.is_auto` is tri-state; a user post replaces only an auto post, else 409.
 - Wrap `media_url` responses in `signMediaUrlsDeep(...)`; `stripMediaQuery(...)` inputs; store bare paths.

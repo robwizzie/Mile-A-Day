@@ -14,6 +14,7 @@ import {
   ChallengeTimeWindowDetail,
 } from "../types/badge.js";
 import { ADD_FRIEND_CHALLENGE_KEY } from "./challengeRotation.js";
+import { USER_OFFSET_MINUTES_P1_SQL } from "./dailyResetTime.js";
 
 const db = PostgresService.getInstance();
 
@@ -333,14 +334,13 @@ async function postDetail(
 /**
  * Timezone expression for mapping an action's created_at onto the user's
  * local day. Prefers the offset of that DAY's workouts (historically honest
- * if the user has moved timezones since) before falling back to the newest
- * workout's offset, mirroring the live evaluators.
+ * if the user has moved timezones since) before falling back to the user's
+ * current offset (`USER_OFFSET_MINUTES_P1_SQL`), mirroring the live evaluators.
  */
 function actionLocalDateSql(createdAtCol: string): string {
   return `(${createdAtCol} + (COALESCE(
 		(SELECT timezone_offset FROM workouts WHERE user_id = $1 AND local_date = $2::date ORDER BY device_end_date DESC LIMIT 1),
-		(SELECT timezone_offset FROM workouts WHERE user_id = $1 ORDER BY device_end_date DESC LIMIT 1),
-		0) || ' minutes')::interval)::date = $2::date`;
+		${USER_OFFSET_MINUTES_P1_SQL}) || ' minutes')::interval)::date = $2::date`;
 }
 
 async function hypedFriends(

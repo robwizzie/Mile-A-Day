@@ -8,6 +8,7 @@ import {
 } from "./buddyFeatures.js";
 import { CLIENT_FEATURES, userSupports } from "./clientFeatures.js";
 import { BUDDY_MAX_PARTICIPANTS } from "../types/buddy.js";
+import { userOffsetMinutesSql } from "./dailyResetTime.js";
 
 const db = PostgresService.getInstance();
 
@@ -174,12 +175,7 @@ export async function heartbeat(
               s.distance_miles,
               u.goal_miles::float AS goal_miles,
               to_char(
-                (NOW() + (COALESCE(
-                  (SELECT w2.timezone_offset FROM workouts w2
-                   WHERE w2.user_id = f.friend_id
-                   ORDER BY w2.device_end_date DESC LIMIT 1),
-                  0
-                ) || ' minutes')::interval)::date,
+                (NOW() + (${userOffsetMinutesSql("f.friend_id")} || ' minutes')::interval)::date,
                 'YYYY-MM-DD'
               ) AS local_date
        FROM friendships f
@@ -320,12 +316,7 @@ export async function friendsOutNow(userId: string): Promise<FriendOutNow[]> {
             -- against a 1-mile bar reads as finished when they're halfway.
             u.goal_miles::float AS goal_miles,
             to_char(
-              (NOW() + (COALESCE(
-                (SELECT w2.timezone_offset FROM workouts w2
-                 WHERE w2.user_id = f.friend_id
-                 ORDER BY w2.device_end_date DESC LIMIT 1),
-                0
-              ) || ' minutes')::interval)::date,
+              (NOW() + (${userOffsetMinutesSql("f.friend_id")} || ' minutes')::interval)::date,
               'YYYY-MM-DD'
             ) AS local_date,
             room.id AS buddy_session_id,

@@ -4,6 +4,7 @@ import { getStreakErasForUser } from "./workoutService.js";
 import { holidayDayQualifiesSql, holidayProbeDates } from "./badgeService.js";
 import { HOLIDAYS, holidayKeyForLocalDate, holidayKeyFromBadgeId, type HolidayKey } from "./holidays.js";
 import type { UserBadge } from "../types/badge.js";
+import { userOffsetMinutesSql } from "./dailyResetTime.js";
 
 const db = PostgresService.getInstance();
 
@@ -122,10 +123,7 @@ export async function earnedDetailsFor(
   const tzP = safe(
     db.query<{ badge_id: string; day: string }>(
       `SELECT ub.badge_id,
-	          to_char(((ub.earned_at AT TIME ZONE 'UTC') + (COALESCE(
-	              (SELECT ns.timezone_offset_minutes FROM notification_settings ns WHERE ns.user_id = ub.user_id),
-	              (SELECT w.timezone_offset FROM workouts w WHERE w.user_id = ub.user_id ORDER BY w.device_end_date DESC LIMIT 1),
-	              0) || ' minutes')::interval)::date, 'YYYY-MM-DD') AS day
+	          to_char(((ub.earned_at AT TIME ZONE 'UTC') + (${userOffsetMinutesSql("ub.user_id")} || ' minutes')::interval)::date, 'YYYY-MM-DD') AS day
 	     FROM user_badges ub WHERE ub.user_id = $1`,
       [userId],
     ),

@@ -17,6 +17,7 @@ import {
 import { getBlockedIds } from "./moderationService.js";
 import { isUserInQuietHours, sendPush } from "./pushNotificationService.js";
 import { CLIENT_FEATURES } from "./clientFeatures.js";
+import { userOffsetMinutesOrNullSql, userOffsetMinutesSql } from "./dailyResetTime.js";
 
 const db = PostgresService.getInstance();
 
@@ -131,8 +132,8 @@ const round2 = (n: number) => Math.round(n * 100) / 100;
 
 /**
  * The user's local clock at `at`: today, the hour, and the Sunday that starts
- * this week. Same offset COALESCE as `weekWindowForUser` (preference, then the
- * latest workout's offset, then UTC). `AT TIME ZONE 'UTC'` pins the wall-clock
+ * this week. Same offset as `weekWindowForUser` (`userOffsetMinutesSql`: preference,
+ * then the latest workout's offset, then UTC). `AT TIME ZONE 'UTC'` pins the wall-clock
  * arithmetic so a session TimeZone can't move it.
  */
 async function userClock(
@@ -145,11 +146,7 @@ async function userClock(
     week_start: string;
   }>(
     `WITH tz AS (
-			SELECT COALESCE(
-				(SELECT ns.timezone_offset_minutes FROM notification_settings ns WHERE ns.user_id = $1::text),
-				(SELECT w.timezone_offset FROM workouts w WHERE w.user_id = $1::text ORDER BY w.device_end_date DESC LIMIT 1),
-				0
-			) AS offset_minutes
+			SELECT ${userOffsetMinutesSql("$1::text")} AS offset_minutes
 		),
 		local AS (
 			SELECT (($2::timestamptz AT TIME ZONE 'UTC') + (tz.offset_minutes || ' minutes')::interval) AS ts FROM tz
@@ -530,10 +527,7 @@ export async function weeklyRecapCandidates(
     `WITH base AS (
 			SELECT
 				u.user_id,
-				COALESCE(
-					ns.timezone_offset_minutes,
-					(SELECT timezone_offset FROM workouts WHERE user_id = u.user_id ORDER BY device_end_date DESC LIMIT 1)
-				) AS tz_offset,
+				${userOffsetMinutesOrNullSql("u.user_id")} AS tz_offset,
 				COALESCE(ns.daily_reminder_enabled, TRUE) AS reminder_on,
 				COALESCE(ns.daily_reminder_hour, 18) AS reminder_hour
 			FROM users u

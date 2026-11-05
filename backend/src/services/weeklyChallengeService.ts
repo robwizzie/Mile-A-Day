@@ -10,6 +10,7 @@ import { getBlockedIds } from "./moderationService.js";
 import { sendPush } from "./pushNotificationService.js";
 import { shouldSendNotification } from "./notificationSettingsService.js";
 import { CLIENT_FEATURES, userSupports } from "./clientFeatures.js";
+import { USER_OFFSET_MINUTES_P1_SQL } from "./dailyResetTime.js";
 
 const db = PostgresService.getInstance();
 
@@ -98,9 +99,9 @@ export function sundayWeekStartSql(tsExpr: string): string {
  * A user's local week, SUNDAY-start (Sunday through Saturday).
  *
  * Postgres's `date_trunc('week')` is ISO Monday-start, so every call here goes
- * through `sundayWeekStartSql` instead. The timezone COALESCE is the same one
- * `weeklyRecapCron` uses — the stored preference first, then the timezone of
- * their most recent workout.
+ * through `sundayWeekStartSql` instead. The offset is `userOffsetMinutesSql`,
+ * the same one `weeklyRecapCron` uses — the stored preference first, then the
+ * timezone of their most recent workout.
  *
  * Every read and write in this module goes through this one helper so the
  * boundary cannot drift between surfaces.
@@ -112,11 +113,7 @@ export async function weekWindowForUser(userId: string): Promise<WeekWindow> {
     local_today: string;
   }>(
     `WITH tz AS (
-			SELECT COALESCE(
-				(SELECT ns.timezone_offset_minutes FROM notification_settings ns WHERE ns.user_id = $1),
-				(SELECT w.timezone_offset FROM workouts w WHERE w.user_id = $1 ORDER BY w.device_end_date DESC LIMIT 1),
-				0
-			) AS offset_minutes
+			SELECT ${USER_OFFSET_MINUTES_P1_SQL} AS offset_minutes
 		),
 		local AS (
 			SELECT (NOW() + (tz.offset_minutes || ' minutes')::interval) AS ts FROM tz

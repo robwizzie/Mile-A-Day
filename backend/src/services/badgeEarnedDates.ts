@@ -2,6 +2,7 @@ import { PostgresService } from "./DbService.js";
 import { MIN_PLAUSIBLE_MILE_SECONDS, countedWorkoutSql } from "./mileTime.js";
 import { earnedDetailsFor } from "./badgeEarnedDetail.js";
 import { getUserBadges } from "./badgeService.js";
+import { USER_OFFSET_MINUTES_P1_SQL } from "./dailyResetTime.js";
 
 const db = PostgresService.getInstance();
 
@@ -87,10 +88,7 @@ export async function redateBadges(
   const ids = [...days.keys()];
   const res = await db.query<{ badge_id: string }>(
     `WITH off AS (
-		   SELECT COALESCE(
-		     (SELECT ns.timezone_offset_minutes FROM notification_settings ns WHERE ns.user_id = $1),
-		     (SELECT w.timezone_offset FROM workouts w WHERE w.user_id = $1 ORDER BY w.device_end_date DESC LIMIT 1),
-		     0) AS m
+		   SELECT ${USER_OFFSET_MINUTES_P1_SQL} AS m
 		 ), src AS (
 		   SELECT t.badge_id,
 		          COALESCE(
