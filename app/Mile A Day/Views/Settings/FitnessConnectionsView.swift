@@ -187,7 +187,7 @@ struct FitnessConnectionsView: View {
                 HStack(spacing: MADTheme.Spacing.sm) {
                     Image(systemName: "clock.arrow.circlepath")
                         .font(.system(size: 20, weight: .semibold))
-                        .foregroundStyle(MADTheme.Colors.redGradient)
+                        .foregroundColor(MADTheme.Colors.madRed)
                     Text("Bring in your past workouts")
                         .font(MADTheme.Typography.headline)
                         .foregroundColor(.primary)
@@ -208,7 +208,7 @@ struct FitnessConnectionsView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(MADTheme.Spacing.md)
-            .madLiquidGlass()
+            .background(DashboardCardSurface(style: .fun))
         }
         .buttonStyle(.plain)
     }
@@ -240,7 +240,7 @@ struct FitnessConnectionsView: View {
         }
         .tint(.secondary)
         .padding(MADTheme.Spacing.md)
-        .madLiquidGlass()
+        .background(DashboardCardSurface(style: .fun))
     }
 
     private static let troubleshootingTips = [
@@ -261,14 +261,7 @@ struct FitnessConnectionsView: View {
                 ForEach(FitnessSourceCatalog.limitations) { limitation in
                     Button { activeSheet = .limitation(limitation) } label: {
                         HStack(spacing: MADTheme.Spacing.md) {
-                            ZStack {
-                                Circle()
-                                    .fill(Color.secondary.opacity(0.15))
-                                    .frame(width: 36, height: 36)
-                                Image(systemName: limitation.symbol)
-                                    .font(.system(size: 15, weight: .medium))
-                                    .foregroundColor(.secondary)
-                            }
+                            SettingsGlyph(icon: limitation.symbol)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(limitation.name)
                                     .font(MADTheme.Typography.smallBold)
@@ -291,12 +284,12 @@ struct FitnessConnectionsView: View {
                     .buttonStyle(.plain)
 
                     if limitation.id != FitnessSourceCatalog.limitations.last?.id {
-                        Divider().padding(.leading, 52)
+                        SettingsDivider(inset: 40)
                     }
                 }
             }
             .padding(MADTheme.Spacing.md)
-            .madLiquidGlass()
+            .background(DashboardCardSurface(style: .fun))
         }
     }
 
@@ -307,7 +300,7 @@ struct FitnessConnectionsView: View {
             HStack(spacing: MADTheme.Spacing.sm) {
                 Image(systemName: "heart.text.square.fill")
                     .font(.system(size: 22, weight: .semibold))
-                    .foregroundStyle(MADTheme.Colors.redGradient)
+                    .foregroundColor(MADTheme.Colors.madRed)
                 Text("Everything flows through Apple Health")
                     .font(MADTheme.Typography.headline)
                     .foregroundColor(.primary)
@@ -324,7 +317,7 @@ struct FitnessConnectionsView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(MADTheme.Spacing.md)
-        .madLiquidGlass()
+        .background(DashboardCardSurface(style: .fun))
     }
 
     private var healthUnavailableCard: some View {
@@ -348,7 +341,7 @@ struct FitnessConnectionsView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(MADTheme.Spacing.md)
-        .madLiquidGlass()
+        .background(DashboardCardSurface(style: .fun))
     }
 
     private var connectedSection: some View {
@@ -372,7 +365,7 @@ struct FitnessConnectionsView: View {
                 }
             }
             .padding(MADTheme.Spacing.md)
-            .madLiquidGlass()
+            .background(DashboardCardSurface(style: .fun))
         }
     }
 
@@ -479,7 +472,7 @@ struct FitnessConnectionsView: View {
             }
             .padding(.horizontal, MADTheme.Spacing.md)
             .padding(.vertical, MADTheme.Spacing.sm)
-            .madLiquidGlass()
+            .background(DashboardCardSurface(style: .fun))
 
             VStack(spacing: 0) {
                 if filteredPlatforms.isEmpty {
@@ -502,7 +495,7 @@ struct FitnessConnectionsView: View {
                 }
             }
             .padding(MADTheme.Spacing.md)
-            .madLiquidGlass()
+            .background(DashboardCardSurface(style: .fun))
         }
     }
 
@@ -568,7 +561,7 @@ struct FitnessConnectionsView: View {
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, MADTheme.Spacing.sm)
-                .background(MADTheme.Colors.redGradient)
+                .background(MADTheme.Colors.madRed)
                 .foregroundColor(.white)
                 .clipShape(Capsule())
             }
@@ -577,7 +570,7 @@ struct FitnessConnectionsView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(MADTheme.Spacing.md)
-        .madLiquidGlass()
+        .background(DashboardCardSurface(style: .fun))
     }
 
     private var duplicateExplainer: String {
@@ -607,21 +600,20 @@ struct FitnessConnectionsView: View {
                     .foregroundColor(.secondary)
             }
             .padding(MADTheme.Spacing.md)
-            .madLiquidGlass()
+            .background(DashboardCardSurface(style: .fun))
         }
         .buttonStyle(.plain)
     }
 
+    /// A plain sentence-case header, same as `SettingsSection`'s. `systemImage`
+    /// is kept for the call sites but no longer drawn: the section's rows
+    /// already carry their own icons.
     private func sectionHeader(_ title: String, systemImage: String) -> some View {
-        HStack(spacing: MADTheme.Spacing.sm) {
-            Image(systemName: systemImage)
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(MADTheme.Colors.redGradient)
-            Text(title)
-                .font(MADTheme.Typography.smallBold)
-                .foregroundColor(.primary)
-        }
-        .padding(.leading, MADTheme.Spacing.xs)
+        Text(LocalizedStringKey(title))
+            .madFont(size: 15, weight: .semibold, design: .rounded)
+            .foregroundColor(.secondary)
+            .padding(.horizontal, MADTheme.Spacing.xs)
+            .accessibilityAddTraits(.isHeader)
     }
 
     // MARK: - Data
@@ -698,7 +690,7 @@ struct FitnessLimitationSheet: View {
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(MADTheme.Spacing.md)
-                    .madLiquidGlass()
+                    .background(DashboardCardSurface(style: .fun))
 
                     VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
                         Text("What you can do")
@@ -711,7 +703,7 @@ struct FitnessLimitationSheet: View {
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(MADTheme.Spacing.md)
-                    .madLiquidGlass()
+                    .background(DashboardCardSurface(style: .fun))
 
                     if limitation.offersImport {
                         Button(action: onImport) {
@@ -719,7 +711,7 @@ struct FitnessLimitationSheet: View {
                                 .font(MADTheme.Typography.bodyBold)
                                 .frame(maxWidth: .infinity)
                                 .padding(.vertical, MADTheme.Spacing.md)
-                                .background(MADTheme.Colors.redGradient)
+                                .background(MADTheme.Colors.madRed)
                                 .foregroundColor(.white)
                                 .clipShape(Capsule())
                         }
@@ -755,15 +747,11 @@ struct FitnessSourceSetupSheet: View {
                     VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
                         ForEach(Array(platform.setupSteps.enumerated()), id: \.offset) {
                             index, step in
-                            HStack(alignment: .top, spacing: MADTheme.Spacing.md) {
-                                ZStack {
-                                    Circle()
-                                        .fill(platform.tint.opacity(0.15))
-                                        .frame(width: 26, height: 26)
-                                    Text("\(index + 1)")
-                                        .font(MADTheme.Typography.caption)
-                                        .foregroundColor(platform.tint)
-                                }
+                            HStack(alignment: .firstTextBaseline, spacing: MADTheme.Spacing.sm) {
+                                Text(verbatim: "\(index + 1).")
+                                    .font(MADTheme.Typography.smallBold)
+                                    .foregroundColor(platform.tint)
+                                    .monospacedDigit()
                                 Text(step)
                                     .font(MADTheme.Typography.subheadline)
                                     .foregroundColor(.primary)
@@ -773,7 +761,7 @@ struct FitnessSourceSetupSheet: View {
                         }
                     }
                     .padding(MADTheme.Spacing.md)
-                    .madLiquidGlass()
+                    .background(DashboardCardSurface(style: .fun))
 
                     if let caveat = platform.caveat {
                         HStack(alignment: .top, spacing: MADTheme.Spacing.sm) {
@@ -786,7 +774,7 @@ struct FitnessSourceSetupSheet: View {
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(MADTheme.Spacing.md)
-                        .madLiquidGlass()
+                        .background(DashboardCardSurface(style: .fun))
                     }
 
                     // ONE destination, and it's the App Store product page.
@@ -806,7 +794,7 @@ struct FitnessSourceSetupSheet: View {
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, MADTheme.Spacing.md)
-                        .background(MADTheme.Colors.redGradient)
+                        .background(MADTheme.Colors.madRed)
                         .foregroundColor(.white)
                         .clipShape(Capsule())
                     }

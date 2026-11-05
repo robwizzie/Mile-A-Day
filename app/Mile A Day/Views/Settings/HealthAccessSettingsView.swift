@@ -23,9 +23,9 @@ struct HealthAccessSettingsView: View {
                 statusCard
                 if monitor.state != .unavailable {
                     typesCard
+                    openHealthCard
                     routeMapsNote
                     readAccessNote
-                    openHealthCard
                 }
             }
             .padding(.horizontal, MADTheme.Spacing.md)
@@ -49,15 +49,11 @@ struct HealthAccessSettingsView: View {
 
     private var statusCard: some View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
-            HStack(spacing: MADTheme.Spacing.md) {
-                ZStack {
-                    Circle()
-                        .fill(statusColor.opacity(0.15))
-                        .frame(width: 46, height: 46)
-                    Image(systemName: statusIcon)
-                        .font(.system(size: 20, weight: .semibold))
-                        .foregroundColor(statusColor)
-                }
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: statusIcon)
+                    .madFont(size: 20, weight: .semibold, maxScale: 1.3)
+                    .foregroundColor(statusColor)
+                    .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(statusTitle)
                         .font(MADTheme.Typography.headline)
@@ -82,24 +78,21 @@ struct HealthAccessSettingsView: View {
                     HStack(spacing: 8) {
                         if isRequesting {
                             ProgressView().tint(.white)
-                        } else {
-                            Image(systemName: "checkmark.shield.fill")
-                                .font(.system(size: 14, weight: .bold))
                         }
                         Text(isRequesting ? "Waiting for Health…" : "Grant access")
-                            .font(.system(size: 15, weight: .heavy, design: .rounded))
+                            .font(.system(size: 15, weight: .bold, design: .rounded))
                     }
                     .foregroundColor(.white)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
-                    .background(Capsule().fill(MADTheme.Colors.redGradient))
+                    .background(Capsule().fill(MADTheme.Colors.madRed))
                 }
                 .buttonStyle(.plain)
                 .disabled(isRequesting)
             }
         }
-        .padding(MADTheme.Spacing.md)
-        .madLiquidGlass()
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .settingsCard()
     }
 
     private var statusColor: Color {
@@ -132,13 +125,13 @@ struct HealthAccessSettingsView: View {
     private var statusSubtitle: String {
         switch monitor.state {
         case .granted:
-            return "Everything Mile A Day asks for has been answered. If your miles still look wrong, check the read switches in Apple Health below."
+            return "Everything Mile A Day asks for is answered. Miles still look wrong? Check the read switches in Apple Health."
         case .needsRequest:
-            return "One or more types were never answered — usually because an update started using something new. You can grant them right here."
+            return "Usually because an update started using something new. You can grant it here."
         case .someWritesDenied:
             let blocked = monitor.blockedTitles
             let list = ListFormat.and(blocked)
-            return "\(list) \(blocked.count == 1 ? "is" : "are") turned off, so walks you track in the app can't be saved properly. Turn them back on in Apple Health."
+            return "\(list) \(blocked.count == 1 ? "is" : "are") off, so walks you track here can't save properly. Turn \(blocked.count == 1 ? "it" : "them") back on in Apple Health."
         case .unavailable:
             return "This device doesn't have Apple Health, so Mile A Day can't count workouts automatically."
         }
@@ -147,36 +140,19 @@ struct HealthAccessSettingsView: View {
     // MARK: - Per-type list
 
     private var typesCard: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text("WHAT MILE A DAY USES")
-                .font(.system(size: 11, weight: .heavy, design: .rounded))
-                .tracking(1.2)
-                .foregroundColor(.secondary)
-                .padding(.bottom, MADTheme.Spacing.sm)
-
+        SettingsSection("What Mile A Day uses") {
             ForEach(Array(monitor.kinds.enumerated()), id: \.element.id) { index, kind in
                 if index > 0 {
-                    Divider()
-                        .overlay(Color.white.opacity(0.06))
-                        .padding(.vertical, MADTheme.Spacing.xs)
+                    SettingsDivider()
                 }
                 typeRow(kind)
             }
         }
-        .padding(MADTheme.Spacing.md)
-        .madLiquidGlass()
     }
 
     private func typeRow(_ kind: HealthDataKind) -> some View {
-        HStack(spacing: MADTheme.Spacing.md) {
-            ZStack {
-                Circle()
-                    .fill((kind.isBlocked ? MADTheme.Colors.madRed : Color.teal).opacity(0.15))
-                    .frame(width: 34, height: 34)
-                Image(systemName: kind.icon)
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundColor(kind.isBlocked ? MADTheme.Colors.madRed : .teal)
-            }
+        HStack(spacing: 12) {
+            SettingsGlyph(icon: kind.icon, tint: kind.isBlocked ? MADTheme.Colors.madRed : .teal)
             VStack(alignment: .leading, spacing: 2) {
                 Text(kind.title)
                     .font(MADTheme.Typography.body)
@@ -188,119 +164,80 @@ struct HealthAccessSettingsView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 0)
-            statusPill(kind)
+            statusLabel(kind)
         }
-        .padding(.vertical, MADTheme.Spacing.xs)
+        .padding(.vertical, 8)
     }
 
     /// Only a claim we can back up. For a read-only type Apple tells us
-    /// nothing, so the pill says nothing — a green tick there would be a
+    /// nothing, so the label says nothing — a green tick there would be a
     /// guess, and a red one would be a false alarm on a user whose access is
     /// perfectly fine.
     @ViewBuilder
-    private func statusPill(_ kind: HealthDataKind) -> some View {
+    private func statusLabel(_ kind: HealthDataKind) -> some View {
         if kind.isBlocked {
-            pill("Off", color: MADTheme.Colors.madRed)
+            statusText("Off", color: MADTheme.Colors.madRed)
         } else if kind.isWritable && kind.writeStatus == .sharingAuthorized {
-            pill("On", color: .green)
+            statusText("On", color: .green)
         } else if kind.isWritable {
-            pill("Not asked", color: .orange)
+            statusText("Not asked", color: .orange)
         } else {
-            pill("Read only", color: .secondary)
+            statusText("Read only", color: .secondary)
         }
     }
 
-    private func pill(_ text: String, color: Color) -> some View {
-        Text(text)
-            .font(.system(size: 11, weight: .heavy, design: .rounded))
+    /// Coloured text, no capsule: the state lives in the colour.
+    private func statusText(_ text: String, color: Color) -> some View {
+        Text(LocalizedStringKey(text))
+            .font(.system(size: 13, weight: .semibold, design: .rounded))
             .foregroundColor(color)
-            .padding(.horizontal, 9)
-            .padding(.vertical, 4)
-            .background(Capsule().fill(color.opacity(0.14)))
+            .lineLimit(1)
+            .fixedSize()
     }
 
     // MARK: - The part Apple won't tell us
 
     private var routeMapsNote: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
-                Image(systemName: "map.badge.exclamationmark")
-                    .font(.system(size: 12, weight: .bold))
-                Text("WHY A WALK HAS NO MAP")
-                    .font(.system(size: 11, weight: .heavy, design: .rounded))
-                    .tracking(1.1)
-            }
-            .foregroundColor(.secondary)
-
-            Text("If Route is off under Apple Health, a walk you track in Mile A Day can save without GPS, and that map cannot be recovered later. Mile A Day's route sharing, post default, and Stealth Mode settings only decide whether an existing route is shown to other people.")
-                .font(MADTheme.Typography.caption)
-                .foregroundColor(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(MADTheme.Spacing.md)
-        .background(
-            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                .fill(Color.teal.opacity(0.08))
-                .overlay(
-                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                        .strokeBorder(Color.teal.opacity(0.22), lineWidth: 1)
-                )
+        note(
+            "Why a walk has no map",
+            "If Route is off in Apple Health, a walk you track here saves without GPS, and that map can't be recovered later. Mile A Day's privacy settings only decide who sees a route that exists."
         )
     }
 
     private var readAccessNote: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
-                Image(systemName: "eye.trianglebadge.exclamationmark")
-                    .font(.system(size: 12, weight: .bold))
-                Text("ABOUT READING YOUR DATA")
-                    .font(.system(size: 11, weight: .heavy, design: .rounded))
-                    .tracking(1.1)
-            }
-            .foregroundColor(.secondary)
+        note(
+            "About reading your data",
+            "Apple never tells an app whether it may read your health data, so we can't check it from here. If your miles or steps look wrong while everything above is on, check the read switches in Apple Health."
+        )
+    }
 
-            Text("Apple never tells an app whether it's allowed to READ your health data — that's a privacy protection, and it means we genuinely can't check it from in here. If your miles or steps look wrong while everything above says it's on, open Apple Health and make sure the read switches are on too.")
+    /// Reference text, not a control: no card, just a title and a paragraph.
+    private func note(_ title: String, _ body: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(LocalizedStringKey(title))
+                .font(MADTheme.Typography.smallBold)
+                .foregroundColor(.primary)
+            Text(LocalizedStringKey(body))
                 .font(MADTheme.Typography.caption)
                 .foregroundColor(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(MADTheme.Spacing.md)
-        .background(
-            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                .fill(Color.white.opacity(0.04))
-        )
+        .padding(.horizontal, MADTheme.Spacing.xs)
     }
 
     // MARK: - The door
 
     private var openHealthCard: some View {
-        VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
+        SettingsSection {
             Button(action: HealthAppLink.openHealthSources) {
-                HStack(spacing: MADTheme.Spacing.md) {
-                    ZStack {
-                        Circle()
-                            .fill(Color.red.opacity(0.15))
-                            .frame(width: 36, height: 36)
-                        Image(systemName: "heart.fill")
-                            .font(.system(size: 15, weight: .medium))
-                            .foregroundColor(.red)
-                    }
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Open Apple Health")
-                            .font(MADTheme.Typography.body)
-                            .fontWeight(.semibold)
-                            .foregroundColor(.primary)
-                        Text("Takes you to Sharing → Apps")
-                            .font(MADTheme.Typography.caption)
-                            .foregroundColor(.secondary)
-                    }
-                    Spacer()
-                    Image(systemName: "arrow.up.forward.app")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(.secondary)
-                }
+                SettingsRow(
+                    icon: "heart.fill",
+                    title: "Open Apple Health",
+                    subtitle: "Takes you to Sharing → Apps",
+                    tint: .red,
+                    accessory: .external
+                )
             }
             .buttonStyle(.plain)
 
@@ -313,20 +250,18 @@ struct HealthAccessSettingsView: View {
                 stepRow(2, "Choose Mile A Day")
                 stepRow(3, "Tap Turn On All")
             }
-            .padding(.leading, 2)
+            .padding(.leading, 36)
+            .padding(.bottom, 6)
         }
-        .padding(MADTheme.Spacing.md)
-        .madLiquidGlass()
     }
 
     private func stepRow(_ number: Int, _ text: String) -> some View {
-        HStack(alignment: .top, spacing: 8) {
-            Text("\(number)")
-                .font(.system(size: 11, weight: .heavy, design: .rounded))
-                .foregroundColor(.white)
-                .frame(width: 18, height: 18)
-                .background(Circle().fill(MADTheme.Colors.madRed.opacity(0.7)))
-            Text(text)
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(verbatim: "\(number).")
+                .font(.system(size: 12, weight: .bold, design: .rounded))
+                .foregroundColor(.secondary)
+                .monospacedDigit()
+            Text(LocalizedStringKey(text))
                 .font(MADTheme.Typography.caption)
                 .foregroundColor(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -356,7 +291,8 @@ enum ListFormat {
 /// This is the message the app was missing. Everything downstream of a revoked
 /// permission looks like a bug rather than a setting — a streak stuck at 0, a
 /// dashboard that won't count today's walk, widgets a day behind — so the one
-/// place it must be said is the first screen the user opens.
+/// place it must be said is the first screen the user opens. (Settings doesn't
+/// show it: its Health access row carries the same state.)
 struct HealthAccessBanner: View {
     @ObservedObject private var monitor = HealthAccessMonitor.shared
     let onTap: () -> Void
