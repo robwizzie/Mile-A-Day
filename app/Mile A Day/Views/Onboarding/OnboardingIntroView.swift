@@ -851,7 +851,7 @@ private struct IntroFriendsArt: View {
         // A short hero (SE) keeps the note to one line so the tiles stay big
         // enough to show the faces.
         let roomy = height >= 210
-        let noteHeight: CGFloat = roomy ? 64 : 40
+        let noteHeight: CGFloat = roomy ? 72 : 40
         // Three tiles + two 12pt gaps inside a 20pt gutter each side; a tile
         // is 1.25× as tall as it is wide.
         let tile = min((height - 14 - noteHeight) / 1.25, 112, (artWidth - 40 - 24) / 3)
@@ -873,23 +873,24 @@ private struct IntroFriendsArt: View {
     }
 }
 
-/// The team's profile pictures are their kid photos; say so, playfully, and
-/// that a new user's can be anything.
+/// The team's profile pictures are their kid photos, and new users will see
+/// baby pics all over the app: say so, and that theirs can be anything
+/// (though a kid pic of themselves is the cool move).
 private struct IntroKidPhotoNote: View {
     let roomy: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text("👶 Yep, those are us as kids.")
+            Text("👶 Baby pics are our thing")
                 .madFont(size: 14, weight: .heavy, design: .rounded, maxScale: 1.15)
             if roomy {
-                Text("You'll spot them all over the app. Your pic can be anything.")
+                Text("You'll see them all over the app. Any pic works for yours, but a kid pic is way cooler 😎")
                     .madFont(size: 12, weight: .medium, design: .rounded, maxScale: 1.15)
                     .opacity(0.7)
             }
         }
         .foregroundColor(Color(red: 0.12, green: 0.08, blue: 0.09))
-        .lineLimit(2)
+        .lineLimit(3)
         .minimumScaleFactor(0.85)
         .multilineTextAlignment(.leading)
         .padding(.horizontal, 14)
