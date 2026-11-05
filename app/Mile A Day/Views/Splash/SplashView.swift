@@ -168,6 +168,14 @@ private struct SplashLayerRepresentable: UIViewRepresentable {
             driver?.started(overApp: overApp, reduceMotion: reduceMotion)
         }
         driver.view = view
+        // Backstop: if the splash somehow never gets a size (so never
+        // reports its first frame), build the app anyway after a second
+        // rather than leaving the launch blank until the 8s fallback.
+        if overApp {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                AppStateManager.shared.mountMain()
+            }
+        }
         return view
     }
 
