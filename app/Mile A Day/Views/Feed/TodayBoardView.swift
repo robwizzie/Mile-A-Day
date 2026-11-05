@@ -247,7 +247,6 @@ struct TodayBoardView: View {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { onOpenLiveProfile(friend) }
                 }
             )
-            .presentationDetents([.large])
             .presentationDragIndicator(.visible)
         }
     }

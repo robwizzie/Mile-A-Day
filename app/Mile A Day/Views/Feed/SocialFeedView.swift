@@ -470,7 +470,6 @@ struct SocialFeedView: View {
                                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { handleCompose() }
                             }
                         )
-                        .presentationDetents([.large])
                         .presentationDragIndicator(.visible)
                     }
 

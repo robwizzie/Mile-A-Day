@@ -97,7 +97,6 @@ struct DoneTodayCard: View {
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { postPhoto() }
                     }
                 )
-                .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
             }
         }

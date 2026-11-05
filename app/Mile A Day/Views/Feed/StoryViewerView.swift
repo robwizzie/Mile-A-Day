@@ -462,7 +462,9 @@ private struct StoryGroupPlayerView: View {
                     // nothing to load, so the timer can run at once.
                     StoryFinishFrame(stats: post.stats_snapshot,
                                      coordinates: post.routeCoordinates,
-                                     workoutType: post.workout_type)
+                                     workoutType: post.workout_type,
+                                     flameyLook: FeedCardFlamey.look(authorFlamey: post.author_flamey,
+                                                                     isOwn: post.is_self))
                         .id(post.post_id)
                         .ignoresSafeArea()
                         .onAppear { imageReady = true }
