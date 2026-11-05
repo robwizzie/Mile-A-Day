@@ -364,6 +364,11 @@ jobs:
       # and no sensitive column rides along. Both leak or lie in public.
       - name: Public profile check
         run: node scripts/public-profile-check.mjs
+      # Onboarding's example photos are served to signed-out devices: only the
+      # allowlisted posts, in order, dropped once deleted or off the feed,
+      # with signed urls and no extra columns.
+      - name: Showcase photos check
+        run: node scripts/showcase-check.mjs
       # Mile A Day+: what we do with an Apple-VERIFIED transaction. Founding
       # Runners by signup date; a subscription is Plus until expiry (renewing
       # ⇒ 1-day grace), re-posts idempotent, never rolled back by an older
