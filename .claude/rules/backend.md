@@ -109,7 +109,7 @@ Details: docs/conventions/backend.md § Competition Resolution
 ## Hypes & Posts
 Details: docs/conventions/backend.md § Hypes & Posts
 - 'mile' hypes key on `<userId>:<localDate>`; match via `mileHypeKeyMatchSql`.
-- `/friends/activity/today` serves `current_streak` (`effectiveStreakSql`) and `minutes_left_today` (`minutesLeftTodaySql`) additively; the nudge push words what's at stake via `nudgeCopy(getStreakStakes)` (same type/data).
+- `/friends/activity/today` serves `current_streak` (`effectiveStreakSql`) and `minutes_left_today` (`minutesLeftTodaySql`: offset from `notification_settings.timezone_offset_minutes` first, the latest workout's only as fallback) additively; the nudge push words what's at stake via `nudgeCopy(getStreakStakes)` (same type/data).
 - Keep the `express.json` limit at 2mb.
 - `posts.is_auto` is tri-state; a user post replaces only an auto post, else 409.
 - Wrap `media_url` responses in `signMediaUrlsDeep(...)`; `stripMediaQuery(...)` inputs; store bare paths.

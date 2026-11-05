@@ -101,7 +101,8 @@ Service (`services/`) → controller (`controllers/`) → route (`routes/`) → 
 
 ## Hypes & Posts
 
-- **Friend streak stakes.** `/friends/activity/today` serves `current_streak` and `minutes_left_today`, additively. `minutesLeftTodaySql(alias)` is the one rule for the minutes: time to the user's local midnight, from their latest workout's `timezone_offset`, the same day `userTodaySql` uses. `getStreakStakes(userId)` reads both for one user.
+- **Friend streak stakes.** `/friends/activity/today` serves `current_streak` and `minutes_left_today`, additively. `minutesLeftTodaySql(alias)` is the one rule for the minutes: time to the user's local midnight. The offset comes from `notification_settings.timezone_offset_minutes` first; the app sends its current offset on every launch (`syncDailyReminderPrefsToBackend`), and `lastCallService` already reads it the same way. The latest workout's `timezone_offset` is only a fallback, because it is frozen at the time of that workout. After the Nov 1, 2026 DST change, a friend whose last walk was in EDT showed "1h 51m left" at 9:09 PM EST, an hour early. 52 of 234 users had a stale workout offset at the time.
+- **Open: the same stale offset drives `userTodaySql` and about 25 other "latest workout offset" reads**, including the streak writer. For an affected user, the effective streak can read 0 for the last local hour before midnight. Fixing that has to change every one of them together, so that "today" never means two things. It is not done yet. `getStreakStakes(userId)` reads both for one user.
 - **Nudge copy.** The nudge push (`friendNudgeController`) words what's at stake via `nudgeCopy`:
   - With a streak and ≤ `NUDGE_RISK_WINDOW_MINUTES` (180, the iOS `riskWindowMinutes`) left: "🔥 Your 17-day streak ends in 34m".
   - With a streak and more time: "…keep your 17-day streak going".
