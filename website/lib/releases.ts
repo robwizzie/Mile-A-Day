@@ -116,6 +116,12 @@ export const RELEASES: Release[] = [
         desc: "Your streak front and center beside Flamey, each number said once, and after your mile a quick way to share it or go another.",
       },
       {
+        icon: Sparkles,
+        color: "#FF9F0A",
+        title: "A fresh new look",
+        desc: "A new launch screen, cleaner Friends, Profile and Settings tabs, and a guided tour that walks you through the app.",
+      },
+      {
         icon: Sticker,
         color: "#BF5AF2",
         title: "Stickers on your photos",
