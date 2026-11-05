@@ -1,5 +1,6 @@
 import { Response } from 'express';
 import { AuthenticatedRequest } from '../middleware/auth.js';
+import { getHistoryFloor } from '../services/plusService.js';
 import {
 	upsertDailySteps,
 	upsertDailyStepsBatch,
@@ -67,7 +68,11 @@ export async function putDailyStepsBatch(req: AuthenticatedRequest, res: Respons
 			parsed.push({ localDate, steps: Math.floor(steps) });
 		}
 
-		const result = await upsertDailyStepsBatch(userId, parsed, timezoneOffset);
+		// Same history floor as workout uploads (`getHistoryFloor`): a
+		// non-member's step days before it don't count toward their streak.
+		const historyFloor = await getHistoryFloor(userId);
+		const kept = historyFloor ? parsed.filter((d) => d.localDate >= historyFloor) : parsed;
+		const result = await upsertDailyStepsBatch(userId, kept, timezoneOffset);
 		return res.status(200).json(result);
 	} catch (err: any) {
 		console.error('Error upserting daily steps batch:', err.message);

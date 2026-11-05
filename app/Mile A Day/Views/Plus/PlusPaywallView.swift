@@ -5,13 +5,21 @@ import SwiftUI
 /// rejects a paywall that sells features that aren't in the build, so a perk
 /// goes here the day it works, never before.
 enum PlusPerk: CaseIterable, Identifiable {
-    case fasterTokens, flameyColors, family, support
+    case fasterTokens, fullHistory, flameyColors, family, support
 
     var id: Self { self }
+
+    /// The perks listed under the token comparison (which covers
+    /// `fasterTokens`), in order, on the paywall and in Plus settings alike.
+    static let extras: [PlusPerk] = [.fullHistory, .flameyColors, .family, .support]
+
+    /// Everything in one line, for the places that only have room for that.
+    static let summary = "Faster streak tokens, your full workout history, Plus-only Flamey looks and Family Sharing."
 
     var icon: String {
         switch self {
         case .fasterTokens: return "shield.lefthalf.filled"
+        case .fullHistory: return "clock.arrow.circlepath"
         case .flameyColors: return "paintpalette.fill"
         case .family: return "person.3.fill"
         case .support: return "heart.fill"
@@ -21,6 +29,7 @@ enum PlusPerk: CaseIterable, Identifiable {
     var tint: Color {
         switch self {
         case .fasterTokens: return .cyan
+        case .fullHistory: return .teal
         case .flameyColors: return .orange
         case .family: return .green
         case .support: return MADTheme.Colors.madRed
@@ -30,6 +39,7 @@ enum PlusPerk: CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .fasterTokens: return "Streak tokens, faster"
+        case .fullHistory: return "Your full workout history"
         case .flameyColors: return "Plus-only Flamey looks"
         case .family: return "Share with your family"
         case .support: return "Keep Mile A Day independent"
@@ -40,6 +50,8 @@ enum PlusPerk: CaseIterable, Identifiable {
         switch self {
         case .fasterTokens:
             return "Double Down in 5 days instead of 14, Streak Save in 3 runs instead of 7, and a Streak Assist every 14 days instead of 30."
+        case .fullHistory:
+            return "Free accounts import the past year from Apple Health. Plus brings in every workout before that too: your whole streak and lifetime stats."
         case .flameyColors:
             return "Electric, Rose Gold, Obsidian and Tropic colors, plus the glow-in-the-dark Skeleton Suit."
         case .family:
@@ -340,7 +352,7 @@ struct PlusPaywallView: View {
                 speedTile(name: "Double Down", plus: "5 days", free: "14", tint: .orange)
                 speedTile(name: "Streak Assist", plus: "14 days", free: "30", tint: Color(red: 1.0, green: 0.48, blue: 0.69))
             }
-            Text("Walk days count as half a run. Plus-only Flamey looks and Family Sharing too.")
+            Text("Walk days count as half a run. Plus also brings your full workout history, Plus-only Flamey looks and Family Sharing.")
                 .madFont(size: 12, weight: .semibold, design: .rounded)
                 .foregroundColor(.white.opacity(0.62))
                 .fixedSize(horizontal: false, vertical: true)
@@ -646,11 +658,12 @@ struct PlusPaywallView: View {
 
     private var extras: some View {
         VStack(spacing: 0) {
-            extraRow(PlusPerk.flameyColors)
-            Divider().overlay(Color.white.opacity(0.08)).padding(.leading, 52)
-            extraRow(PlusPerk.family)
-            Divider().overlay(Color.white.opacity(0.08)).padding(.leading, 52)
-            extraRow(PlusPerk.support)
+            ForEach(Array(PlusPerk.extras.enumerated()), id: \.element) { index, perk in
+                if index > 0 {
+                    Divider().overlay(Color.white.opacity(0.08)).padding(.leading, 52)
+                }
+                extraRow(perk)
+            }
         }
         .padding(.horizontal, MADTheme.Spacing.md)
         .padding(.vertical, 6)

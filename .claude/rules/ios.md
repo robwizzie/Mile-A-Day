@@ -158,6 +158,7 @@ Details: docs/conventions/ios.md § Key Patterns
 
 ## Mile A Day+
 Details: docs/conventions/ios.md § Mile A Day+
+- Every HISTORICAL HealthKit workout read goes through `HistoryWindow.limit`/`clamp` (in HealthKitManager.swift, Watch-safe; floor from `/plus/status` `history_floor`, nil = full); the import waits for the Plus status; `.madHistoryFloorLifted` → `importFullHistoryAfterUnlock`; perks list = `PlusPerk.extras`/`PlusPerk.summary`, never a hand-written list.
 - Entitlement is the server's (`PlusStore.status`); never unlock from a local StoreKit check; `finish()` a transaction only after the server's `results[i]` says ok or `retryable: false`.
 - Purchases pass `.appAccountToken` (`PlusStore.appAccountToken`); product ids live in `PlusProducts` (mirrors backend `PLUS_PRODUCTS`).
 - The paywall sells only shipped perks (`PlusPerk`); prices/periods come from `Product`, never literals; keep Restore + Terms + Privacy + the renewal line beside the button (3.1.2).

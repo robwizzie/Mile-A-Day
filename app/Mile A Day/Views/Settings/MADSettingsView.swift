@@ -543,7 +543,7 @@ struct MADSettingsView: View {
 
     private var plusSubtitle: String {
         guard let status = plusStore.status, status.is_plus else {
-            return "Faster streak tokens, Flamey looks, gifting"
+            return HistoryWindow.isCapped ? "Your full workout history, faster streak tokens" : "Faster streak tokens, Flamey looks, gifting"
         }
         if status.isFoundingRunner && status.source == "founding" { return "Founding Runner — free for life" }
         return "Active — manage, gift or restore"

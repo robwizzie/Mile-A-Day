@@ -422,7 +422,9 @@ struct HistoryImportDetailView: View {
                 .font(.system(size: 19, weight: .bold, design: .rounded))
                 .multilineTextAlignment(.center)
                 .foregroundColor(.white)
-            Text("Your streak, records and badges are all built from this, so we bring across your whole history — not just today.")
+            Text(HistoryWindow.isCapped
+                 ? "Your streak, records and badges are all built from this. We bring across your past year of workouts, and Mile A Day+ brings in everything before that too."
+                 : "Your streak, records and badges are all built from this, so we bring across your whole history — not just today.")
                 .font(.system(size: 14, weight: .medium, design: .rounded))
                 .multilineTextAlignment(.center)
                 .foregroundColor(.white.opacity(0.65))
@@ -559,9 +561,16 @@ struct HistoryImportDetailView: View {
             )
             point(
                 icon: "clock",
-                title: "Years of history take minutes",
+                title: HistoryWindow.isCapped ? "A year of history takes a minute or two" : "Years of history take minutes",
                 body: "Every workout carries its own distance, pace and mile splits, and each one is read from Apple Health individually. Thousands of workouts is thousands of reads."
             )
+            if HistoryWindow.isCapped {
+                point(
+                    icon: "sparkles",
+                    title: "Want your whole history?",
+                    body: "Your past year comes in free. Join Mile A Day+ any time and we'll import every workout before that too, for your full streak and lifetime stats."
+                )
+            }
             point(
                 icon: "flame.fill",
                 title: "Your streak grows as it goes",

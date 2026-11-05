@@ -170,7 +170,7 @@ extension HealthKitManager {
 
             let query = HKSampleQuery(
                 sampleType: HKObjectType.workoutType(),
-                predicate: compoundPredicate,
+                predicate: HistoryWindow.limit(compoundPredicate),
                 limit: HKObjectQueryNoLimit,
                 sortDescriptors: [NSSortDescriptor(key: HKSampleSortIdentifierEndDate, ascending: false)]
             ) { _, samples, error in
@@ -369,7 +369,7 @@ extension HealthKitManager {
 
         let query = HKSampleQuery(
             sampleType: HKObjectType.workoutType(),
-            predicate: finalPredicate,
+            predicate: HistoryWindow.limit(finalPredicate),
             limit: HKObjectQueryNoLimit,
             sortDescriptors: [sortDescriptor]
         ) { [weak self] _, samples, error in
@@ -403,7 +403,7 @@ extension HealthKitManager {
 
         let query = HKSampleQuery(
             sampleType: HKObjectType.workoutType(),
-            predicate: compoundPredicate,
+            predicate: HistoryWindow.limit(compoundPredicate),
             limit: HKObjectQueryNoLimit,
             sortDescriptors: [NSSortDescriptor(key: HKSampleSortIdentifierEndDate, ascending: false)]
         ) { _, samples, error in
@@ -428,7 +428,7 @@ extension HealthKitManager {
 
         let query = HKSampleQuery(
             sampleType: HKObjectType.workoutType(),
-            predicate: finalPredicate,
+            predicate: HistoryWindow.limit(finalPredicate),
             limit: HKObjectQueryNoLimit,
             sortDescriptors: [sortDescriptor]
         ) { _, samples, error in
@@ -451,7 +451,7 @@ extension HealthKitManager {
 
         let query = HKSampleQuery(
             sampleType: HKObjectType.workoutType(),
-            predicate: compoundPredicate,
+            predicate: HistoryWindow.limit(compoundPredicate),
             limit: HKObjectQueryNoLimit,
             sortDescriptors: [sortDescriptor]
         ) { _, samples, error in

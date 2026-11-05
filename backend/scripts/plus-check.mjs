@@ -35,6 +35,7 @@ import express from "express";
 import { PostgresService } from "../dist/services/DbService.js";
 import { authenticateToken } from "../dist/middleware/auth.js";
 import plusRoutes from "../dist/routes/plusRoutes.js";
+import workoutRoutes from "../dist/routes/workoutRoutes.js";
 import { generateAccessToken } from "../dist/services/tokenService.js";
 import {
   FOUNDING_CUTOFF,
@@ -46,6 +47,7 @@ import {
 import {
   appAccountTokenFor,
   applyNotificationTransaction,
+  getHistoryFloor,
   getPlusStatus,
   isPlusActive,
   listGifts,
@@ -125,6 +127,7 @@ const app = express();
 app.use(express.json({ limit: "2mb" }));
 app.use(authenticateToken);
 app.use("/plus", plusRoutes);
+app.use("/workouts", workoutRoutes);
 const server = await new Promise((resolve) => {
   const s = app.listen(0, "127.0.0.1", () => resolve(s));
 });
@@ -190,6 +193,30 @@ try {
   );
   check("isPlusActive agrees (newbie)", await isPlusActive(NEWBIE), false);
   check("status carries product ids", n.products, PLUS_PRODUCTS);
+
+  // ── History floor: a non-member imports one year before signup ────────
+  check("founder has full history", [f.history_floor, f.full_history, await getHistoryFloor(FOUNDER)], [null, true, null]);
+  const [{ expected_floor }] = await db.query(
+    `SELECT ((created_at AT TIME ZONE 'UTC')::date - 366)::text AS expected_floor FROM users WHERE user_id = $1`,
+    [NEWBIE],
+  );
+  check("new non-member's floor is a year before signup (fixed, not rolling)", [n.history_floor, n.full_history], [expected_floor, false]);
+  check("getHistoryFloor agrees", await getHistoryFloor(NEWBIE), expected_floor);
+  // The upload drops workouts before the floor and says which.
+  const dayBefore = new Date(Date.parse(`${expected_floor}T12:00:00Z`) - DAY).toISOString().slice(0, 10);
+  const wk = (id, localDate) => ({
+    workoutId: id, distance: 1.1, localDate, date: `${localDate}T12:00:00Z`,
+    deviceEndDate: `${localDate}T12:20:00Z`, timezoneOffset: 0, workoutType: "running",
+    calories: 100, totalDuration: 900, splits: [],
+  });
+  const up = await call("POST", `/workouts/${NEWBIE}/upload?fullSync=true`, NEWBIE, [
+    wk("pc-floor-old", dayBefore),
+    wk("pc-floor-ok", expected_floor),
+  ]);
+  check("upload answers 200", up.status, 200);
+  check("…naming the workout before the floor", up.json?.skipped_before_floor, ["pc-floor-old"]);
+  const storedFloor = await db.query(`SELECT workout_id FROM workouts WHERE user_id = $1 ORDER BY workout_id`, [NEWBIE]);
+  check("…and storing only the one on/after it", storedFloor.map((r) => r.workout_id), ["pc-floor-ok"]);
 
   // Onboarding paywall A/B: stable per account, both arms used, ~50/50.
   check("status carries the paywall variant", n.paywall_variant, paywallVariantFor(NEWBIE));
@@ -306,6 +333,7 @@ try {
     { applied: 1 },
   );
   check("refunded ⇒ not Plus", await isPlusActive(SUBBER), false);
+  check("…but full history stays unlocked once ever Plus", await getHistoryFloor(SUBBER), null);
   await applyNotificationTransaction(sub2, null); // REFUND_REVERSED: no revocationDate
   check("refund reversed ⇒ Plus again", await isPlusActive(SUBBER), true);
   await applyNotificationTransaction(sub2, { autoRenewStatus: 0 });

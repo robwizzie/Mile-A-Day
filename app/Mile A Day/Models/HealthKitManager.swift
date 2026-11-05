@@ -861,7 +861,7 @@ class HealthKitManager: ObservableObject {
         
         let query = HKSampleQuery(
             sampleType: HKObjectType.workoutType(),
-            predicate: finalPredicate,
+            predicate: HistoryWindow.limit(finalPredicate),
             limit: HKObjectQueryNoLimit,
             sortDescriptors: [sortDescriptor]
         ) { [weak self] _, samples, error in
@@ -959,7 +959,7 @@ class HealthKitManager: ObservableObject {
 
         let query = HKSampleQuery(
             sampleType: HKObjectType.workoutType(),
-            predicate: predicate,
+            predicate: HistoryWindow.limit(predicate),
             limit: 50,
             sortDescriptors: [sortDescriptor]
         ) { [weak self] _, samples, error in
@@ -1117,7 +1117,7 @@ class HealthKitManager: ObservableObject {
         
         let query = HKSampleQuery(
             sampleType: HKObjectType.workoutType(),
-            predicate: compoundPredicate,
+            predicate: HistoryWindow.limit(compoundPredicate),
             limit: HKObjectQueryNoLimit,
             sortDescriptors: nil
         ) { [weak self] _, samples, error in
@@ -1618,7 +1618,7 @@ class HealthKitManager: ObservableObject {
 
         let query = HKSampleQuery(
             sampleType: HKObjectType.workoutType(),
-            predicate: predicate,
+            predicate: HistoryWindow.limit(predicate),
             limit: HKObjectQueryNoLimit,
             sortDescriptors: [sort]
         ) { [weak self] _, samples, _ in
@@ -2622,3 +2622,80 @@ enum WorkoutDedup {
             .map(\.element)
     }
 }
+
+// MARK: - History window
+
+// Lives here (not in PlusStore) because this file is in the Watch target too
+// and every historical query in it reads the window. The Watch never records
+// a floor, so it keeps full history (and its own 365-day read).
+
+/// How far back this account reads Apple Health. A non-member imports one
+/// year before the day they signed up (the server decides: `history_floor`
+/// on `/plus/status`, FIXED at signup, never a rolling year); Founding
+/// Runners and anyone who has ever had Plus get everything. EVERY historical
+/// HealthKit read and upload goes through `clamp`, so the streak the phone
+/// computes and the one the server stores are built from the same days (the
+/// upload drops anything older, too).
+///
+/// Stored in UserDefaults (not on the MainActor store) so HealthKit callbacks
+/// on any queue can read it. No floor recorded = full history: an existing
+/// account is never capped by a status that simply hasn't loaded yet.
+enum HistoryWindow {
+    private static let key = "historyFloorV1"
+    private static let formatter: DateFormatter = {
+        let f = DateFormatter()
+        f.calendar = Calendar(identifier: .gregorian)
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
+
+    /// Start of the first day that counts, or nil for full history.
+    static var floor: Date? {
+        guard let raw = UserDefaults.standard.string(forKey: key),
+              let day = formatter.date(from: raw) else { return nil }
+        return Calendar.current.startOfDay(for: day)
+    }
+
+    /// True while this account imports only its past year.
+    static var isCapped: Bool { floor != nil }
+
+    /// `start` moved up to the floor (nil start = "all time" = the floor).
+    static func clamp(_ start: Date?) -> Date? {
+        guard let floor else { return start }
+        guard let start else { return floor }
+        return max(start, floor)
+    }
+
+    /// Records the server's answer. Returns true when the floor just LIFTED
+    /// (capped before, full history now): the caller imports the rest.
+    /// `floor` is the server's `history_floor` ("yyyy-MM-dd", nil = full).
+    @discardableResult
+    static func update(floor raw: String?, fullHistory: Bool?) -> Bool {
+        let wasCapped = isCapped
+        if let raw, !raw.isEmpty, fullHistory != true {
+            UserDefaults.standard.set(raw, forKey: key)
+            return false
+        }
+        UserDefaults.standard.removeObject(forKey: key)
+        return wasCapped
+    }
+
+    static func reset() { UserDefaults.standard.removeObject(forKey: key) }
+
+    /// A workout query's predicate, limited to the history window: `base`
+    /// AND "starts on or after the floor". Unchanged with full history. Safe on
+    /// any query (a recent-days one is already inside the window).
+    static func limit(_ base: NSPredicate?) -> NSPredicate? {
+        guard let floor else { return base }
+        let window = HKQuery.predicateForSamples(withStart: floor, end: nil, options: .strictStartDate)
+        guard let base else { return window }
+        return NSCompoundPredicate(andPredicateWithSubpredicates: [base, window])
+    }
+}
+
+extension Notification.Name {
+    /// The history floor lifted (they joined Mile A Day+): import the rest.
+    static let madHistoryFloorLifted = Notification.Name("madHistoryFloorLifted")
+}
+

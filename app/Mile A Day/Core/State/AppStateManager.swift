@@ -91,8 +91,10 @@ class AppStateManager: ObservableObject {
         // switch flips — this only marks that the UI exists here.
         StreakFeatureService.enrollIfNeeded()
 
-        // Mile A Day+ entitlement for the account that just signed in.
-        Task { @MainActor in await PlusStore.shared.refresh() }
+        // Mile A Day+ entitlement for the account that just signed in. The
+        // historical import below waits for it: it decides how far back this
+        // account reads Apple Health (`HistoryWindow`).
+        let plusReady = Task { @MainActor in await PlusStore.shared.refresh() }
 
         DispatchQueue.main.async {
             withAnimation(MADTheme.Animation.standard) {
@@ -102,8 +104,12 @@ class AppStateManager: ObservableObject {
                         self.userDefaults.set(true, forKey: self.hasCompletedFullSetupKey)
                         self.currentState = .main
                         // Initial sync (if needed) runs in the background — user can
-                        // continue using the app while workouts upload.
-                        WorkoutSyncService.shared.startInitialSyncIfNeeded()
+                        // continue using the app while workouts upload. After the
+                        // Plus status lands, so the history window is known.
+                        Task { @MainActor in
+                            await plusReady.value
+                            WorkoutSyncService.shared.startInitialSyncIfNeeded()
+                        }
                     } else {
                         self.currentState = .healthAccess
                     }

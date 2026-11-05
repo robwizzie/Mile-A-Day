@@ -70,6 +70,7 @@ import {
 import { reconcileBuddySessions } from "../services/buddySessionService.js";
 import { fetchCoveredDays } from "../services/streakFeatureCore.js";
 import { notifyH2hLeadChanges } from "../services/h2hMatchupService.js";
+import { getHistoryFloor } from "../services/plusService.js";
 
 export async function uploadWorkouts(req: Request, res: Response) {
   if (!hasRequiredKeys(["userId"], req, res)) return;
@@ -111,6 +112,23 @@ export async function uploadWorkouts(req: Request, res: Response) {
     const user = await getUser({ userId });
     if (!user) {
       return res.status(400).send({ error: `No user found with ID ${userId}` });
+    }
+
+    // History floor: a non-member's import stops a year before they signed
+    // up (`getHistoryFloor`; null = full history, which every Founding Runner
+    // and anyone who has ever had Plus gets). The phone reads Apple Health
+    // from the same date, so this only catches an older build or a stray
+    // workout; it keeps the stored streak equal to what the phone shows.
+    // Answered as `skipped_before_floor` so the client can re-push them once
+    // the floor lifts (it marks a whole batch synced otherwise).
+    const historyFloor = await getHistoryFloor(userId);
+    const skippedBeforeFloor: string[] = [];
+    if (historyFloor) {
+      req.body = (req.body as Workout[]).filter((w) => {
+        const keep = typeof w.localDate !== "string" || w.localDate >= historyFloor;
+        if (!keep) skippedBeforeFloor.push(w.workoutId);
+        return keep;
+      });
     }
 
     // Snapshot race PRs BEFORE the upsert so a retried/idempotent re-upload
@@ -428,6 +446,8 @@ export async function uploadWorkouts(req: Request, res: Response) {
       newlyEarnedBadges: rewards.newlyEarnedBadges,
       newChallengeCompletions: rewards.newChallengeCompletions,
       newRaceRecords,
+      // Additive: workouts before this account's history floor, not stored.
+      skipped_before_floor: skippedBeforeFloor,
     });
   } catch (error: any) {
     console.error("Error uploading workouts:", error.message);

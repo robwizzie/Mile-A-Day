@@ -153,6 +153,7 @@ Details: docs/conventions/backend.md § Push Notifications
 
 ## Mile A Day+
 Details: docs/conventions/backend.md § Mile A Day+
+- A non-member's history floor is FIXED at signup (`historyFloorSql`: signup date − `HISTORY_WINDOW_DAYS` − 1, served as `history_floor`); full history = founder OR any purchase row OR redeemed gift (`fullHistorySql`, permanent once unlocked); `uploadWorkouts` and the daily-steps batch drop days before it (`skipped_before_floor`). Check: `plus-check`.
 - Entitlement is DERIVED at read (`plusActiveSql`/`isPlusActive`/`getPlusStatus`), never stored on `users`; perks read it live (`getMeters`, `ownedFlameyItems`). Check: `plus-check`.
 - Record only VERIFIED StoreKit JWS (`appleStoreVerifier.verifyTransaction`) via `recordTransaction`; product → grant only from `plusCatalog.ts` (`PLUS_PRODUCTS`, mirrored by iOS `PlusProducts`); never rename a product id.
 - `plus_purchases` upserts move FORWARD only (`purchased_at <=`); a refund stamps `revoked_at`, never deletes; gifts are one code per Apple `transaction_id`, voided (never deleted) on refund.
