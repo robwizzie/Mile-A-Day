@@ -733,7 +733,9 @@ private struct IntroPhotoCard: View {
 
     @ViewBuilder
     fileprivate var image: some View {
-        if let url = photo?.imageURL {
+        if let bundled = photo?.bundledImage {
+            Image(bundled).resizable().scaledToFill()
+        } else if let url = photo?.imageURL {
             AsyncImage(url: url, transaction: Transaction(animation: .easeOut(duration: 0.25))) { phase in
                 if case .success(let image) = phase {
                     image.resizable().scaledToFill()
@@ -1057,18 +1059,42 @@ struct ShowcasePhoto: Decodable, Identifiable, Equatable {
     let streak: Int?
     let username: String
     let profile_image_url: String?
+    /// A copy of the photo shipped in the app (`onboarding-post-N`), so the
+    /// feed step shows real photos instantly and offline. Never on the wire.
+    var bundledImage: String? = nil
 
     var id: String { post_id }
     var imageURL: URL? { ProfileImageService.fullImageURL(for: media_url) }
     var avatarURL: URL? { ProfileImageService.fullImageURL(for: profile_image_url) }
+
+    private enum CodingKeys: String, CodingKey {
+        case post_id, media_url, caption, distance, streak, username, profile_image_url
+    }
+
+    /// rob's real posts from the default showcase allowlist, bundled. The
+    /// first caption is trimmed: its tail is an aside about a bug.
+    static let bundled: [ShowcasePhoto] = [
+        ShowcasePhoto(post_id: "fbc7ab58-46c2-47ec-aead-93ef5ee916ab", media_url: "",
+                      caption: "Fastest mile since the injury 😮‍💨", distance: 1.02, streak: 535,
+                      username: "rob", profile_image_url: nil, bundledImage: "onboarding-post-1"),
+        ShowcasePhoto(post_id: "ce1bc4df-cc72-472a-ab7c-9ad0ec720c7b", media_url: "",
+                      caption: "Bangggggggg", distance: 1.01, streak: 533,
+                      username: "rob", profile_image_url: nil, bundledImage: "onboarding-post-2"),
+        ShowcasePhoto(post_id: "7669ff18-5270-4b93-b65a-be7dd689e005", media_url: "",
+                      caption: "Peachyyyyyyyyyy 🍑", distance: 1.91, streak: 522,
+                      username: "rob", profile_image_url: nil, bundledImage: "onboarding-post-3")
+    ]
 }
 
 @MainActor
 final class ShowcasePhotoStore: ObservableObject {
     static let shared = ShowcasePhotoStore()
 
-    @Published private(set) var photos: [ShowcasePhoto] = []
+    /// Starts on the bundled copies; the server's list only replaces them
+    /// when the owner has picked different posts (`SHOWCASE_POST_IDS`).
+    @Published private(set) var photos: [ShowcasePhoto] = ShowcasePhoto.bundled
     private var loading = false
+    private var loaded = false
 
     private struct Response: Decodable { let photos: [ShowcasePhoto] }
 
@@ -1076,7 +1102,7 @@ final class ShowcasePhotoStore: ObservableObject {
     /// shows real photos the moment it's swiped to. Any failure keeps the
     /// drawn samples — onboarding never shows an error for this.
     func load() async {
-        guard photos.isEmpty, !loading,
+        guard !loaded, !loading,
               let url = URL(string: AppConfig.baseURL + "/public/showcase") else { return }
         loading = true
         defer { loading = false }
@@ -1084,14 +1110,21 @@ final class ShowcasePhotoStore: ObservableObject {
             let (data, response) = try await URLSession.shared.data(from: url)
             guard (response as? HTTPURLResponse)?.statusCode == 200 else { return }
             let decoded = try JSONDecoder().decode(Response.self, from: data).photos
-            photos = Array(decoded.prefix(3))  // front post + two prints
-            for photo in photos {
+            loaded = true
+            // Front post + two prints. All of them still in the bundle (or
+            // the showcase turned off): keep the bundled copies, no swap.
+            let picks = Array(decoded.prefix(3))
+            let bundledIds = Set(ShowcasePhoto.bundled.map(\.post_id))
+            guard !picks.isEmpty, !picks.allSatisfy({ bundledIds.contains($0.post_id) }) else { return }
+            // New picks: download first, then swap, so nothing flashes empty.
+            for photo in picks {
                 if let imageURL = photo.imageURL {
                     _ = try? await URLSession.shared.data(from: imageURL)
                 }
             }
+            photos = picks
         } catch {
-            // Drawn samples stay.
+            // Bundled photos stay.
         }
     }
 }
