@@ -24,7 +24,7 @@ LIVE = 11                # not a choice: shown while the owner is out running
 SHOWCASE_S = 40.0        # Showcase: seconds per style
 SHOWCASE_SHOW = 180.0    # ...and a stat show about every 3 minutes
 MASCOTS = ("RUNNER", "FLAMEY")
-FIRMWARE = 24            # this build (the remote shows it and offers newer ones)
+FIRMWARE = 25            # this build (the remote shows it and offers newer ones)
 BOOT_MIN = 3.0           # keep the logo up at least this long
 DASH_SECONDS = 25        # Classic: still dashboard time between stat shows
 T_TRANS = 1.7            # mascot wipe between screens
@@ -608,11 +608,16 @@ class App:
         """My own run, my personal records, the date (seasons, New Year)."""
         me = self.me
         date = me.get("local_date") or ""
-        if self.date and date and date != self.date and self.date.endswith("12-31"):
+        if self.date and date and date == next_day(self.date) and self.date.endswith("12-31"):
             if not self.ny_countdown:          # (the countdown already partied)
                 self.push(("newyear", int(date[:4])))
-        if date and (not self.date or date >= self.date):
-            self.date = date              # (never step back: the board rolls over itself)
+        # The server's date is the truth. The one exception: just after
+        # midnight the board has rolled over on its own and the feed may still
+        # say yesterday for a poll or two.
+        s = self.local_seconds(now)
+        lagging = s is not None and s < 300 and self.date == next_day(date)
+        if date and len(date) == 10 and not lagging:
+            self.date = date
         self.closet = wear(me.get("flamey"))
         self.apply_season()
         self._medals(me.get("medals") or ())
@@ -819,8 +824,12 @@ class App:
             self.start_event(("countdown", 86400 - s, int(self.date[:4]) + 1), now)
             return
         m = s / 60
-        day_start = self.last_m is None or m < self.last_m      # new day
-        if self.last_m is not None and m < self.last_m and self.date:
+        # A new day only when the clock really wraps past midnight: a clock
+        # nudged back by a slow poll, or set back an hour in the fall, is not
+        # tomorrow (that once ran the box's date ahead into other holidays).
+        wrapped = self.last_m is not None and self.last_m >= 23 * 60 and m < 60
+        day_start = self.last_m is None or wrapped
+        if wrapped and self.date:
             self.date = next_day(self.date)                     # midnight, locally
             self.apply_season()
         self.last_m = m
