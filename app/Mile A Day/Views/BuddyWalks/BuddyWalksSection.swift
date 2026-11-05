@@ -88,7 +88,7 @@ struct BuddyWalksSection: View {
 
     private var header: some View {
         HStack(spacing: MADTheme.Spacing.sm) {
-            ProfileCardLabel(text: "WALKS TOGETHER")
+            ProfileCardLabel(text: "Walks together")
             Spacer()
             if !walks.isEmpty {
                 Button {

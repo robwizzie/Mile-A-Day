@@ -25,6 +25,8 @@ struct ProfileView: View {
     @State private var isRecalibratingStreak = false
     @State private var recalibrateResultMessage: String?
     @State private var showingShareProfile = false
+    /// The banner gear: pushes the one Settings page, like the Dashboard's.
+    @State private var showingSettings = false
     /// The Share Studio on the day — streak, Flamey, stats — from the one
     /// screen that is ABOUT your streak. The QR button beside it shares the
     /// PROFILE (a way to add you), which is a different thing.
@@ -97,20 +99,25 @@ struct ProfileView: View {
                             onPureFlame: { showPureFlameInfo = true }
                         )
 
-                        // Streak · Miles · Friends. Friends is tappable through
-                        // to the friends list / leaderboard.
+                        // Streak · Miles · Friends. Friends opens a plain A–Z
+                        // list of your friends (the Friends TAB is one tap
+                        // away in the tab bar; pushing it again here was a
+                        // second copy of a whole tab).
                         ProfileStatTiles(
                             streak: userManager.currentUser.streak,
                             totalMiles: userManager.currentUser.totalMiles,
                             friendCount: ownFriendCount,
-                            streakDoneToday: ownGoalDoneToday,
-                            streakSavedToday: ownSavedToday,
-                            // The Miles tile owns lifetime miles now (the
-                            // banner chip and the Performance card are gone),
-                            // so it is also the door to the Total Miles screen.
+                            // The Miles tile owns lifetime miles, so it is
+                            // also the door to the Total Miles screen.
                             onTapMiles: { activeSheet = .totalMiles }
                         ) {
-                            FriendsListView(friendService: friendService)
+                            if let uid = userManager.currentUser.backendUserId {
+                                UserFriendsListView(
+                                    userId: uid,
+                                    ownerName: userManager.currentUser.username ?? "You",
+                                    friendService: friendService
+                                )
+                            }
                         }
 
                         // Token shelf — your minted set, right under the numbers
@@ -168,6 +175,14 @@ struct ProfileView: View {
         // no-slide-down direction for navigational destinations.
         .navigationDestination(isPresented: $showingShareProfile) {
             ShareProfileView()
+        }
+        // The same page, presented the same way, as the Dashboard gear.
+        .navigationDestination(isPresented: $showingSettings) {
+            MADSettingsView(
+                userManager: userManager,
+                healthManager: healthManager,
+                friendService: friendService
+            )
         }
         // The same history screen the Dashboard's Recent Workouts card pushes.
         .navigationDestination(isPresented: $showingWorkoutHistory) {
@@ -313,10 +328,8 @@ struct ProfileView: View {
             // metric — and because it's the only place in the app outside the
             // start sheet that says what a buddy walk is.
             BuddyWalksSection()
-            HallOfStreaksSection(
-                userId: userManager.currentUser.backendUserId,
-                isSelf: true
-            )
+            // Hall of Streaks lives on the Stats tab, where a friend's
+            // profile has it too.
             if !receivedHypes.isEmpty {
                 recentHypesSection
             }
@@ -328,7 +341,7 @@ struct ProfileView: View {
     private var recentHypesSection: some View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
             HStack {
-                ProfileCardLabel(text: "RECENT HYPES")
+                ProfileCardLabel(text: "Recent hypes")
                 Spacer()
                 if receivedHypes.count > Self.hypePreviewCount {
                     Button {
@@ -471,7 +484,16 @@ struct ProfileView: View {
     @ViewBuilder
     private var ownStatsTabContent: some View {
         VStack(spacing: MADTheme.Spacing.lg) {
-            performanceSection
+            // The same card, same three numbers, as a friend's Stats tab.
+            ProfileStatsCard(stats: [
+                ProfileStat.bestPace(bestFastestMilePace, action: { activeSheet = .fastestPace }),
+                ProfileStat.bestDay(userManager.currentUser.mostMilesInOneDay, action: { activeSheet = .mostMiles }),
+                ProfileStat.sevenDayAverage(ownDayTotals)
+            ])
+            HallOfStreaksSection(
+                userId: userManager.currentUser.backendUserId,
+                isSelf: true
+            )
             RacePRsSection(userId: userManager.currentUser.backendUserId)
             // Beside the PRs rather than on its own screen: both answer "how
             // fast am I", and a race history buried a tap deeper is a race
@@ -729,10 +751,11 @@ struct ProfileView: View {
             ownAvatarImage
         } topBar: {
             HStack(alignment: .center) {
-                ProfileWordmark()
                 Spacer()
-                // Two controls: Share (streak card or QR) and Edit. Settings
-                // lives behind the Dashboard gear only — ONE door to one page.
+                // Share (streak card or QR), Edit, and Settings: the SAME
+                // `MADSettingsView` the Dashboard gear pushes, pushed the same
+                // way. One page, two doors: people look for settings on
+                // their own profile.
                 HStack(spacing: 8) {
                     ProfileBannerMenu(systemImage: "square.and.arrow.up", accessibilityLabel: "Share") {
                         Button {
@@ -749,6 +772,10 @@ struct ProfileView: View {
                     }
                     ProfileBannerButton(systemImage: "pencil", accessibilityLabel: "Edit profile") {
                         showingEditProfile = true
+                    }
+                    ProfileBannerButton(systemImage: "gearshape", accessibilityLabel: "Settings") {
+                        MADHaptics.tap()
+                        showingSettings = true
                     }
                 }
             }
@@ -834,14 +861,7 @@ struct ProfileView: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 9)
             .frame(maxWidth: .infinity)
-            .background(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(Color.white.opacity(0.05))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
-                    )
-            )
+            .profileCard()
             .contentShape(Rectangle())
         }
         .buttonStyle(ScaleButtonStyle())
@@ -849,73 +869,6 @@ struct ProfileView: View {
             StreakTokensDetailView()
         }
     }
-
-    // MARK: - Performance Stats
-
-    private var performanceSection: some View {
-        VStack(spacing: MADTheme.Spacing.md) {
-            HStack(spacing: MADTheme.Spacing.sm) {
-                Image(systemName: "chart.line.uptrend.xyaxis")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(MADTheme.Colors.redGradient)
-                Text("Performance")
-                    .font(MADTheme.Typography.headline)
-                    .foregroundColor(.primary)
-                Spacer()
-            }
-
-            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: MADTheme.Spacing.md) {
-                Button {
-                    activeSheet = .fastestPace
-                } label: {
-                    MADStatCard(
-                        title: "Best Pace",
-                        value: formatPace(bestFastestMilePace),
-                        icon: "timer",
-                        iconColor: MADTheme.Colors.madRed,
-                        backgroundColor: MADTheme.Colors.madRed.opacity(0.1)
-                    )
-                }
-                .buttonStyle(ScaleButtonStyle())
-
-                Button {
-                    activeSheet = .mostMiles
-                } label: {
-                    MADStatCard(
-                        title: "Best Day",
-                        value: userManager.currentUser.mostMilesInOneDay.milesFormatted,
-                        icon: "calendar",
-                        iconColor: .green,
-                        backgroundColor: .green.opacity(0.1)
-                    )
-                }
-                .buttonStyle(ScaleButtonStyle())
-
-                MADStatCard(
-                    title: "Active Days",
-                    value: activeDayStats.map { $0.days.formatted(.number.grouping(.automatic)) } ?? "—",
-                    icon: "calendar.badge.checkmark",
-                    iconColor: .orange,
-                    backgroundColor: .orange.opacity(0.1)
-                )
-
-                MADStatCard(
-                    title: "Avg / Active Day",
-                    value: activeDayStats.map { ($0.miles / Double($0.days)).distanceFormatted } ?? "—",
-                    icon: "chart.bar.fill",
-                    iconColor: .purple,
-                    backgroundColor: .purple.opacity(0.1)
-                )
-            }
-        }
-        .padding(MADTheme.Spacing.md)
-        .madLiquidGlass()
-    }
-
-
-    /// Days with counted miles and the miles on them — see
-    /// `HealthKitManager.activeDayStats`. Nil until the index exists.
-    private var activeDayStats: (days: Int, miles: Double)? { healthManager.activeDayStats }
 
     // MARK: - Helpers
 
@@ -950,14 +903,6 @@ struct ProfileView: View {
         }
     }
 
-    private func formatPace(_ pace: TimeInterval) -> String {
-        guard pace > 0 else {
-            return "N/A"
-        }
-        let minutes = Int(pace)
-        let seconds = Int((pace - Double(minutes)) * 60)
-        return String(format: "%d:%02d", minutes, seconds)
-    }
 
     private func loadProfileImage() {
         if let urlPath = userManager.currentUser.profileImageUrl,

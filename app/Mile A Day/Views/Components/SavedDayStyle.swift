@@ -247,16 +247,14 @@ struct SavedTodayBanner: View {
     var onLearnMore: (() -> Void)? = nil
 
     var body: some View {
+        // Flat: the glyph sits bare (no disc) and the card is the app's one
+        // rimless surface; the saved-day blue lives in the glyph and text.
         HStack(alignment: .top, spacing: 12) {
-            ZStack {
-                Circle()
-                    .fill(SavedDayStyle.tint.opacity(0.16))
-                    .frame(width: 38, height: 38)
-                Image(systemName: SavedDayStyle.icon(for: day.kind))
-                    .font(.system(size: 16, weight: .bold))
-                    .foregroundColor(SavedDayStyle.tint)
-            }
-            .accessibilityHidden(true)
+            Image(systemName: SavedDayStyle.icon(for: day.kind))
+                .font(.system(size: 16, weight: .bold))
+                .foregroundColor(SavedDayStyle.tint)
+                .padding(.top, 1)
+                .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
@@ -289,16 +287,9 @@ struct SavedTodayBanner: View {
                     .padding(.top, 3)
             }
         }
-        .padding(14)
+        .padding(DashboardCardSurface.padding)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(SavedDayStyle.tint.opacity(0.10))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .strokeBorder(SavedDayStyle.tint.opacity(0.32), lineWidth: 1)
-                )
-        )
+        .background(DashboardCardSurface(style: .fun))
         .contentShape(Rectangle())
         // Only claim the taps when there is somewhere to send them — on a
         // friend's profile the viewer has nothing to act on here.

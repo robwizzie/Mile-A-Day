@@ -198,14 +198,14 @@ struct LeaderboardSection: View {
     private func youCard(entry: LeaderboardEntry) -> some View {
         HStack(spacing: MADTheme.Spacing.md) {
             VStack(alignment: .leading, spacing: 2) {
-                Text("YOUR RANK")
-                    .font(.system(size: 10, weight: .heavy, design: .rounded))
-                    .tracking(1.2)
-                    .foregroundColor(.white.opacity(0.5))
+                Text("Your rank")
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.6))
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    // The brand red lives on the number, not on the card.
                     Text("#\(entry.rank)")
                         .font(.system(size: 34, weight: .black, design: .rounded))
-                        .foregroundColor(.white)
+                        .foregroundColor(MADTheme.Colors.madRed)
                     if vm.totalCount > 0 {
                         Text("of \(vm.totalCount)")
                             .font(.system(size: 13, weight: .semibold, design: .rounded))
@@ -224,26 +224,12 @@ struct LeaderboardSection: View {
                     .font(.system(size: 24, weight: .bold, design: .rounded))
                     .foregroundColor(.white)
                 Text(metricUnitText)
-                    .font(.system(size: 10, weight: .heavy, design: .rounded))
-                    .tracking(1.0)
-                    .foregroundColor(.white.opacity(0.45))
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.5))
             }
         }
-        .padding(MADTheme.Spacing.lg)
-        .background(
-            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                .fill(
-                    LinearGradient(
-                        colors: [MADTheme.Colors.madRed.opacity(0.55), MADTheme.Colors.madRed.opacity(0.20)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                        .strokeBorder(MADTheme.Colors.madRed.opacity(0.45), lineWidth: 1)
-                )
-        )
+        .padding(DashboardCardSurface.padding)
+        .background(DashboardCardSurface(style: .fun))
     }
 
     private var notRankedCard: some View {
@@ -252,25 +238,17 @@ struct LeaderboardSection: View {
                 .font(.system(size: 22, weight: .bold))
                 .foregroundColor(.white.opacity(0.35))
             VStack(alignment: .leading, spacing: 2) {
-                Text("YOU'RE NOT RANKED YET")
-                    .font(.system(size: 10, weight: .heavy, design: .rounded))
-                    .tracking(1.2)
-                    .foregroundColor(.white.opacity(0.45))
+                Text("You're not ranked yet")
+                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
                 Text(notRankedMessage)
                     .font(.system(size: 12, weight: .medium, design: .rounded))
                     .foregroundColor(.white.opacity(0.55))
             }
             Spacer()
         }
-        .padding(MADTheme.Spacing.md)
-        .background(
-            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                .fill(Color.white.opacity(0.04))
-                .overlay(
-                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                        .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
-                )
-        )
+        .padding(DashboardCardSurface.padding)
+        .background(DashboardCardSurface(style: .fun))
     }
 
     // MARK: Filter chips
@@ -508,25 +486,13 @@ struct LeaderboardSection: View {
                     }
                 }
                 .padding(.vertical, 4)
-                .background(
-                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                        .fill(Color.white.opacity(0.03))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                                .strokeBorder(Color.white.opacity(0.05), lineWidth: 1)
-                        )
-                )
+                .background(DashboardCardSurface(style: .fun))
             }
 
+            // No "End of leaderboard" footer: the list simply ends.
             if vm.isLoadingMore {
                 ProgressView().tint(MADTheme.Colors.madRed)
                     .padding(.vertical, MADTheme.Spacing.md)
-            } else if !vm.hasMore && vm.entries.count > 5 {
-                Text("END OF LEADERBOARD")
-                    .font(.system(size: 9, weight: .heavy, design: .rounded))
-                    .tracking(1.4)
-                    .foregroundColor(.white.opacity(0.25))
-                    .padding(.top, 4)
             }
         }
     }
@@ -593,13 +559,7 @@ struct LeaderboardSection: View {
                     .foregroundColor(.white)
                     .lineLimit(1)
                 if entry.is_current_user {
-                    Text("YOU")
-                        .font(.system(size: 8, weight: .black, design: .rounded))
-                        .tracking(0.5)
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 1.5)
-                        .background(Capsule().fill(MADTheme.Colors.madRed))
+                    youLabel
                 }
                 Text(formatValue(entry.value, metric: vm.metric))
                     .font(.system(size: isFirst ? 14 : 12, weight: .heavy, design: .rounded))
@@ -616,14 +576,16 @@ struct LeaderboardSection: View {
         .frame(maxWidth: .infinity)
         .frame(height: height, alignment: .bottom)
         .padding(.vertical, 8)
-        .background(
-            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
-                .fill(entry.is_current_user ? MADTheme.Colors.madRed.opacity(0.10) : Color.white.opacity(0.04))
-                .overlay(
-                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
-                        .strokeBorder(entry.is_current_user ? MADTheme.Colors.madRed.opacity(0.3) : Color.white.opacity(0.06), lineWidth: 1)
-                )
-        )
+        .background(DashboardCardSurface(style: .fun))
+    }
+
+    /// "You" beside your own name: sentence case in the brand red, no chip.
+    private var youLabel: some View {
+        Text("You")
+            .font(.system(size: 11, weight: .bold, design: .rounded))
+            .foregroundColor(MADTheme.Colors.madRed)
+            .lineLimit(1)
+            .fixedSize()
     }
 
     private func medalColor(_ rank: Int) -> Color {
@@ -656,13 +618,7 @@ struct LeaderboardSection: View {
                         .foregroundColor(.white)
                         .lineLimit(1)
                     if entry.is_current_user {
-                        Text("YOU")
-                            .font(.system(size: 8, weight: .black, design: .rounded))
-                            .tracking(0.5)
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 1.5)
-                            .background(Capsule().fill(MADTheme.Colors.madRed))
+                        youLabel
                     }
                 }
                 if let subtitle = statsSubtitle(entry) {
@@ -701,9 +657,9 @@ struct LeaderboardSection: View {
 
     private var metricUnitText: String {
         switch vm.metric {
-        case .milesRan, .milesTotal: return "MILES"
-        case .pace: return "MIN/MI"
-        case .streak: return "DAYS"
+        case .milesRan, .milesTotal: return "miles"
+        case .pace: return "min/mi"
+        case .streak: return "days"
         }
     }
 
