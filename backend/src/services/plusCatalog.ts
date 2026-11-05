@@ -46,7 +46,7 @@ export function giftMonths(productId: string): number {
  * people who were told they have it); moving it forward also widens the
  * check scripts' seeded users into Founding Runners, so seed them after it.
  */
-export const FOUNDING_CUTOFF = "2026-10-15T00:00:00Z";
+export const FOUNDING_CUTOFF = "2026-11-06T05:00:00Z";
 
 /**
  * Streak-token perks: Plus fills all three meters faster — Double Down in 5

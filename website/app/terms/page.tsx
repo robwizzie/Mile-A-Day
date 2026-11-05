@@ -26,7 +26,7 @@ export const metadata: Metadata = {
 
 export default function TermsPage() {
 	return (
-		<LegalPage title="TERMS OF USE" lastUpdated="October 15, 2026">
+		<LegalPage title="TERMS OF USE" lastUpdated="November 5, 2026">
 			<Section heading="Acceptance of Terms">
 				<p>
 					These Terms of Use (&ldquo;Terms&rdquo;) govern your use of the Mile A Day app and related services
@@ -86,7 +86,7 @@ export default function TermsPage() {
 			<Section heading="Mile A Day+">
 				<p>
 					Mile A Day+ is an optional membership. Logging your daily mile, streaks, friends, the feed and competitions
-					remain free. Mile A Day+ adds extras such as faster-earning streak tokens, Mile A Day+-only looks for Flamey,
+					remain free. Mile A Day+ adds extras such as faster-earning streak tokens, importing workout history older than one year, Mile A Day+-only looks for Flamey,
 					and Family Sharing. The features included in Mile A Day+ are described in the app and may change over time;
 					the free core of the app is not part of Mile A Day+.
 				</p>

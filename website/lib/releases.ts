@@ -1,6 +1,7 @@
 import {
   Activity,
   Award,
+  Bluetooth,
   BarChart3,
   Bell,
   Calendar,
@@ -17,6 +18,8 @@ import {
   Gift,
   Globe,
   HeartPulse,
+  Hourglass,
+  House,
   Images,
   LifeBuoy,
   LayoutGrid,
@@ -32,6 +35,7 @@ import {
   Shirt,
   Smartphone,
   Sparkles,
+  Sticker,
   Swords,
   SwitchCamera,
   ThumbsUp,
@@ -41,6 +45,7 @@ import {
   Users,
   Utensils,
   Watch,
+  Zap,
   type LucideIcon,
 } from "lucide-react";
 
@@ -67,6 +72,75 @@ export type Release = {
 // the home page's "New in" section and /updates both follow. Copy stays
 // user-facing: what the feature does for you, no internal names.
 export const RELEASES: Release[] = [
+  {
+    version: "1.2.08",
+    date: "November 2026",
+    headline: "Mile A Day+ is here, and founders get it free",
+    summary:
+      "Mile A Day+ launches, and everyone who joined before it is a Founding Runner with Plus free, forever. Plus Monthly Flames, a Today row of every friend, nudges for streaks ending tonight, and a cleaner home.",
+    features: [
+      {
+        icon: Medal,
+        color: "#FFCC5C",
+        title: "Founding Runners",
+        desc: "Everyone who joined before Mile A Day+ gets it free, forever: faster streak tokens, your full workout history and every Plus look for Flamey.",
+      },
+      {
+        icon: Sparkles,
+        color: "#D94059",
+        title: "Mile A Day+",
+        desc: "An optional membership: streak tokens in about half the time, your full workout history, Plus-only Flamey looks and gifting a year to a friend. Your daily mile stays free.",
+      },
+      {
+        icon: Calendar,
+        color: "#FF9F0A",
+        title: "Monthly Flames",
+        desc: "Get your mile in every day of a month to unlock that month's Flamey form. Perfect months you've already had count too.",
+      },
+      {
+        icon: Users,
+        color: "#ff4d7d",
+        title: "Today, at the top of the feed",
+        desc: "One row of every friend: who's out walking right now, new stories, who's done and who isn't yet. Stories open out of their tile and flip between friends.",
+      },
+      {
+        icon: Hourglass,
+        color: "#D94059",
+        title: "Streaks ending tonight",
+        desc: "See which friends' streaks end tonight and how long they have left, and nudge each one. Their reminder says exactly what's at stake.",
+      },
+      {
+        icon: House,
+        color: "#30B0C7",
+        title: "A cleaner home",
+        desc: "Your streak front and center beside Flamey, each number said once, and after your mile a quick way to share it or go another.",
+      },
+      {
+        icon: Sticker,
+        color: "#BF5AF2",
+        title: "Stickers on your photos",
+        desc: "Add Flamey, your route, your stats, text or emoji to a post, then pinch, twist and place them anywhere.",
+      },
+      {
+        icon: Footprints,
+        color: "#4A9FF5",
+        title: "Walks earn a Streak Save",
+        desc: "A walk day counts as half a run toward your Streak Save, and the app tells you when a Save is about to cover a missed day.",
+      },
+      {
+        icon: Bluetooth,
+        color: "#5E5CE6",
+        title: "Connect a gym treadmill",
+        desc: "On indoor walks, connect to many Bluetooth treadmills and count the belt's distance.",
+      },
+      {
+        icon: Zap,
+        color: "#FFD659",
+        title: "Faster, and posts that wait for signal",
+        desc: "The app is snappier, and a post that can't send without signal goes out on its own once you're back online.",
+      },
+    ],
+  },
   {
     version: "1.2.07",
     date: "October 2026",
