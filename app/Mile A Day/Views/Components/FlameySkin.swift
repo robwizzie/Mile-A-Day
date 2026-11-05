@@ -421,12 +421,26 @@ final class FlameySkinCatalog {
             .appendingPathComponent("FlameySkins.json")
     }
 
-    init() {
-        if let url = Bundle.main.url(forResource: "FlameySkins", withExtension: "json"), let data = try? Data(contentsOf: url) {
-            load(data, replacing: true)
+    /// Posted (main thread) after a download changes the catalog.
+    static let didChange = Notification.Name("FlameySkinCatalogDidChange")
+
+    /// `bundled: false` = an empty catalog (to validate a download before
+    /// it replaces anything).
+    init(bundled: Bool = true) {
+        guard bundled else { return }
+        // ONE parse, not two (the widgets' memory is tight): the download is
+        // the server's whole set, so when it is newer than this build's copy
+        // it is all we need; an older one (from before an app update) loses.
+        let bundle = Bundle.main.url(forResource: "FlameySkins", withExtension: "json")
+        let cache = Self.cacheURL.flatMap { FileManager.default.fileExists(atPath: $0.path) ? $0 : nil }
+        func modified(_ u: URL?) -> Date {
+            u.flatMap { try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate } ?? .distantPast
         }
-        if let url = Self.cacheURL, let data = try? Data(contentsOf: url) {
-            load(data, replacing: false)
+        let source = cache != nil && modified(cache) > modified(bundle) ? cache : bundle
+        if let source, let data = try? Data(contentsOf: source), load(data, replacing: true) > 0 { return }
+        // The chosen copy was unreadable: fall back to the other.
+        if let other = source == cache ? bundle : cache, let data = try? Data(contentsOf: other) {
+            load(data, replacing: true)
         }
     }
 
