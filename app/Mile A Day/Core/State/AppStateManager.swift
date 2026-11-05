@@ -40,18 +40,47 @@ class AppStateManager: ObservableObject {
     // MARK: - Initialization
     init() {
         loadAppState()
-        startSplashTimer()
+        if splashLeadsToMain {
+            // Returning user: the app builds UNDER the splash (RootView draws
+            // `SplashView` over `.main` while `splashOverlay` is set), so the
+            // splash can wait for the real home screen and dissolve into it.
+            NotificationPrePrompt.release()
+            currentState = .main
+            splashOverlay = true
+            startSplashOverlayFallback()
+        } else {
+            startSplashTimer()
+        }
     }
-    
+
     // MARK: - Public Methods
-    
-    /// Complete the splash screen and move to next appropriate state
-    /// Whether the splash will hand off straight into the app (the same
-    /// test `completeSplash` routes on), so it can end on the home screen's
-    /// cards instead of the wordmark.
+
+    /// Set while the splash is drawn over the already-running app (returning
+    /// users). `SplashView` clears it via `finishSplashOverlay()` once it has
+    /// dissolved into the real dashboard.
+    @Published var splashOverlay = false
+
+    /// Whether the splash hands off straight into the app (the same test
+    /// `completeSplash` routes on).
     var splashLeadsToMain: Bool {
         !isFirstLaunch && isAuthenticated && userDefaults.bool(forKey: hasCompletedFullSetupKey)
     }
+
+    /// The splash has dissolved into the app; stop drawing it.
+    func finishSplashOverlay() {
+        DispatchQueue.main.async { self.splashOverlay = false }
+    }
+
+    /// Never leave the overlay up: `SplashView` reveals by ~4.4s at the latest
+    /// even if the dashboard never reports ready; this is the backstop for a
+    /// splash that never appeared at all.
+    private func startSplashOverlayFallback() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 6) {
+            self.splashOverlay = false
+        }
+    }
+
+    /// Complete the splash screen and move to next appropriate state
 
     func completeSplash() {
         DispatchQueue.main.async {

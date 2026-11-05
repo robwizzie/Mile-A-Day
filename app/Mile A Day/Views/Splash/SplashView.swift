@@ -1,35 +1,41 @@
 import SwiftUI
 import UIKit
 
-/// Launch experience for Mile A Day: split-flap into the app.
+/// Launch experience for Mile A Day: split-flap, then a real reveal.
 ///
 /// Three red flap tiles rattle through numbers like a departures board and
 /// land, one after another, on M · A · D (a tick each). They merge into the
 /// app icon with a thump. Then:
-/// - heading into the app, the icon flies up into the dashboard's real
-///   header (`MADTabHeader`: "Mile A Day", today's date, bell + gear) and
-///   dissolves into its title while the home screen's flat cards fade in, so
-///   the splash becomes the dashboard it hands off to (the dashboard has no
-///   icon of its own; the title IS the brand there);
-/// - heading into onboarding or sign-in (no dashboard yet), "Mile A Day"
-///   rises under the icon instead.
+/// - **Returning users** (`AppStateManager.splashOverlay`): the app is
+///   already running UNDER the splash. The splash waits until the dashboard
+///   reports, through `SplashGate`, that its data has loaded and where its
+///   real "Mile A Day" title sits on screen. Then the icon flies into that
+///   title and dissolves while the splash's own background fades away,
+///   revealing the actual home screen. There is no fake skeleton: what shows
+///   through is the real dashboard. If the dashboard never reports (another
+///   tab restored, a stuck load), the reveal starts anyway at `revealCap`.
+/// - **New users / sign-in** (no dashboard yet): "Mile A Day" rises under
+///   the icon and the splash hands off at `wordmarkHandoffDelay`.
 ///
-/// Every frame is a pure function of the time since the view appeared
-/// (`TimelineView` + `frame(at:)`), never a chain of `withAnimation` /
-/// `asyncAfter` state flips, so a first frame before `onAppear`, a safe-area
-/// settle or a slow launch can't leave one layer out of step with another.
-/// The splash owns its own exit (`handoffDelay`); `AppStateManager` keeps a
-/// later fallback in case the view never appears.
+/// Every frame is a pure function of time (`TimelineView`), never a chain of
+/// `withAnimation` / `asyncAfter` state flips, so a first frame before
+/// `onAppear`, a safe-area settle or a slow launch can't leave one layer out
+/// of step with another.
 struct SplashView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @ObservedObject private var gate = SplashGate.shared
 
     @State private var start: Date?
-    /// Decided once on appear: does the splash end on the dashboard?
-    @State private var intoApp = false
+    /// Decided once on appear: is the app running underneath?
+    @State private var overApp = false
+    /// When the dissolve into the dashboard starts (overlay mode only).
+    @State private var revealAt: Date?
 
-    static let handoffDelay: TimeInterval = 2.05
     private static let wordmarkHandoffDelay: TimeInterval = 1.9
     private static let reducedHandoffDelay: TimeInterval = 0.9
+    /// Reveal anyway if the dashboard hasn't reported ready by then.
+    private static let revealCap: TimeInterval = 4.4
+    private static let revealDuration: TimeInterval = 0.6
 
     // MARK: - Timeline (seconds after appear)
     private enum Beat {
@@ -40,8 +46,6 @@ struct SplashView: View {
         static let flash: Double = 0.12
         static let mergeStart: Double = 1.05
         static let mergeEnd: Double = 1.35
-        static let riseStart: Double = 1.45
-        static let riseEnd: Double = 2.0
         static let wordmarkIn: Double = 1.3
         static let taglineIn: Double = 1.45
         static let textSettle: Double = 0.35
@@ -59,19 +63,27 @@ struct SplashView: View {
         GeometryReader { geo in
             TimelineView(.animation(minimumInterval: nil, paused: start == nil)) { context in
                 let t = start.map { context.date.timeIntervalSince($0) } ?? 0
-                frame(at: reduceMotion ? 10 : t, size: geo.size)
+                let r = revealAt.map { context.date.timeIntervalSince($0) / Self.revealDuration } ?? 0
+                frame(at: reduceMotion ? 10 : t,
+                      reveal: Self.easeInOut(Self.clamp(r)),
+                      size: geo.size,
+                      origin: geo.frame(in: .global).origin)
                     .opacity(reduceMotion ? Self.progress(t, 0, 0.3) : 1)
             }
         }
-        .background(MADTheme.Colors.appBackgroundGradient.ignoresSafeArea())
+        .ignoresSafeArea()
+        .allowsHitTesting(revealAt == nil)
         .onAppear(perform: begin)
+        .onReceive(gate.$ready) { ready in
+            if ready { scheduleReveal() }
+        }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Mile A Day")
     }
 
     // MARK: - Frame
 
-    private func frame(at t: Double, size: CGSize) -> some View {
+    private func frame(at t: Double, reveal: Double, size: CGSize, origin: CGPoint) -> some View {
         let width = min(size.width, 440)
         let tileWidth = width * 0.2
         let tileHeight = width * 0.27
@@ -80,25 +92,27 @@ struct SplashView: View {
         let center = CGPoint(x: size.width / 2, y: size.height * 0.42)
 
         let merge = Self.easeInOut(Self.progress(t, Beat.mergeStart, Beat.mergeEnd))
-        let rise = intoApp ? Self.easeInOut(Self.progress(t, Beat.riseStart, Beat.riseEnd)) : 0
-        // Fly to where the header's title sits (16pt in, ~23pt down: its
-        // padding + half the 26pt line) and shrink to about the title's
-        // height, fading out over the second half as the title fades in.
-        let target = CGPoint(x: MADTheme.Spacing.md + 18, y: MADTheme.Spacing.sm + 15)
-        let iconX = center.x + (target.x - center.x) * CGFloat(rise)
-        let iconY = center.y + (target.y - center.y) * CGFloat(rise)
-        let iconScale = (0.6 + 0.4 * Self.easeOutBack(merge)) * (1 - 0.87 * rise)
-        let iconOpacity = merge * (1 - Self.progress(rise, 0.45, 1))
+
+        // Where the real title is, in this view's coordinates (fallback: the
+        // header's usual spot under the status bar).
+        let target: CGPoint = gate.titleAnchor.map { CGPoint(x: $0.x - origin.x, y: $0.y - origin.y) }
+            ?? CGPoint(x: MADTheme.Spacing.md + 14, y: 70)
+        let iconX = center.x + (target.x - center.x) * CGFloat(reveal)
+        let iconY = center.y + (target.y - center.y) * CGFloat(reveal)
+        // Shrink to about the title's cap height, fading out over the second
+        // half so it reads as becoming the title underneath.
+        let landed = 0.6 + 0.4 * Self.easeOutBack(merge)
+        let iconScale = landed * (1 - (1 - 26 / Double(iconSize)) * reveal)
+        let iconOpacity = merge * (1 - Self.progress(reveal, 0.4, 1))
 
         return ZStack {
-            // Soft red light behind the mark; fades as the app takes over.
-            RadialGradient(colors: [red.opacity(0.22 * merge * (1 - rise)), .clear],
+            // The splash's own background: fades away to show the app.
+            MADTheme.Colors.appBackgroundGradient
+                .opacity(1 - reveal)
+
+            RadialGradient(colors: [red.opacity(0.22 * merge * (1 - reveal)), .clear],
                            center: UnitPoint(x: 0.5, y: center.y / max(size.height, 1)),
                            startRadius: 0, endRadius: width * 0.7)
-
-            if intoApp && rise > 0 {
-                appPreview(size: size, opacity: rise)
-            }
 
             // The flaps, sliding together and fading as they merge.
             ForEach(0..<3, id: \.self) { i in
@@ -117,7 +131,7 @@ struct SplashView: View {
                 .opacity(iconOpacity)
                 .position(x: iconX, y: iconY)
 
-            if !intoApp {
+            if !overApp {
                 wordmark(at: t)
                     .position(x: center.x, y: center.y + iconSize / 2 + width * 0.16)
             }
@@ -158,48 +172,6 @@ struct SplashView: View {
         .frame(width: width, height: height)
     }
 
-    /// The top of the home screen: its real header (same component, title,
-    /// date and bell + gear as `DashboardView`) over flat cards in
-    /// `DashboardCardSurface`'s fill and radius, so the hand-off lands on it.
-    private func appPreview(size: CGSize, opacity: Double) -> some View {
-        let card = Color.white.opacity(0.045)
-        let shape = RoundedRectangle(cornerRadius: 18, style: .continuous)
-        let gap: CGFloat = 12
-        return VStack(spacing: gap) {
-            MADTabHeader(
-                title: "Mile A Day",
-                subtitle: Self.headerDateFormatter.string(from: Date()),
-                actions: [
-                    MADHeaderAction(id: "bell", systemImage: "bell.fill", style: .notification(count: 0)) {},
-                    MADHeaderAction(id: "settings", systemImage: "gearshape.fill") {}
-                ]
-            )
-            Group {
-                shape.fill(card).frame(height: size.height * 0.3)
-                HStack(spacing: gap) {
-                    shape.fill(card)
-                    shape.fill(card)
-                }
-                .frame(height: size.height * 0.13)
-                shape.fill(card).frame(height: size.height * 0.1)
-                Capsule().fill(red).frame(height: 54)
-            }
-            .padding(.horizontal, MADTheme.Spacing.md)
-            .offset(y: CGFloat(1 - opacity) * 20)
-            Spacer(minLength: 0)
-        }
-        .frame(width: size.width, height: size.height, alignment: .top)
-        .opacity(opacity)
-        .allowsHitTesting(false)
-    }
-
-    /// The dashboard's header date format ("Tuesday, July 21").
-    private static let headerDateFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "EEEE, MMMM d"
-        return f
-    }()
-
     private func wordmark(at t: Double) -> some View {
         let title = Self.easeOut(Self.progress(t, Beat.wordmarkIn, Beat.wordmarkIn + Beat.textSettle))
         let line = Self.easeOut(Self.progress(t, Beat.taglineIn, Beat.taglineIn + Beat.textSettle))
@@ -225,12 +197,9 @@ struct SplashView: View {
 
     private func begin() {
         guard start == nil else { return }
-        intoApp = AppStateManager.shared.splashLeadsToMain
+        overApp = AppStateManager.shared.splashOverlay
         start = Date()
 
-        let handoff = reduceMotion
-            ? Self.reducedHandoffDelay
-            : (intoApp ? Self.handoffDelay : Self.wordmarkHandoffDelay)
         if !reduceMotion {
             let tick = UIImpactFeedbackGenerator(style: .light)
             let thump = UIImpactFeedbackGenerator(style: .heavy)
@@ -245,17 +214,39 @@ struct SplashView: View {
                 thump.impactOccurred(intensity: 0.9)
             }
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + handoff) {
-            AppStateManager.shared.completeSplash()
+
+        if overApp {
+            // The dashboard may already be ready; otherwise wait for it, capped.
+            if gate.ready { scheduleReveal() }
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.revealCap) { scheduleReveal() }
+        } else {
+            let handoff = reduceMotion ? Self.reducedHandoffDelay : Self.wordmarkHandoffDelay
+            DispatchQueue.main.asyncAfter(deadline: .now() + handoff) {
+                AppStateManager.shared.completeSplash()
+            }
+        }
+    }
+
+    /// Start the dissolve: never before the icon has landed, once only.
+    private func scheduleReveal() {
+        guard overApp, revealAt == nil, let start else { return }
+        let earliest = start.addingTimeInterval(reduceMotion ? 0.3 : Beat.mergeEnd + 0.05)
+        let at = max(Date(), earliest)
+        revealAt = at
+        let finish = at.timeIntervalSinceNow + Self.revealDuration + 0.05
+        DispatchQueue.main.asyncAfter(deadline: .now() + max(0, finish)) {
+            AppStateManager.shared.finishSplashOverlay()
         }
     }
 
     // MARK: - Easing (pure functions of t)
 
+    private static func clamp(_ x: Double) -> Double { min(max(x, 0), 1) }
+
     /// 0→1 as `t` goes from `from` to `to`, clamped.
     private static func progress(_ t: Double, _ from: Double, _ to: Double) -> Double {
         guard to > from else { return t >= to ? 1 : 0 }
-        return min(max((t - from) / (to - from), 0), 1)
+        return clamp((t - from) / (to - from))
     }
 
     private static func easeOut(_ x: Double) -> Double { 1 - pow(1 - x, 3) }
@@ -268,6 +259,48 @@ struct SplashView: View {
     private static func easeOutBack(_ x: Double) -> Double {
         let c1 = 1.70158, c3 = c1 + 1
         return 1 + c3 * pow(x - 1, 3) + c1 * pow(x - 1, 2)
+    }
+}
+
+// MARK: - Dashboard → splash handshake
+
+/// What the launch splash needs from the real dashboard: that its data has
+/// loaded (`ready`) and where its "Mile A Day" title sits on screen
+/// (`titleAnchor`, global coordinates), so the icon can dissolve into it.
+@MainActor
+final class SplashGate: ObservableObject {
+    static let shared = SplashGate()
+    @Published private(set) var ready = false
+    @Published private(set) var titleAnchor: CGPoint?
+
+    func report(anchor: CGPoint, ready isReady: Bool) {
+        if titleAnchor != anchor { titleAnchor = anchor }
+        if isReady && !ready { ready = true }
+    }
+}
+
+/// Placed behind the dashboard's `MADTabHeader`: reports the title's spot
+/// (16pt in, half the 26pt title line below the header's 8pt top padding)
+/// and whether the home screen has its first data.
+struct SplashRevealBeacon: View {
+    let isReady: Bool
+
+    var body: some View {
+        GeometryReader { geo in
+            let frame = geo.frame(in: .global)
+            let anchor = CGPoint(x: frame.minX + MADTheme.Spacing.md + 13,
+                                 y: frame.minY + MADTheme.Spacing.sm + 16)
+            Color.clear
+                .onAppear { SplashGate.shared.report(anchor: anchor, ready: isReady) }
+                .onChange(of: isReady) { _, ready in
+                    SplashGate.shared.report(anchor: anchor, ready: ready)
+                }
+                .onChange(of: anchor) { _, newAnchor in
+                    SplashGate.shared.report(anchor: newAnchor, ready: isReady)
+                }
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 }
 
