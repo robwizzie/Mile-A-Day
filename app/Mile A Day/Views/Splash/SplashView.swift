@@ -168,6 +168,14 @@ private struct SplashLayerRepresentable: UIViewRepresentable {
             driver?.started(overApp: overApp, reduceMotion: reduceMotion)
         }
         driver.view = view
+        // Backstop: if the splash somehow never gets a size (so never
+        // reports its first frame), build the app anyway after a second
+        // rather than leaving the launch blank until the 8s fallback.
+        if overApp {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                AppStateManager.shared.mountMain()
+            }
+        }
         return view
     }
 
@@ -232,9 +240,12 @@ final class SplashLayerView: UIView {
         iconSize = width * 0.27
         let center = CGPoint(x: size.width / 2, y: size.height * 0.42)
         let scale = traitCollection.displayScale > 0 ? traitCollection.displayScale : 3
-        // Everything starts a beat after the first commit, so even a slow
-        // first frame can't eat the start of the sequence.
-        let t0 = CACurrentMediaTime() + 0.05
+        // Offsets, not clock times: every animation is wrapped by `addTimed`
+        // in a group that starts when this transaction reaches the render
+        // server, so a main thread blocked before the first frame (a
+        // logged-in launch loading data) delays the whole sequence evenly
+        // instead of skipping its opening.
+        let t0: CFTimeInterval = 0
         let total = SplashBeat.mergeEnd
 
         // Background: the app's own gradient.
@@ -423,9 +434,7 @@ final class SplashLayerView: UIView {
             both.animations = [rise, show]
             both.duration = SplashBeat.textSettle
             both.timingFunction = CAMediaTimingFunction(name: .easeOut)
-            both.beginTime = t0 + start
-            both.fillMode = .backwards
-            label.add(both, forKey: "in")
+            addTimed(label, both, at: t0 + start)
         }
     }
 
@@ -486,12 +495,20 @@ final class SplashLayerView: UIView {
         return animation
     }
 
-    /// Add an animation that starts at `t0` and, before then, holds its
-    /// first value (so the model value — the END state — never flashes).
-    private func addTimed(_ target: CALayer, _ animation: CAAnimation, at t0: CFTimeInterval) {
-        animation.beginTime = t0
+    /// Add an animation `offset` seconds into the sequence. It sits in a
+    /// group whose `beginTime` is 0, which Core Animation stamps with the
+    /// moment the transaction is committed to the render server, so every
+    /// layer shares one start: the first frame actually on screen. Before
+    /// its offset it holds its first value (`.backwards`), so the model
+    /// value (the END state) never flashes.
+    private func addTimed(_ target: CALayer, _ animation: CAAnimation, at offset: CFTimeInterval) {
+        animation.beginTime = offset
         animation.fillMode = .backwards
-        target.add(animation, forKey: nil)
+        let clock = CAAnimationGroup()
+        clock.animations = [animation]
+        clock.duration = offset + animation.duration
+        clock.fillMode = .backwards
+        target.add(clock, forKey: nil)
     }
 
     private func fade(layer target: CALayer, from: Float, to: Float, at t0: CFTimeInterval, duration: Double) {

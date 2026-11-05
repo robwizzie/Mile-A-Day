@@ -83,6 +83,11 @@ struct RootView: View {
                 }
             }
         }
+        // Full screen even when the ZStack is empty: while a cold launch holds
+        // the tab view back (`mainMounted == false`) nothing else sizes it,
+        // and an overlay on a zero-size ZStack is zero-size too, so the
+        // splash never drew and never mounted the app.
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         // Returning users: the app is already running underneath; the splash
         // plays on top and dissolves into the real dashboard.
         .overlay {
