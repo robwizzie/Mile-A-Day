@@ -1,0 +1,27 @@
+{
+  "format": 1,
+  "id": "star_glasses",
+  "order": 66,
+  "slot": "eyes",
+  "name": "Star Glasses",
+  "family": "holidays",
+  "unlock": {"badge":"holiday_new_years_day"},
+  "unlock_copy": "Walk your mile on New Year's Day",
+  "holidays": ["new_years_day"],
+  "mood_prop": false,
+  "compact": true,
+  "tier": 5,
+  "auto_eligible": false,
+  "rules": {"hides":[],"clashes":["sweatband"]},
+  "art": {
+    "front": {
+      "ops": [
+        {"d":"M-.145 -.105L-.1068 -.0276L-.0214 -.0152L-.0832 .0451L-.0686 .1302L-.145 .09L-.2214 .1302L-.2068 .0451L-.2686 -.0152L-.1832 -.0276Z","op":"fill","paint":"#FFCF40FF"},
+        {"d":"M-.145 -.105L-.1068 -.0276L-.0214 -.0152L-.0832 .0451L-.0686 .1302L-.145 .09L-.2214 .1302L-.2068 .0451L-.2686 -.0152L-.1832 -.0276Z","join":"round","op":"stroke","paint":"#B8860BFF","w":0.00781},
+        {"d":"M.145 -.105L.1832 -.0276L.2686 -.0152L.2068 .0451L.2214 .1302L.145 .09L.0686 .1302L.0832 .0451L.0214 -.0152L.1068 -.0276Z","op":"fill","paint":"#FFCF40FF"},
+        {"d":"M.145 -.105L.1832 -.0276L.2686 -.0152L.2068 .0451L.2214 .1302L.145 .09L.0686 .1302L.0832 .0451L.0214 -.0152L.1068 -.0276Z","join":"round","op":"stroke","paint":"#B8860BFF","w":0.00781},
+        {"d":"M-.03 .01L.03 .01L.03 .028L-.03 .028Z","op":"fill","paint":"#B8860BFF"}
+      ]
+    }
+  }
+}

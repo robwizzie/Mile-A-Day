@@ -1,0 +1,18 @@
+{
+  "format": 1,
+  "id": "neon",
+  "order": 127,
+  "slot": "bubble",
+  "name": "Neon",
+  "family": "nudges",
+  "unlock": {"badge":"nudge_25"},
+  "unlock_copy": "Send 25 nudges",
+  "holidays": [],
+  "mood_prop": false,
+  "compact": false,
+  "tier": 20,
+  "auto_eligible": true,
+  "rules": {"hides":[],"clashes":[]},
+  "effects": ["bubble:neon"],
+  "art": {}
+}

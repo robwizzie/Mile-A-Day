@@ -1,0 +1,31 @@
+{
+  "format": 1,
+  "id": "mint",
+  "order": 6,
+  "slot": "color",
+  "name": "Mint",
+  "family": "streakDays",
+  "unlock": {"badge":"streak_21"},
+  "unlock_copy": "Reach a 21-day streak",
+  "holidays": [],
+  "mood_prop": false,
+  "compact": true,
+  "tier": 21,
+  "auto_eligible": true,
+  "rules": {"hides":[],"clashes":[]},
+  "palette": {
+    "angular": false,
+    "bodyOpacity": 1,
+    "core": "#CFFFEAFF",
+    "effects": [],
+    "end": [0.5,1],
+    "eye": "#0B3326FF",
+    "glow": "#3EE0A0FF",
+    "inner": ["#F0FFF8FF","#A2F6D2FF"],
+    "innerOpacity": null,
+    "outer": ["#C6FFE6FF","#3FE0A2FF","#0C9A6AFF"],
+    "rim": null,
+    "start": [0.5,0]
+  },
+  "art": {}
+}

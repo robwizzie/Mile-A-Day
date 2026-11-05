@@ -216,179 +216,36 @@ enum FriendActionStyle {
 }
 
 // MARK: - Friend Stats View
-/// The Stats tab's performance grid. Deliberately says nothing about TODAY
-/// or the current streak — the hero ring, its label and the stat tiles above
-/// the tabs already do, and a second copy here is how the two drifted apart.
-/// Lifetime miles likewise lives on the Miles tile, so it isn't repeated.
+/// A friend's Stats-tab performance card: the SAME `ProfileStatsCard` and the
+/// same three numbers (best pace, best day, 7-day average) as your own
+/// profile. Says nothing about today or the current streak: the goal ring
+/// and the stat tiles above the tabs own those.
 struct FriendStatsView: View {
     let user: BackendUser
     let stats: UserStats?
     /// The server's exact last-7-days series (`last_7_day_miles`). The ONLY
-    /// truthful denominator this screen has for an average: "Avg/Day" used to
-    /// divide LIFETIME miles by the CURRENT streak, so anyone with history
-    /// before a break read several times their real daily distance (and a
-    /// zero streak read 0). Nil on an older server ⇒ the tile is omitted.
+    /// truthful denominator for an average: "Avg/Day" once divided LIFETIME
+    /// miles by the CURRENT streak. Nil on an older server ⇒ "—".
     var last7DayMiles: [FriendDayMiles]? = nil
 
-    /// Mean over the seven served days (zero-mile days included, which is
-    /// what makes it an average per DAY rather than per active day).
-    private var sevenDayAverage: Double? {
-        guard let days = last7DayMiles, !days.isEmpty else { return nil }
-        return days.reduce(0) { $0 + $1.miles } / Double(days.count)
-    }
-
     var body: some View {
-        VStack(spacing: MADTheme.Spacing.md) {
-            if let stats = stats {
-                VStack(spacing: MADTheme.Spacing.md) {
-                    HStack {
-                        Image(systemName: "chart.line.uptrend.xyaxis")
-                            .font(.system(size: 16))
-                            .foregroundColor(MADTheme.Colors.madRed)
-                            .accessibilityHidden(true)
-                        Text("Performance")
-                            .font(.system(size: 17, weight: .semibold))
-                            .foregroundColor(MADTheme.Colors.primaryText)
-                        Spacer()
-                    }
-
-                    let average = sevenDayAverage
-                    let columnCount = average == nil ? 2 : 3
-                    LazyVGrid(
-                        columns: Array(repeating: GridItem(.flexible(), spacing: MADTheme.Spacing.sm), count: columnCount),
-                        spacing: MADTheme.Spacing.sm
-                    ) {
-                        FriendStatCard(
-                            title: "Best Pace",
-                            value: formatPace(stats.fastestMilePace),
-                            icon: "timer",
-                            color: MADTheme.Colors.madRed,
-                            subtitle: stats.fastestMilePace > 0 ? "/mi" : nil
-                        )
-                        FriendStatCard(
-                            title: "Best Day",
-                            value: String(format: "%.1f", stats.mostMilesInOneDay),
-                            icon: "calendar",
-                            color: .green,
-                            subtitle: "mi"
-                        )
-                        if let average {
-                            FriendStatCard(
-                                title: "7-Day Avg",
-                                value: String(format: "%.1f", average),
-                                icon: "chart.bar.fill",
-                                color: .purple,
-                                subtitle: "mi"
-                            )
-                        }
-                    }
-                }
-                .padding(MADTheme.Spacing.md)
-                .background(MADTheme.Colors.primaryBackground)
-                .cornerRadius(MADTheme.CornerRadius.large)
-                .shadow(color: Color.black.opacity(0.05), radius: 8, x: 0, y: 2)
-            } else {
-                loadingOrEmptyState
+        if let stats {
+            ProfileStatsCard(stats: [
+                ProfileStat.bestPace(stats.fastestMilePace),
+                ProfileStat.bestDay(stats.mostMilesInOneDay),
+                ProfileStat.sevenDayAverage(last7DayMiles)
+            ])
+        } else {
+            VStack(spacing: MADTheme.Spacing.sm) {
+                ProgressView()
+                    .tint(MADTheme.Colors.madRed)
+                Text("Loading stats…")
+                    .font(.system(size: 13, weight: .medium, design: .rounded))
+                    .foregroundColor(.white.opacity(0.5))
             }
+            .frame(maxWidth: .infinity)
+            .padding(MADTheme.Spacing.xl)
         }
-    }
-    // MARK: - Loading/Empty State
-    private var loadingOrEmptyState: some View {
-        VStack(spacing: MADTheme.Spacing.md) {
-            ProgressView()
-                .scaleEffect(1.2)
-                .tint(MADTheme.Colors.madRed)
-            
-            Text("Loading stats...")
-                .font(MADTheme.Typography.caption)
-                .foregroundColor(MADTheme.Colors.secondaryText)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(MADTheme.Spacing.xl)
-    }
-    
-    // MARK: - Helper Functions
-    private func formatPace(_ pace: TimeInterval) -> String {
-        if pace == 0 {
-            return "N/A"
-        }
-        let minutes = Int(pace)
-        let seconds = Int((pace - Double(minutes)) * 60)
-        return "\(minutes):\(String(format: "%02d", seconds))"
-    }
-}
-
-
-// MARK: - Friend Stat Card
-struct FriendStatCard: View {
-    let title: String
-    let value: String
-    let icon: String
-    let color: Color
-    var subtitle: String? = nil
-    
-    var body: some View {
-        ZStack {
-            // Subtle gradient background like streak card
-            LinearGradient(
-                gradient: Gradient(colors: [
-                    color.opacity(0.08),
-                    color.opacity(0.03)
-                ]),
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            
-            VStack(alignment: .leading, spacing: 8) {
-                // Header label
-                Text(title.uppercased())
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundColor(color)
-                    .tracking(1.2)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
-                
-                // Value — SCALES to fit, never truncates: three cards across
-                // left ~90pt, and a pace ("10:12") came out "10:…". The unit
-                // keeps its size and yields width to the number first.
-                HStack(alignment: .firstTextBaseline, spacing: 3) {
-                    Text(value)
-                        .font(.system(size: 28, weight: .bold, design: .rounded))
-                        .monospacedDigit()
-                        .foregroundColor(MADTheme.Colors.primaryText)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.5)
-                        .layoutPriority(1)
-                    
-                    if let subtitle = subtitle {
-                        Text(subtitle)
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundColor(MADTheme.Colors.secondaryText)
-                            .lineLimit(1)
-                            .fixedSize()
-                    }
-                }
-                
-                Spacer()
-                
-                // Icon at bottom
-                HStack {
-                    Image(systemName: icon)
-                        .font(.system(size: 18))
-                        .foregroundColor(color)
-                    Spacer()
-                }
-            }
-            .padding(MADTheme.Spacing.md)
-        }
-        .frame(maxWidth: .infinity)
-        .frame(height: 120)
-        .cornerRadius(MADTheme.CornerRadius.medium)
-        .overlay(
-            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
-                .stroke(color.opacity(0.3), lineWidth: 1)
-        )
-        .shadow(color: Color.black.opacity(0.05), radius: 8, x: 0, y: 2)
     }
 }
 

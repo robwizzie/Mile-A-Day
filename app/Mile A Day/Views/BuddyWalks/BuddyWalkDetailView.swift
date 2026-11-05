@@ -321,7 +321,7 @@ struct BuddyWalkDetailView: View {
     private var routesCard: some View {
         if !routeParticipants.isEmpty {
             VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
-                ProfileCardLabel(text: routeParticipants.count > 1 ? "THE ROUTES" : "THE ROUTE")
+                ProfileCardLabel(text: routeParticipants.count > 1 ? "The routes" : "The route")
 
                 ZStack(alignment: .topLeading) {
                     if hasDrawableRoute, let lead = leadParticipant {
@@ -460,7 +460,7 @@ struct BuddyWalkDetailView: View {
         let showsPlaces = !walk.mode.isCooperative
         return VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
             HStack {
-                ProfileCardLabel(text: "THE CREW")
+                ProfileCardLabel(text: "The crew")
                 Spacer()
                 Text("\(walk.participants.count)")
                     .font(.system(size: 11, weight: .bold, design: .rounded))
@@ -569,7 +569,7 @@ struct BuddyWalkDetailView: View {
     /// When, how long, what for.
     private var factsCard: some View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
-            ProfileCardLabel(text: "THE WALK")
+            ProfileCardLabel(text: "The walk")
             VStack(spacing: 8) {
                 if let date = walk.date {
                     factRow("Date", date.formatted(.dateTime.weekday(.wide).month(.wide).day().year()))

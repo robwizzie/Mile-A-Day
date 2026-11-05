@@ -1,0 +1,31 @@
+{
+  "format": 1,
+  "id": "arctic",
+  "order": 11,
+  "slot": "color",
+  "name": "Arctic",
+  "family": "streakDays",
+  "unlock": {"badge":"streak_75"},
+  "unlock_copy": "Reach a 75-day streak",
+  "holidays": [],
+  "mood_prop": false,
+  "compact": true,
+  "tier": 75,
+  "auto_eligible": true,
+  "rules": {"hides":[],"clashes":[]},
+  "palette": {
+    "angular": false,
+    "bodyOpacity": 1,
+    "core": "#FFFFFFFF",
+    "effects": [],
+    "end": [0.5,1],
+    "eye": "#10284AFF",
+    "glow": "#BFE6FFFF",
+    "inner": ["#FFFFFFFF","#E8F6FFFF"],
+    "innerOpacity": null,
+    "outer": ["#FFFFFFFF","#D6EEFFFF","#86BCEAFF"],
+    "rim": "#FFFFFFB3",
+    "start": [0.5,0]
+  },
+  "art": {}
+}

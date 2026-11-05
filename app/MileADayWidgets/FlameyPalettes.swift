@@ -15,12 +15,18 @@ import SwiftUI
 /// A colour's effect. `sheen` … `hotCore` live INSIDE his silhouette and are
 /// part of the colour everywhere; `halo` and `embers` are OUTSIDE him and are
 /// the colour's glow — subject to `FlameyGlow` precedence.
-enum FlameyPaletteEffect: Hashable {
+enum FlameyPaletteEffect: Hashable, CaseIterable {
     case sheen, stars, denseStars, lava, ribbons, candy, waves, nebula, hotCore, prismCycle
     case halo, embers
     // Monthly Flames — patterns inside his outline, so every outfit still fits.
     case snowflakes, hearts, clovers, raindrops, rainbow, flowers, sunRays, flagStripes, melon,
          leaves, pumpkinRibs, knit, stringLights
+
+    /// By the name a skin file uses (the case name: "stars", "denseStars").
+    init?(name: String) {
+        guard let e = Self.allCases.first(where: { String(describing: $0) == name }) else { return nil }
+        self = e
+    }
 }
 
 struct FlameyPalette: Hashable {
@@ -51,182 +57,36 @@ struct FlameyPalette: Hashable {
     }
 
     /// Classic returns nil: the figure's own lifecycle palette (it burns
-    /// down through the day), byte-identical to before the wardrobe.
+    /// down through the day), byte-identical to before the wardrobe. Every
+    /// other colour is its skin's `palette` (backend/flamey-skins).
     static func palette(for item: FlameyItem) -> FlameyPalette? {
-        func h(_ v: UInt32, _ o: Double = 1) -> Color { hex(v, o) }
-        switch item {
-        case .classic: return nil
-        // MARK: Solids
-        case .ember:
-            return FlameyPalette(outer: [h(0xFF9A6B), h(0xF03A1C), h(0x9A1206)],
-                                 inner: [h(0xFFE0C8), h(0xFF8052)], glow: h(0xFF3D1A), core: h(0xFFD0B8),
-                                 eye: h(0x3A0A04))
-        case .lime:
-            return FlameyPalette(outer: [h(0xF0FFA8), h(0xA8E02A), h(0x4E8C06)],
-                                 inner: [h(0xFBFFE6), h(0xD6F77E)], glow: h(0xB4F03A), core: h(0xEFFFC4),
-                                 eye: h(0x1E3300))
-        case .ruby:
-            return FlameyPalette(outer: [h(0xFF7A96), h(0xE3194B), h(0x8A0A2C)],
-                                 inner: [h(0xFFD2DC), h(0xFF7593)], glow: h(0xFF2D55), core: h(0xFFC2D0),
-                                 eye: h(0x3A0414))
-        case .lavender:
-            return FlameyPalette(outer: [h(0xF6EEFF), h(0xCDB6F4), h(0x9477CF)],
-                                 inner: [h(0xFFFFFF), h(0xE6DAFF)], glow: h(0xC7AEF8), core: h(0xF4ECFF),
-                                 eye: h(0x2A1A48), rim: Color.white.opacity(0.6))
-        case .sunflower:
-            return FlameyPalette(outer: [h(0xFFF27A), h(0xFFD000), h(0xFF9500)],
-                                 inner: [h(0xFFFDE8), h(0xFFEE70)], glow: h(0xFFC800), core: h(0xFFF8C8),
-                                 eye: h(0x3A1E00))
-        case .mint:
-            return FlameyPalette(outer: [h(0xC6FFE6), h(0x3FE0A2), h(0x0C9A6A)],
-                                 inner: [h(0xF0FFF8), h(0xA2F6D2)], glow: h(0x3EE0A0), core: h(0xCFFFEA),
-                                 eye: h(0x0B3326))
-        case .sapphire:
-            return FlameyPalette(outer: [h(0x9CC8FF), h(0x2F6BFF), h(0x1230A8)],
-                                 inner: [h(0xE8F4FF), h(0x93C7FF)], glow: h(0x3D7BFF), core: h(0xCFE6FF),
-                                 eye: h(0x0A1640))
-        case .violet:
-            return FlameyPalette(outer: [h(0xDDB6FF), h(0x9B4DFF), h(0x541CB0)],
-                                 inner: [h(0xF5EAFF), h(0xCCA3FF)], glow: h(0x9B4DFF), core: h(0xE8D6FF),
-                                 eye: h(0x220A45))
-        case .rose:
-            return FlameyPalette(outer: [h(0xFFC8E0), h(0xFF5FA2), h(0xC21A69)],
-                                 inner: [h(0xFFEEF6), h(0xFFA3CC)], glow: h(0xFF5FA2), core: h(0xFFD8EA),
-                                 eye: h(0x3D0A22))
-        case .teal:
-            return FlameyPalette(outer: [h(0xA6F4F2), h(0x17C0BE), h(0x08707C)],
-                                 inner: [h(0xE6FFFE), h(0x86EBE8)], glow: h(0x19C2C0), core: h(0xCFFFFD),
-                                 eye: h(0x06302F))
-        case .arctic:
-            return FlameyPalette(outer: [.white, h(0xD6EEFF), h(0x86BCEA)],
-                                 inner: [.white, h(0xE8F6FF)], glow: h(0xBFE6FF), core: .white,
-                                 eye: h(0x10284A), rim: Color.white.opacity(0.7))
-        case .midnight:
-            return FlameyPalette(outer: [h(0x4557C0), h(0x1B2470), h(0x0A0F36)],
-                                 inner: [h(0xF0FAFF), h(0x76D3FF)], glow: h(0x4A6BFF), core: h(0x9FE2FF),
-                                 eye: h(0x0A1030), rim: h(0x9FC6FF, 0.55), innerOpacity: 1)
-        case .phantom:
-            return FlameyPalette(outer: [h(0xF2FFFB), h(0xB8F0E6), h(0x6FA8C8)],
-                                 inner: [.white, h(0xE0FBF4)], glow: h(0x9FFFE0), core: h(0xE8FFF8),
-                                 eye: h(0x10283A), rim: Color.white.opacity(0.8), bodyOpacity: 0.74)
-        // MARK: Mile A Day+
-        case .electric:
-            return FlameyPalette(outer: [h(0x9BF6FF), h(0x3A8BFF), h(0x5B2BFF), h(0x1A0B6E)],
-                                 inner: [h(0xF4FDFF), h(0x9FE8FF)], glow: h(0x4F8BFF), core: h(0xD8F6FF),
-                                 eye: h(0x0B0838), rim: h(0xB8F0FF, 0.7), effects: [.sheen, .halo])
-        case .roseGold:
-            return FlameyPalette(outer: [h(0xFFE3D6), h(0xF0A58C), h(0xC86E62), h(0x6E3233)],
-                                 inner: [h(0xFFF6F0), h(0xFFCDB8)], glow: h(0xF29A86), core: h(0xFFE6DA),
-                                 eye: h(0x3A1618), rim: h(0xFFE9DE, 0.8), effects: [.sheen],
-                                 start: .topLeading, end: .bottom)
-        case .obsidian:
-            return FlameyPalette(outer: [h(0x5A5A66), h(0x26262E), h(0x0C0C10)],
-                                 inner: [h(0xFFD9A0), h(0xFF7A2E)], glow: h(0xFF6A1F), core: h(0xFFC27A),
-                                 eye: h(0xFFB15C), rim: h(0x8A8A99, 0.6), effects: [.hotCore, .embers])
-        case .tropic:
-            return FlameyPalette(outer: [h(0xFFF27A), h(0x37E0B5), h(0x14A6C8), h(0xFF5FA2)],
-                                 inner: [h(0xFFFFF2), h(0xB8FFE6)], glow: h(0x2FD9C0), core: h(0xE8FFF6),
-                                 eye: h(0x08303A), effects: [.waves])
-        // MARK: Monthly Flames
-        case .frostbite:
-            return FlameyPalette(outer: [h(0xF4FCFF), h(0xA8DDF7), h(0x4F9FD6), h(0x1F5E9E)],
-                                 inner: [.white, h(0xD8F3FF)], glow: h(0x8FD8FF), core: h(0xF4FDFF),
-                                 eye: h(0x0E2A44), rim: Color.white.opacity(0.85), effects: [.snowflakes, .sheen])
-        case .sweetheart:
-            return FlameyPalette(outer: [h(0xFFC8DA), h(0xFF5C8A), h(0xD81B4E), h(0x7A0A2A)],
-                                 inner: [h(0xFFF0F5), h(0xFFB3C9)], glow: h(0xFF5C8A), core: h(0xFFE3EC),
-                                 eye: h(0x3A0614), rim: h(0xFFE0EA, 0.7), effects: [.hearts])
-        case .luckyClover:
-            return FlameyPalette(outer: [h(0xD2F8A8), h(0x4CC35A), h(0x168A3A), h(0x0B4A22)],
-                                 inner: [h(0xF4FFE8), h(0xB8F0A0)], glow: h(0x3FD07A), core: h(0xFFF3B0),
-                                 eye: h(0x082A12), rim: h(0xFFE58A, 0.6), effects: [.clovers])
-        case .aprilShowers:
-            return FlameyPalette(outer: [h(0xE2F0FF), h(0x8FB8E8), h(0x5A7FC0), h(0x2C3F7A)],
-                                 inner: [.white, h(0xCFE6FF)], glow: h(0x7FB2FF), core: h(0xF0F8FF),
-                                 eye: h(0x101E3A), rim: Color.white.opacity(0.7), effects: [.raindrops, .rainbow])
-        case .wildflower:
-            return FlameyPalette(outer: [h(0xEEFFC4), h(0x8FD86A), h(0x3E9E4A), h(0x1E5A2E)],
-                                 inner: [h(0xFFFDE8), h(0xD8F7A8)], glow: h(0x8FE07A), core: h(0xFFF6C8),
-                                 eye: h(0x14301A), rim: h(0xFFFDE8, 0.6), effects: [.flowers])
-        case .sunburst:
-            return FlameyPalette(outer: [h(0xFFF8C0), h(0xFFD23A), h(0xFF9A1A), h(0xE0560A)],
-                                 inner: [.white, h(0xFFF0A0)], glow: h(0xFFC83A), core: .white,
-                                 eye: h(0x3A2000), rim: h(0xFFFBE0, 0.8), effects: [.sunRays, .sheen])
-        case .firecracker:
-            return FlameyPalette(outer: [h(0xFF7A7A), h(0xE0202E), h(0x9A0A1E)],
-                                 inner: [.white, h(0xFFD6D6)], glow: h(0xFF3B3B), core: h(0xFFF1F1),
-                                 eye: h(0x1A0610), rim: Color.white.opacity(0.75), effects: [.flagStripes])
-        case .watermelon:
-            return FlameyPalette(outer: [h(0xFFB0C0), h(0xFF5674), h(0xE02A4C)],
-                                 inner: [h(0xFFE9EE), h(0xFFA3B6)], glow: h(0xFF5C7A), core: h(0xFFEFF2),
-                                 eye: h(0x1A0A0C), rim: h(0xFFE9EE, 0.6), effects: [.melon])
-        case .fallingLeaves:
-            return FlameyPalette(outer: [h(0xFFD884), h(0xF0902A), h(0xC24A14), h(0x6E1E0A)],
-                                 inner: [h(0xFFF2D8), h(0xFFC27A)], glow: h(0xFF8A2A), core: h(0xFFE9B8),
-                                 eye: h(0x2A0E04), rim: h(0xFFE0A8, 0.6), effects: [.leaves])
-        case .jackOLantern:
-            return FlameyPalette(outer: [h(0xFFB347), h(0xF07B1A), h(0xC2500A), h(0x6E2A04)],
-                                 inner: [h(0xFFF4A8), h(0xFFC247)], glow: h(0xFF8A1A), core: h(0xFFE07A),
-                                 eye: h(0x2A0E02), rim: h(0xFFD08A, 0.5), effects: [.pumpkinRibs, .hotCore, .embers])
-        case .sweaterWeather:
-            return FlameyPalette(outer: [h(0xF08080), h(0xC0384A), h(0x7A1A2A)],
-                                 inner: [h(0xFFF4E6), h(0xF7CDB0)], glow: h(0xE0505A), core: h(0xFFF4E6),
-                                 eye: h(0x2A0A0E), rim: h(0xFFF4E6, 0.6), effects: [.knit])
-        case .twinkleLights:
-            return FlameyPalette(outer: [h(0x9BE8AE), h(0x2E9E5A), h(0x0E5A34), h(0x05301C)],
-                                 inner: [h(0xF4FFF4), h(0xBFF0C8)], glow: h(0x5FE08A), core: h(0xFFF6C8),
-                                 eye: h(0x041A0E), rim: h(0xFFE58A, 0.55), effects: [.stringLights, .halo])
-        // MARK: Gradients
-        case .sunset:
-            return FlameyPalette(outer: [h(0xFFE07A), h(0xFF7A45), h(0xE8386F), h(0x6E2A8C)],
-                                 inner: [h(0xFFF5D1), h(0xFFB478)], glow: h(0xFF6A5C))
-        case .aurora:
-            return FlameyPalette(outer: [h(0x8CFFBE), h(0x2FD3B5), h(0x4F7BFF), h(0x9B4DFF)],
-                                 inner: [h(0xF2FFF8), h(0xA6F5D6)], glow: h(0x4FD9C0), core: h(0xD6FFEF),
-                                 eye: h(0x10203A))
-        case .ocean:
-            return FlameyPalette(outer: [h(0xB6FFF2), h(0x22D3C8), h(0x137FC0), h(0x0A2A66)],
-                                 inner: [h(0xEFFFFC), h(0x9EF0EA)], glow: h(0x22C8D0), core: h(0xCFFFF8),
-                                 eye: h(0x05203A), effects: [.waves])
-        case .lavaLamp:
-            return FlameyPalette(outer: [h(0xFF9A4A), h(0xE8386F), h(0x6E1A5C)],
-                                 inner: [h(0xFFEDB8), h(0xFFB24D)], glow: h(0xFF5A6A), effects: [.lava])
-        case .galaxy:
-            return FlameyPalette(outer: [h(0x9C7BFF), h(0x4B22B8), h(0x1A0A4A)],
-                                 inner: [h(0xF6EEFF), h(0xBFA3FF)], glow: h(0x7E5BFF), core: h(0xE0D2FF),
-                                 eye: h(0x1A0A40), rim: h(0xC9B6FF, 0.5), effects: [.stars])
-        case .candy:
-            return FlameyPalette(outer: [h(0xFFB8E8), h(0xC9A6FF), h(0x8ED8FF)],
-                                 inner: [.white, h(0xFFDDF2)], glow: h(0xFF9FDC), core: h(0xFFE6F6),
-                                 eye: h(0x3A1438), effects: [.candy], start: .topLeading, end: .bottomTrailing)
-        case .northernLights:
-            return FlameyPalette(outer: [h(0x2A3F8F), h(0x121A4F), h(0x070B26)],
-                                 inner: [h(0xEDFFF6), h(0x8DFFC8)], glow: h(0x38E6A0), core: h(0xB8FFDD),
-                                 eye: h(0x0A1A20), rim: h(0x8DFFC8, 0.5), effects: [.ribbons], innerOpacity: 1)
-        // MARK: Legendary
-        case .gold:
-            return FlameyPalette(outer: [h(0xFFF4C0), h(0xF2C230), h(0xB67A08), h(0x5E3A00)],
-                                 inner: [h(0xFFFDEB), h(0xFFE08A)], glow: h(0xFFC83A), core: h(0xFFF3B0),
-                                 eye: h(0x3A2400), rim: h(0xFFF6C8, 0.85), effects: [.sheen, .embers],
-                                 start: .topLeading, end: .bottom)
-        case .prism:
-            return FlameyPalette(outer: [h(0xFF5A5A), h(0xFFB03A), h(0xFFE94A), h(0x4ADE80), h(0x38BDF8),
-                                         h(0x8B5CF6), h(0xF472B6)],
-                                 inner: [.white, h(0xFFF0FA)], glow: .white, core: .white, eye: h(0x2A1030),
-                                 rim: Color.white.opacity(0.75), effects: [.sheen, .prismCycle, .halo], angular: true)
-        case .cosmic:
-            return FlameyPalette(outer: [h(0x3A1A80), h(0x160A40), h(0x05030F)],
-                                 inner: [.white, h(0xCDB8FF)], glow: h(0x8E6BFF), core: h(0xD8C8FF),
-                                 eye: h(0x14082E), rim: h(0xD6C4FF, 0.65), effects: [.denseStars, .nebula, .halo],
-                                 innerOpacity: 1)
-        case .eternal:
-            return FlameyPalette(outer: [.white, h(0xFFF8DC), h(0xFFDE8A), h(0xFFB547)],
-                                 inner: [.white, .white], glow: h(0xFFE8A8), core: .white,
-                                 eye: h(0x3A2410), rim: Color.white.opacity(0.9), effects: [.halo, .embers, .hotCore],
-                                 innerOpacity: 1)
-        default:
-            return nil
+        item.skin?.flameyPalette
+    }
+
+}
+
+extension FlameyPalette {
+    /// A palette from a skin file's `palette` object (field names as here,
+    /// colours "#RRGGBBAA", points [x, y], effects by name).
+    init?(json: [String: Any]) {
+        func color(_ k: String) -> Color? { (json[k] as? String).map(FlameySkinLayer.color) }
+        func colors(_ k: String) -> [Color] { (json[k] as? [String] ?? []).map(FlameySkinLayer.color) }
+        func point(_ k: String) -> UnitPoint? {
+            guard let v = json[k] as? [Double], v.count == 2 else { return nil }
+            return UnitPoint(x: v[0], y: v[1])
         }
+        let outer = colors("outer"), inner = colors("inner")
+        guard !outer.isEmpty, !inner.isEmpty, let glow = color("glow") else { return nil }
+        self.init(outer: outer, inner: inner, glow: glow)
+        if let c = color("core") { core = c }
+        eye = color("eye")
+        rim = color("rim")
+        effects = Set((json["effects"] as? [String] ?? []).compactMap(FlameyPaletteEffect.init(name:)))
+        angular = json["angular"] as? Bool ?? false
+        if let p = point("start") { start = p }
+        if let p = point("end") { end = p }
+        bodyOpacity = (json["bodyOpacity"] as? NSNumber)?.doubleValue ?? 1
+        innerOpacity = (json["innerOpacity"] as? NSNumber)?.doubleValue
     }
 }
 
@@ -672,20 +532,6 @@ enum FlameyMonthlyFX {
     }
 }
 
-// MARK: - Costume skins
-
-extension FlameyPalette {
-    /// The Skeleton Suit is a whole-body onesie: his arms and legs are its
-    /// black sleeves (never his flame colour, in any pose or animation), the
-    /// hood under the suit art is the same black, and he glows bone-green.
-    static let skeletonSuit = FlameyPalette(
-        outer: [hex(0x3A3646), hex(0x2A2734), hex(0x1A1822)],
-        inner: [hex(0x2A2734), hex(0x1A1822)],
-        glow: hex(0xBEFFC8),
-        eye: hex(0x2B2734),
-        rim: hex(0xC8BEFF, 0.35))
-}
-
 extension FlameyLook {
     /// The palette his FIGURE is drawn in — body, arms, legs and glow: his
     /// colour, unless a costume skins all of him. Every surface that builds
@@ -693,7 +539,11 @@ extension FlameyLook {
     /// `FlameyPalette.palette(for: color)`, so a suit can't leave flame-
     /// coloured limbs poking out of it.
     var figurePalette: FlameyPalette? {
-        if wears(.skeletonSuit) { return FlameyPalette.skeletonSuit }
+        // A costume that skins all of him (the skeleton suit) says so in its
+        // skin's `rules.figure_palette`.
+        for item in items where item.slot != .color {
+            if let p = item.skin?.figurePalette { return p }
+        }
         return FlameyPalette.palette(for: color)
     }
 }

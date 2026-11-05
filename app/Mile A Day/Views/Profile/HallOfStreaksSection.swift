@@ -180,7 +180,7 @@ struct HallOfStreaksSection: View {
 
     private func header(_ list: Shortlist) -> some View {
         HStack(spacing: MADTheme.Spacing.sm) {
-            ProfileCardLabel(text: "HALL OF STREAKS")
+            ProfileCardLabel(text: "Hall of Streaks")
             Spacer()
             // Says WHY short runs are missing, in three characters. Without it
             // a user who knows they have a dozen 2-day streaks just sees them

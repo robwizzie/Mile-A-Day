@@ -1,0 +1,31 @@
+{
+  "format": 1,
+  "id": "midnight",
+  "order": 12,
+  "slot": "color",
+  "name": "Midnight",
+  "family": "streakDays",
+  "unlock": {"badge":"streak_90"},
+  "unlock_copy": "Reach a 90-day streak",
+  "holidays": [],
+  "mood_prop": false,
+  "compact": true,
+  "tier": 90,
+  "auto_eligible": true,
+  "rules": {"hides":[],"clashes":[]},
+  "palette": {
+    "angular": false,
+    "bodyOpacity": 1,
+    "core": "#9FE2FFFF",
+    "effects": [],
+    "end": [0.5,1],
+    "eye": "#0A1030FF",
+    "glow": "#4A6BFFFF",
+    "inner": ["#F0FAFFFF","#76D3FFFF"],
+    "innerOpacity": 1,
+    "outer": ["#4557C0FF","#1B2470FF","#0A0F36FF"],
+    "rim": "#9FC6FF8C",
+    "start": [0.5,0]
+  },
+  "art": {}
+}

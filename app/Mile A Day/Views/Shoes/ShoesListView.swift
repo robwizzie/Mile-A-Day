@@ -20,9 +20,9 @@ struct ShoesListView: View {
                     if !store.active.isEmpty {
                         ShoeDefaultsCard()
                     }
-                    section("IN ROTATION", shoes: store.active)
+                    section("In rotation", shoes: store.active)
                     if !store.retired.isEmpty {
-                        section("RETIRED", shoes: store.retired)
+                        section("Retired", shoes: store.retired)
                     }
                     Text("Only you can see your shoes and their mileage.")
                         .font(MADTheme.Typography.caption)

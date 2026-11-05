@@ -178,17 +178,6 @@ private struct ProfileBannerGlyph: View {
     }
 }
 
-/// The small tracked wordmark in the banner's top-left corner.
-struct ProfileWordmark: View {
-    var body: some View {
-        Text("MILE A DAY")
-            .font(.system(size: 11, weight: .heavy, design: .rounded))
-            .tracking(2.2)
-            .foregroundColor(.white.opacity(0.85))
-            .accessibilityHidden(true)
-    }
-}
-
 // MARK: - Goal ring
 
 /// Avatar inside today's goal ring — the same colour language as the
@@ -261,46 +250,10 @@ struct GoalRingAvatar<Avatar: View>: View {
     }
 }
 
-/// "88% TO GOAL" / "GOAL DONE" — the chip tucked under the ring. Nothing when
-/// progress is unknown.
-struct GoalRingLabel: View {
-    let progress: Double?
-    let isComplete: Bool
-    /// The day a token is carrying. Its chip REPLACES the percentage rather
-    /// than sitting beside it: "0% TO GOAL" over a streak that just went up
-    /// is the contradiction this whole state exists to remove.
-    var savedToday: CoveredDate? = nil
-
-    var body: some View {
-        if isComplete {
-            chip("GOAL DONE", icon: "checkmark", color: .green)
-        } else if let savedToday {
-            SavedDayStyle.todayChip(for: savedToday)
-        } else if let progress {
-            let percent = Int((max(0, min(1, progress)) * 100).rounded(.down))
-            chip("\(percent)% TO GOAL", icon: nil, color: .orange)
-        }
-    }
-
-    private func chip(_ text: String, icon: String?, color: Color) -> some View {
-        HStack(spacing: 3) {
-            if let icon {
-                Image(systemName: icon)
-                    .font(.system(size: 8, weight: .black))
-            }
-            Text(text)
-                .font(.system(size: 9, weight: .black, design: .rounded))
-                .tracking(0.6)
-                .monospacedDigit()
-        }
-        .foregroundColor(.black.opacity(0.88))
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-        .background(Capsule().fill(color))
-        .overlay(Capsule().strokeBorder(Color.black.opacity(0.5), lineWidth: 1.5))
-        .fixedSize()
-    }
-}
+// The ring is the ONE place a profile says how today is going. A chip under
+// it ("88% TO GOAL" / "GOAL DONE") and a green check on the Streak tile said
+// the same thing again; both are gone. VoiceOver reads the state off the
+// avatar button (`ProfileHero.goalAccessibilityValue`).
 
 // MARK: - Next milestone
 
@@ -329,48 +282,6 @@ enum MileMilestones {
         let top = ladder.last ?? 0
         let step: Double = 500
         return max(top, floor(miles / step) * step) + step
-    }
-}
-
-/// "NEXT TOTAL MILES MILESTONE · 1,000 mi · 192 to go", right-aligned in the banner.
-struct NextMilestoneChip: View {
-    let totalMiles: Double
-    /// The catalog's mile rungs when loaded; empty falls back to the seed ladder.
-    var thresholds: [Double] = []
-    var alignment: HorizontalAlignment = .trailing
-
-    private var target: Double { MileMilestones.next(after: totalMiles, thresholds: thresholds) }
-    private var toGo: Int { max(1, Int((target - totalMiles).rounded(.up))) }
-
-    var body: some View {
-        VStack(alignment: alignment, spacing: 2) {
-            // Says MILES and MEDAL so it can't be read as the dashboard's
-            // streak milestone — the two are different ladders on purpose.
-            HStack(spacing: 4) {
-                Image(systemName: "medal.fill")
-                    .font(.system(size: 9, weight: .bold))
-                Text("NEXT TOTAL MILES MILESTONE")
-                    .font(.system(size: 9, weight: .heavy, design: .rounded))
-                    .tracking(1.2)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-            }
-            .foregroundColor(.white.opacity(0.7))
-            HStack(spacing: 4) {
-                Text("\(Int(target.inDisplayUnit).formatted(.number.grouping(.automatic))) \(DistanceUnits.current.abbreviation)")
-                    .font(.system(size: 13, weight: .black, design: .rounded))
-                    .foregroundColor(.white)
-                Text("·")
-                    .font(.system(size: 13, weight: .heavy, design: .rounded))
-                    .foregroundColor(.white.opacity(0.45))
-                Text("\(toGo.formatted(.number.grouping(.automatic))) to go")
-                    .font(.system(size: 13, weight: .heavy, design: .rounded))
-                    .foregroundColor(.white.opacity(0.82))
-            }
-            .monospacedDigit()
-        }
-        .shadow(color: .black.opacity(0.4), radius: 4, y: 1)
-        .accessibilityElement(children: .combine)
     }
 }
 
@@ -403,10 +314,21 @@ struct ProfileHero<Avatar: View, TopBar: View>: View {
     @ViewBuilder let topBar: () -> TopBar
 
     private let gutter = MADTheme.Spacing.screenGutter
-    /// Room under the banner for the hanging half of the ring plus the label
-    /// chip tucked under it.
+    /// Room under the banner for the hanging half of the ring, plus a little
+    /// air before the identity block.
     private var hang: CGFloat { GoalRingAvatar<Avatar>.ringDiameter(size: avatarSize) / 2 }
-    private let labelReserve: CGFloat = 14
+    private let labelReserve: CGFloat = 6
+
+    /// What the ring shows, for VoiceOver (the ring has no text of its own).
+    private var goalAccessibilityValue: String {
+        if goalComplete { return "Today's goal done" }
+        if goalSavedToday != nil { return "Today is saved by a streak token" }
+        if let goalProgress {
+            let percent = Int((max(0, min(1, goalProgress)) * 100).rounded(.down))
+            return "\(percent) percent of today's goal"
+        }
+        return ""
+    }
 
     var body: some View {
         ZStack(alignment: .topLeading) {
@@ -417,11 +339,9 @@ struct ProfileHero<Avatar: View, TopBar: View>: View {
                 .padding(.horizontal, gutter)
                 .padding(.top, topInset + 10)
         }
-        // No milestone chip on the banner any more: lifetime miles already
-        // reads on the Miles tile and on the Total Miles screen, and a third
-        // copy in the banner was clutter. `totalMiles`/`milestoneThresholds`
-        // stay in the API so callers keep compiling; `NextMilestoneChip`
-        // stays available for any surface that wants the rung on its own.
+        // No milestone chip on the banner: lifetime miles reads on the Miles
+        // tile and the Total Miles screen's Next Medal. `totalMiles` /
+        // `milestoneThresholds` stay in the API so callers keep compiling.
         .padding(.bottom, hang + labelReserve)
         .overlay(alignment: .bottomLeading) {
             Button {
@@ -439,15 +359,8 @@ struct ProfileHero<Avatar: View, TopBar: View>: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Profile photo")
+            .accessibilityValue(goalAccessibilityValue)
             .allowsHitTesting(onTapAvatar != nil)
-            .overlay(alignment: .bottom) {
-                GoalRingLabel(
-                    progress: goalProgress,
-                    isComplete: goalComplete,
-                    savedToday: goalSavedToday
-                )
-                .offset(y: 8)
-            }
             .padding(.leading, gutter)
             .padding(.bottom, labelReserve)
         }
@@ -512,20 +425,14 @@ struct ProfileIdentityBlock: View {
 
 // MARK: - Stat tiles
 
-/// Streak · Miles · Friends as three tiles. Streak wears the brand red; the
-/// other two stay neutral. Friends is tappable through to the friends list.
+/// Streak · Miles · Friends as three flat tiles. They don't restate today:
+/// the goal ring above owns "done today" (a green tile with a check, and a
+/// blue saved tile, used to say it again). Friends opens an A–Z list.
 struct ProfileStatTiles<FriendsDestination: View>: View {
     let streak: Int
     let totalMiles: Double
     /// nil renders a placeholder dash until the count loads.
     let friendCount: Int?
-    /// Today's mile is in: the streak tile turns green (the dashboard's
-    /// done-colour) instead of the brand red it wears while the day is open.
-    var streakDoneToday: Bool = false
-    /// A token is carrying today. The tile wears SavedDayStyle's blue and a
-    /// shield — never green, which would claim miles that weren't run, and
-    /// never the open-day red, which would contradict the number above it.
-    var streakSavedToday: CoveredDate? = nil
     /// When set, the Miles tile is a button (own profile → Total Miles
     /// detail). Nil keeps it a plain tile, as on a friend's profile.
     var onTapMiles: (() -> Void)? = nil
@@ -533,28 +440,22 @@ struct ProfileStatTiles<FriendsDestination: View>: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            tile(
-                label: "STREAK",
-                value: "\(streak)",
-                accent: streakAccent,
-                trailingIcon: streakIcon
-            )
+            tile(label: "Streak", value: "\(streak)", labelColor: MADTheme.Colors.madRed)
             if let onTapMiles {
                 Button {
                     MADHaptics.tap()
                     onTapMiles()
                 } label: {
-                    tile(label: DistanceUnits.current.plural.uppercased(), value: milesText, accent: nil, chevron: true)
+                    tile(label: DistanceUnits.current.plural.capitalized, value: milesText, chevron: true)
                 }
                 .buttonStyle(.plain)
             } else {
-                tile(label: DistanceUnits.current.plural.uppercased(), value: milesText, accent: nil)
+                tile(label: DistanceUnits.current.plural.capitalized, value: milesText)
             }
             NavigationLink(destination: friendsDestination()) {
                 tile(
-                    label: friendCount == 1 ? "FRIEND" : "FRIENDS",
+                    label: friendCount == 1 ? "Friend" : "Friends",
                     value: friendCount.map { $0.formatted(.number.grouping(.automatic)) } ?? "—",
-                    accent: nil,
                     chevron: true
                 )
             }
@@ -563,38 +464,18 @@ struct ProfileStatTiles<FriendsDestination: View>: View {
         .animation(.easeInOut(duration: 0.2), value: friendCount)
     }
 
-    /// Done outranks saved: a covered day the owner then ran is a green day,
-    /// and the server has already handed the token back by the time we draw.
-    private var streakAccent: Color {
-        if streakDoneToday { return .green }
-        if streakSavedToday != nil { return SavedDayStyle.tint }
-        return MADTheme.Colors.madRed
-    }
-
-    private var streakIcon: String? {
-        if streakDoneToday { return "checkmark.circle.fill" }
-        if let saved = streakSavedToday { return SavedDayStyle.icon(for: saved.kind) }
-        return nil
-    }
-
     private func tile(
         label: String,
         value: String,
-        accent: Color?,
-        chevron: Bool = false,
-        trailingIcon: String? = nil
+        labelColor: Color = .white.opacity(0.55),
+        chevron: Bool = false
     ) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 4) {
-                Text(label)
-                    .font(.system(size: 9, weight: .heavy, design: .rounded))
-                    .tracking(1.2)
-                if let trailingIcon {
-                    Image(systemName: trailingIcon)
-                        .font(.system(size: 9, weight: .bold))
-                }
-            }
-            .foregroundColor(accent ?? .white.opacity(0.55))
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label)
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .foregroundColor(labelColor)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
             HStack(spacing: 4) {
                 Text(value)
                     .font(.system(size: 24, weight: .black, design: .rounded))
@@ -614,14 +495,7 @@ struct ProfileStatTiles<FriendsDestination: View>: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
-        .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(accent?.opacity(0.14) ?? Color.white.opacity(0.05))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .strokeBorder(accent?.opacity(0.28) ?? Color.white.opacity(0.08), lineWidth: 1)
-                )
-        )
+        .background(DashboardCardSurface(style: .fun))
         .contentShape(Rectangle())
     }
 
@@ -697,18 +571,12 @@ struct ProfileTabBar<Tag: Hashable>: View {
 
 // MARK: - Activity-tab card chrome
 
-/// The flat card every Activity-tab block sits on — `Last7DaysChart`'s look,
-/// shared so the tab reads as one set rather than a mix of glass and flat.
+/// The flat card every profile block sits on: the Dashboard's one surface
+/// (`DashboardCardSurface`, rimless, one radius), so a profile and the home
+/// screen read as one app. Colour lives in the content, never the chrome.
 struct ProfileCardStyle: ViewModifier {
     func body(content: Content) -> some View {
-        content.background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Color.white.opacity(0.04))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
-                )
-        )
+        content.background(DashboardCardSurface(style: .fun))
     }
 }
 
@@ -716,15 +584,133 @@ extension View {
     func profileCard() -> some View { modifier(ProfileCardStyle()) }
 }
 
-/// The caps label at the top of every Activity-tab card ("LAST 7 DAYS",
-/// "HALL OF STREAKS", "RECENT WORKOUTS"…).
+/// The sentence-case label at the top of every profile card ("Last 7 days",
+/// "Hall of Streaks", "Recent workouts"…). Callers pass sentence case; no
+/// tracked capitals.
 struct ProfileCardLabel: View {
     let text: String
 
     var body: some View {
         Text(text)
-            .font(.system(size: 11, weight: .heavy, design: .rounded))
-            .tracking(1.2)
-            .foregroundColor(.white.opacity(0.5))
+            .font(.system(size: 13, weight: .semibold, design: .rounded))
+            .foregroundColor(.white.opacity(0.6))
+    }
+}
+
+// MARK: - Stats tab
+
+/// One number on the Stats tab's performance card.
+struct ProfileStat: Identifiable {
+    let label: String
+    let value: String
+    var unit: String? = nil
+    /// Opens the detail screen behind this number (own profile only).
+    var action: (() -> Void)? = nil
+
+    var id: String { label }
+
+    // The SAME three numbers on both profiles, built the same way, so your
+    // own Stats tab and a friend's can't drift apart again.
+
+    /// Fastest mile, `pace` in minutes per mile (0 = none yet).
+    static func bestPace(_ pace: TimeInterval, action: (() -> Void)? = nil) -> ProfileStat {
+        guard pace > 0 else { return ProfileStat(label: "Best pace", value: "—", action: action) }
+        let shown = pace / DistanceUnits.current.perMile
+        let minutes = Int(shown)
+        let seconds = min(59, Int(((shown - Double(minutes)) * 60).rounded()))
+        return ProfileStat(
+            label: "Best pace",
+            value: String(format: "%d:%02d", minutes, seconds),
+            unit: DistanceUnits.current.paceSuffix,
+            action: action
+        )
+    }
+
+    /// Most miles in one day.
+    static func bestDay(_ miles: Double, action: (() -> Void)? = nil) -> ProfileStat {
+        ProfileStat(
+            label: "Best day",
+            value: String(format: "%.1f", miles.inDisplayUnit),
+            unit: DistanceUnits.current.abbreviation,
+            action: action
+        )
+    }
+
+    /// Mean over the last seven days, zero days included (`nil` = not known).
+    static func sevenDayAverage(_ days: [FriendDayMiles]?) -> ProfileStat {
+        guard let days, !days.isEmpty else { return ProfileStat(label: "7-day avg", value: "—") }
+        let average = days.reduce(0) { $0 + $1.miles } / Double(days.count)
+        return ProfileStat(
+            label: "7-day avg",
+            value: String(format: "%.1f", average.inDisplayUnit),
+            unit: DistanceUnits.current.abbreviation
+        )
+    }
+}
+
+/// The Stats tab's performance card, shared by your own profile and a
+/// friend's so both show the same numbers the same way: plain values on the
+/// one flat profile card, no icons, no tinted tiles.
+struct ProfileStatsCard: View {
+    let stats: [ProfileStat]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            ProfileCardLabel(text: "Performance")
+            HStack(alignment: .top, spacing: 12) {
+                ForEach(stats) { stat in
+                    if let action = stat.action {
+                        Button {
+                            MADHaptics.tap()
+                            action()
+                        } label: {
+                            cell(stat, tappable: true)
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        cell(stat, tappable: false)
+                    }
+                }
+            }
+        }
+        .padding(DashboardCardSurface.padding)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .profileCard()
+    }
+
+    private func cell(_ stat: ProfileStat, tappable: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(alignment: .firstTextBaseline, spacing: 3) {
+                Text(stat.value)
+                    .font(.system(size: 22, weight: .black, design: .rounded))
+                    .foregroundColor(.white)
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+                    .layoutPriority(1)
+                if let unit = stat.unit {
+                    Text(unit)
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .foregroundColor(.white.opacity(0.5))
+                        .lineLimit(1)
+                }
+            }
+            HStack(spacing: 3) {
+                Text(stat.label)
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.55))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                if tappable {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundColor(.white.opacity(0.35))
+                        .accessibilityHidden(true)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
     }
 }

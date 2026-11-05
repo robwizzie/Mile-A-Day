@@ -50,7 +50,7 @@ struct ImportHistoryView: View {
                             .foregroundColor(MADTheme.Colors.error)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(MADTheme.Spacing.md)
-                            .madLiquidGlass()
+                            .background(DashboardCardSurface(style: .fun))
                     }
                 }
                 .padding(MADTheme.Spacing.md)
@@ -85,7 +85,7 @@ struct ImportHistoryView: View {
     private var instructionsSection: some View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.lg) {
             VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
-                Text("Connecting an app only brings in NEW workouts.")
+                Text("Connecting an app only brings in new workouts.")
                     .font(MADTheme.Typography.headline)
                     .foregroundColor(.primary)
                 Text(
@@ -99,7 +99,7 @@ struct ImportHistoryView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(MADTheme.Spacing.md)
-            .madLiquidGlass()
+            .background(DashboardCardSurface(style: .fun))
 
             VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
                 Text("Getting your Strava file")
@@ -107,15 +107,11 @@ struct ImportHistoryView: View {
                     .foregroundColor(.primary)
 
                 ForEach(Array(Self.stravaSteps.enumerated()), id: \.offset) { index, step in
-                    HStack(alignment: .top, spacing: MADTheme.Spacing.md) {
-                        ZStack {
-                            Circle()
-                                .fill(MADTheme.Colors.madRed.opacity(0.15))
-                                .frame(width: 26, height: 26)
-                            Text("\(index + 1)")
-                                .font(MADTheme.Typography.caption)
-                                .foregroundColor(MADTheme.Colors.madRed)
-                        }
+                    HStack(alignment: .firstTextBaseline, spacing: MADTheme.Spacing.sm) {
+                        Text(verbatim: "\(index + 1).")
+                            .font(MADTheme.Typography.smallBold)
+                            .foregroundColor(MADTheme.Colors.madRed)
+                            .monospacedDigit()
                         Text(step)
                             .font(MADTheme.Typography.subheadline)
                             .foregroundColor(.primary)
@@ -133,14 +129,14 @@ struct ImportHistoryView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(MADTheme.Spacing.md)
-            .madLiquidGlass()
+            .background(DashboardCardSurface(style: .fun))
 
             Button { showingFilePicker = true } label: {
                 Text("Choose File")
                     .font(MADTheme.Typography.bodyBold)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, MADTheme.Spacing.md)
-                    .background(MADTheme.Colors.redGradient)
+                    .background(MADTheme.Colors.madRed)
                     .foregroundColor(.white)
                     .clipShape(Capsule())
             }
@@ -164,7 +160,7 @@ struct ImportHistoryView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(MADTheme.Spacing.lg)
-        .madLiquidGlass()
+        .background(DashboardCardSurface(style: .fun))
     }
 
     /// The confirmation gate. **Nothing has been written to Apple Health at this
@@ -192,7 +188,7 @@ struct ImportHistoryView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(MADTheme.Spacing.md)
-            .madLiquidGlass()
+            .background(DashboardCardSurface(style: .fun))
 
             // Kilometers and miles are indistinguishable from the file alone —
             // the same runs read 5.0 and 3.1 — so the user is the tiebreak.
@@ -226,7 +222,7 @@ struct ImportHistoryView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(MADTheme.Spacing.md)
-            .madLiquidGlass()
+            .background(DashboardCardSurface(style: .fun))
 
             Button {
                 Task { await startImport() }
@@ -242,7 +238,7 @@ struct ImportHistoryView: View {
                 .background(
                     pendingWorkouts.isEmpty
                         ? AnyShapeStyle(Color.secondary.opacity(0.3))
-                        : AnyShapeStyle(MADTheme.Colors.redGradient)
+                        : AnyShapeStyle(MADTheme.Colors.madRed)
                 )
                 .foregroundColor(.white)
                 .clipShape(Capsule())
@@ -300,7 +296,7 @@ struct ImportHistoryView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(MADTheme.Spacing.lg)
-        .madLiquidGlass()
+        .background(DashboardCardSurface(style: .fun))
     }
 
     private func statRow(_ label: String, _ value: String) -> some View {

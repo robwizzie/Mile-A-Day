@@ -1,0 +1,31 @@
+{
+  "format": 1,
+  "id": "ocean",
+  "order": 15,
+  "slot": "color",
+  "name": "Ocean",
+  "family": "streakDays",
+  "unlock": {"badge":"streak_150"},
+  "unlock_copy": "Reach a 150-day streak",
+  "holidays": [],
+  "mood_prop": false,
+  "compact": true,
+  "tier": 150,
+  "auto_eligible": true,
+  "rules": {"hides":[],"clashes":[]},
+  "palette": {
+    "angular": false,
+    "bodyOpacity": 1,
+    "core": "#CFFFF8FF",
+    "effects": ["waves"],
+    "end": [0.5,1],
+    "eye": "#05203AFF",
+    "glow": "#22C8D0FF",
+    "inner": ["#EFFFFCFF","#9EF0EAFF"],
+    "innerOpacity": null,
+    "outer": ["#B6FFF2FF","#22D3C8FF","#137FC0FF","#0A2A66FF"],
+    "rim": null,
+    "start": [0.5,0]
+  },
+  "art": {}
+}

@@ -17,29 +17,14 @@
 
 export const FLAMEY_CATALOG_VERSION = "1";
 
-export const FLAMEY_SLOTS = [
-  "color",
-  "head",
-  "eyes",
-  "chest",
-  "back",
-  "feet",
-  "costume",
-  "held",
-  "trail",
-  "companion",
-  "aura",
-  "bubble",
-] as const;
-
-export type FlameySlot = (typeof FLAMEY_SLOTS)[number];
-
-export type FlameyUnlock =
-  | { kind: "always" }
-  | { kind: "badge"; id: string }
-  | { kind: "plus" }
-  | { kind: "month"; month: number }
-  | { kind: "purchase"; productId: string };
+export {
+  FLAMEY_SLOTS,
+  isFlameySlot,
+  type FlameySlot,
+  type FlameyUnlock,
+} from "./flameySlots.js";
+import type { FlameySlot, FlameyUnlock } from "./flameySlots.js";
+import { FLAMEY_SKINS } from "./flameySkins.js";
 
 export interface FlameyItem {
   id: string;
@@ -195,7 +180,8 @@ const ROWS: ReadonlyArray<readonly [string, FlameySlot, string]> = [
   ["gold_bubble", "bubble", "nudge_500"],
 ];
 
-function buildCatalog(): ReadonlyMap<string, FlameyItem> {
+/** ROWS-only items (id → item): the built-in catalog, before skin files. */
+function buildRowItems(): ReadonlyMap<string, FlameyItem> {
   const map = new Map<string, FlameyItem>();
   for (const [id, slot, unlock] of ROWS) {
     if (map.has(id)) throw new Error(`flameyCatalog: duplicate item id ${id}`);
@@ -215,14 +201,29 @@ function buildCatalog(): ReadonlyMap<string, FlameyItem> {
   return map;
 }
 
+/**
+ * ROWS as items, unaffected by skin files. `scripts/flamey-skins-check.mjs`
+ * asserts every ROWS item has a skin file with the same slot + unlock.
+ */
+export const FLAMEY_ROW_ITEMS: ReadonlyMap<string, FlameyItem> = buildRowItems();
+
+/**
+ * ROWS first (authoritative for their ids), then every skin file
+ * (flameySkins.ts) whose id is NOT in ROWS, in skin order. Mood props
+ * (`mood_prop: true`) are automatic dressing, never in the Closet, so they
+ * never become ownable/wearable items.
+ */
+function buildCatalog(): ReadonlyMap<string, FlameyItem> {
+  const map = new Map<string, FlameyItem>(FLAMEY_ROW_ITEMS);
+  for (const skin of FLAMEY_SKINS) {
+    if (map.has(skin.id) || skin.moodProp) continue;
+    map.set(skin.id, { id: skin.id, slot: skin.slot, unlock: skin.unlock });
+  }
+  return map;
+}
+
 /** item id → item, in catalog order. */
 export const FLAMEY_CATALOG: ReadonlyMap<string, FlameyItem> = buildCatalog();
-
-export function isFlameySlot(s: unknown): s is FlameySlot {
-  return (
-    typeof s === "string" && (FLAMEY_SLOTS as readonly string[]).includes(s)
-  );
-}
 
 /** Every badge id the catalog depends on (for the existence check). */
 export function flameyBadgeIds(): string[] {

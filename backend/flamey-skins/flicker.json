@@ -1,0 +1,18 @@
+{
+  "format": 1,
+  "id": "flicker",
+  "order": 122,
+  "slot": "aura",
+  "name": "Flicker",
+  "family": "ghosts",
+  "unlock": {"badge":"ghost_margin_45"},
+  "unlock_copy": "Beat a ghost by 45 seconds",
+  "holidays": [],
+  "mood_prop": false,
+  "compact": false,
+  "tier": 20,
+  "auto_eligible": true,
+  "rules": {"hides":[],"clashes":[]},
+  "effects": ["aura:flicker"],
+  "art": {}
+}

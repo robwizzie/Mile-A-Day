@@ -1,0 +1,28 @@
+{
+  "format": 1,
+  "id": "sweatband",
+  "order": 41,
+  "slot": "head",
+  "name": "Sweatband",
+  "family": "firsts",
+  "unlock": {"badge":"special_first_mile"},
+  "unlock_copy": "Walk your first mile",
+  "holidays": [],
+  "mood_prop": false,
+  "compact": true,
+  "tier": 1,
+  "auto_eligible": true,
+  "rules": {"hides":[],"clashes":["star_glasses"]},
+  "art": {
+    "front": {
+      "clips": [
+        {"d":"M-.255 -.135Q-.005 -.051 .245 -.135L.245 -.075Q-.005 .009 -.255 -.075Z"}
+      ],
+      "ops": [
+        {"d":"M-.255 -.135Q-.005 -.051 .245 -.135L.245 -.075Q-.005 .009 -.255 -.075Z","op":"fill","paint":"#F4F4F6FF"},
+        {"clip":[0],"d":"M-.255 -.108Q-.005 -.024 .245 -.108","op":"stroke","paint":"#E8384FFF","w":0.0168},
+        {"d":"M-.255 -.135Q-.005 -.051 .245 -.135L.245 -.075Q-.005 .009 -.255 -.075Z","op":"stroke","paint":"#2A14108C","w":0.008}
+      ]
+    }
+  }
+}

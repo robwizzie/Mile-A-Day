@@ -1,0 +1,34 @@
+{
+  "format": 1,
+  "id": "aviators",
+  "order": 63,
+  "slot": "eyes",
+  "name": "Aviators",
+  "family": "dailyChallenges",
+  "unlock": {"badge":"challenge_25"},
+  "unlock_copy": "Complete 25 daily challenges",
+  "holidays": [],
+  "mood_prop": false,
+  "compact": true,
+  "tier": 40,
+  "auto_eligible": true,
+  "rules": {"hides":[],"clashes":[]},
+  "art": {
+    "front": {
+      "clips": [
+        {"d":"M-.045 -.045L-.245 -.045Q-.265 .11 -.175 .13Q-.025 .12 -.045 -.045Z"},
+        {"d":"M.045 -.045L.245 -.045Q.265 .11 .175 .13Q.025 .12 .045 -.045Z"}
+      ],
+      "ops": [
+        {"d":"M-.045 -.045L-.245 -.045Q-.265 .11 -.175 .13Q-.025 .12 -.045 -.045Z","op":"fill","paint":{"lin":[0,-0.05,0,0.13],"stops":[[0,"#3A2410FF"],[1,"#C0741CFF"]]}},
+        {"clip":[0],"d":"M-.265 -.05L-.025 -.05L-.025 0L-.265 0Z","op":"fill","paint":"#FFFFFF38"},
+        {"d":"M-.045 -.045L-.245 -.045Q-.265 .11 -.175 .13Q-.025 .12 -.045 -.045Z","join":"round","op":"stroke","paint":"#D4A43AFF","w":0.014},
+        {"d":"M.045 -.045L.245 -.045Q.265 .11 .175 .13Q.025 .12 .045 -.045Z","op":"fill","paint":{"lin":[0,-0.05,0,0.13],"stops":[[0,"#3A2410FF"],[1,"#C0741CFF"]]}},
+        {"clip":[1],"d":"M.025 -.05L.265 -.05L.265 0L.025 0Z","op":"fill","paint":"#FFFFFF38"},
+        {"d":"M.045 -.045L.245 -.045Q.265 .11 .175 .13Q.025 .12 .045 -.045Z","join":"round","op":"stroke","paint":"#D4A43AFF","w":0.014},
+        {"d":"M-.045 -.04L.045 -.04","op":"stroke","paint":"#D4A43AFF","w":0.014},
+        {"d":"M-.055 0Q0 -.04 .055 0","op":"stroke","paint":"#D4A43AFF","w":0.01}
+      ]
+    }
+  }
+}

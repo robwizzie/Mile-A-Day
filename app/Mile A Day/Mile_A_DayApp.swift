@@ -35,6 +35,11 @@ struct Mile_A_DayApp: App {
                 .task {
                     await verifyAppleCredentialIfNeeded()
                 }
+                .task {
+                    // Flamey's wardrobe as data: pick up skins added on the
+                    // server since this build (no-op until the set changes).
+                    await FlameySkinSync.syncIfNeeded()
+                }
                 .onReceive(NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification)) { _ in
                     // Schedule background refresh when app enters background
                     MADBackgroundService.shared.appDidEnterBackground()
@@ -63,6 +68,7 @@ struct Mile_A_DayApp: App {
                             // Mile A Day+: post anything StoreKit left
                             // unfinished and re-read entitlement.
                             await PlusStore.shared.refresh()
+                            await FlameySkinSync.syncIfNeeded()
                             // 10k-step days count for the streak: the whole
                             // step history once per account, then a recent
                             // window once a day (a no-op otherwise). Last, so

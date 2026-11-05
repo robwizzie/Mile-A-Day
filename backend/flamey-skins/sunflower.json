@@ -1,0 +1,31 @@
+{
+  "format": 1,
+  "id": "sunflower",
+  "order": 5,
+  "slot": "color",
+  "name": "Sunflower",
+  "family": "streakDays",
+  "unlock": {"badge":"streak_14"},
+  "unlock_copy": "Reach a 14-day streak",
+  "holidays": [],
+  "mood_prop": false,
+  "compact": true,
+  "tier": 14,
+  "auto_eligible": true,
+  "rules": {"hides":[],"clashes":[]},
+  "palette": {
+    "angular": false,
+    "bodyOpacity": 1,
+    "core": "#FFF8C8FF",
+    "effects": [],
+    "end": [0.5,1],
+    "eye": "#3A1E00FF",
+    "glow": "#FFC800FF",
+    "inner": ["#FFFDE8FF","#FFEE70FF"],
+    "innerOpacity": null,
+    "outer": ["#FFF27AFF","#FFD000FF","#FF9500FF"],
+    "rim": null,
+    "start": [0.5,0]
+  },
+  "art": {}
+}

@@ -1,0 +1,18 @@
+{
+  "format": 1,
+  "id": "spotlight",
+  "order": 123,
+  "slot": "aura",
+  "name": "Spotlight",
+  "family": "stories",
+  "unlock": {"badge":"story_25"},
+  "unlock_copy": "Post 25 stories",
+  "holidays": [],
+  "mood_prop": false,
+  "compact": false,
+  "tier": 15,
+  "auto_eligible": true,
+  "rules": {"hides":[],"clashes":[]},
+  "effects": ["aura:spotlight"],
+  "art": {}
+}

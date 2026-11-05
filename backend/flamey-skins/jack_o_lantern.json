@@ -1,0 +1,38 @@
+{
+  "format": 1,
+  "id": "jack_o_lantern",
+  "order": 38,
+  "slot": "color",
+  "name": "Jack-o'-Lantern",
+  "family": "monthly",
+  "unlock": {"month":10},
+  "unlock_copy": "Walk your mile every day of October",
+  "holidays": [],
+  "mood_prop": false,
+  "compact": true,
+  "tier": 97,
+  "auto_eligible": false,
+  "rules": {"hides":[],"clashes":[],"crown_unless":["head","costume"],"crown_rise":0.07},
+  "palette": {
+    "angular": false,
+    "bodyOpacity": 1,
+    "core": "#FFE07AFF",
+    "effects": ["embers","hotCore","pumpkinRibs"],
+    "end": [0.5,1],
+    "eye": "#2A0E02FF",
+    "glow": "#FF8A1AFF",
+    "inner": ["#FFF4A8FF","#FFC247FF"],
+    "innerOpacity": null,
+    "outer": ["#FFB347FF","#F07B1AFF","#C2500AFF","#6E2A04FF"],
+    "rim": "#FFD08A80",
+    "start": [0.5,0]
+  },
+  "art": {
+    "crown": {
+      "ops": [
+        {"d":"M.0416 -.6451L.0369 -.6184C.0357 -.6119 .0351 -.6086 .0334 -.6053C.0314 -.6018 .0278 -.5993 .0238 -.5986C.0201 -.5981 .0168 -.5986 .0103 -.5998L.0062 -.6005C-.0003 -.6017 -.0035 -.6022 -.0068 -.604C-.0104 -.606 -.0129 -.6096 -.0136 -.6136C-.0141 -.6173 -.0135 -.6206 -.0124 -.6271L-.003 -.6804C-.0018 -.6869 -.0013 -.6901 .0005 -.6935C.0025 -.697 .0061 -.6995 .0101 -.7002C.0138 -.7007 .0171 -.7001 .0236 -.699L.0277 -.6983C.0342 -.6971 .0374 -.6966 .0407 -.6948C.0443 -.6928 .0468 -.6892 .0475 -.6852C.048 -.6815 .0474 -.6782 .0463 -.6717Z","op":"fill","paint":"#4F7D2AFF"},
+        {"cap":"round","d":"M.01 -.65Q.11 -.72 .16 -.65","op":"stroke","paint":"#4F9D2AFF","w":0.018}
+      ]
+    }
+  }
+}

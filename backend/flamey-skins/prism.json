@@ -1,0 +1,31 @@
+{
+  "format": 1,
+  "id": "prism",
+  "order": 21,
+  "slot": "color",
+  "name": "Prism",
+  "family": "streakDays",
+  "unlock": {"badge":"streak_500"},
+  "unlock_copy": "Reach a 500-day streak",
+  "holidays": [],
+  "mood_prop": false,
+  "compact": true,
+  "tier": 500,
+  "auto_eligible": true,
+  "rules": {"hides":[],"clashes":[]},
+  "palette": {
+    "angular": true,
+    "bodyOpacity": 1,
+    "core": "#FFFFFFFF",
+    "effects": ["halo","prismCycle","sheen"],
+    "end": [0.5,1],
+    "eye": "#2A1030FF",
+    "glow": "#FFFFFFFF",
+    "inner": ["#FFFFFFFF","#FFF0FAFF"],
+    "innerOpacity": null,
+    "outer": ["#FF5A5AFF","#FFB03AFF","#FFE94AFF","#4ADE80FF","#38BDF8FF","#8B5CF6FF","#F472B6FF"],
+    "rim": "#FFFFFFBF",
+    "start": [0.5,0]
+  },
+  "art": {}
+}

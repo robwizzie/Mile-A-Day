@@ -25,7 +25,10 @@ const TABS = [
   { id: "displays", label: "Displays", render: () => <DisplaysTab /> },
 ] as const;
 
-type TabId = (typeof TABS)[number]["id"];
+/** Admin tools that are their own page (linked from the tab row). */
+const LINKS = [{ href: "/admin/skins", label: "Skins" }] as const;
+
+type TabId =(typeof TABS)[number]["id"];
 
 export function AdminDashboard() {
   const [tab, setTab] = useState<TabId>("overview");
@@ -106,6 +109,16 @@ export function AdminDashboard() {
                     />
                   )}
                 </button>
+              ))}
+              {/* Tools with their own page, after the tabs. */}
+              {LINKS.map((l) => (
+                <a
+                  key={l.href}
+                  href={l.href}
+                  className="relative whitespace-nowrap px-3 py-2.5 text-sm font-semibold text-white/45 transition hover:text-white/80"
+                >
+                  {l.label}
+                </a>
               ))}
             </nav>
           </div>

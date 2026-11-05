@@ -1394,6 +1394,11 @@ const EXTRA_BADGES: Array<{
   })),
 ];
 
+/** Badge ids seedExtraBadges inserts (social/app-function + holiday medals). */
+export function extraBadgeIds(): string[] {
+  return EXTRA_BADGES.map((b) => b.badgeId);
+}
+
 export async function seedExtraBadges(): Promise<void> {
   try {
     const queries = EXTRA_BADGES.map((b) => ({

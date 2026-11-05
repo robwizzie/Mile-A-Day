@@ -1,0 +1,18 @@
+{
+  "format": 1,
+  "id": "spectral_glow",
+  "order": 121,
+  "slot": "aura",
+  "name": "Spectral Glow",
+  "family": "ghosts",
+  "unlock": {"badge":"ghost_margin_15"},
+  "unlock_copy": "Beat a ghost by 15 seconds",
+  "holidays": [],
+  "mood_prop": false,
+  "compact": false,
+  "tier": 10,
+  "auto_eligible": true,
+  "rules": {"hides":[],"clashes":[]},
+  "effects": ["aura:spectral_glow"],
+  "art": {}
+}

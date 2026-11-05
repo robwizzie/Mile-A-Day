@@ -1,0 +1,31 @@
+{
+  "format": 1,
+  "id": "firecracker",
+  "order": 35,
+  "slot": "color",
+  "name": "Firecracker",
+  "family": "monthly",
+  "unlock": {"month":7},
+  "unlock_copy": "Walk your mile every day of July",
+  "holidays": [],
+  "mood_prop": false,
+  "compact": true,
+  "tier": 97,
+  "auto_eligible": false,
+  "rules": {"hides":[],"clashes":[]},
+  "palette": {
+    "angular": false,
+    "bodyOpacity": 1,
+    "core": "#FFF1F1FF",
+    "effects": ["flagStripes"],
+    "end": [0.5,1],
+    "eye": "#1A0610FF",
+    "glow": "#FF3B3BFF",
+    "inner": ["#FFFFFFFF","#FFD6D6FF"],
+    "innerOpacity": null,
+    "outer": ["#FF7A7AFF","#E0202EFF","#9A0A1EFF"],
+    "rim": "#FFFFFFBF",
+    "start": [0.5,0]
+  },
+  "art": {}
+}

@@ -1,0 +1,40 @@
+{
+  "format": 1,
+  "id": "heart_bopper",
+  "order": 55,
+  "slot": "head",
+  "name": "Heart Bopper",
+  "family": "holidays",
+  "unlock": {"badge":"holiday_valentines_day"},
+  "unlock_copy": "Walk your mile on Valentine's Day",
+  "holidays": ["valentines_day"],
+  "mood_prop": false,
+  "compact": true,
+  "tier": 5,
+  "auto_eligible": false,
+  "rules": {"hides":[],"clashes":[],"head_rise":0.1},
+  "art": {
+    "bopper-band": {
+      "ops": [
+        {"cap":"round","d":"M-.2 -.38Q0 -.5 .21 -.38","op":"stroke","paint":"#2A1410FF","w":0.05},
+        {"cap":"round","d":"M-.2 -.38Q0 -.5 .21 -.38","op":"stroke","paint":"#FF5C8AFF","w":0.03}
+      ]
+    },
+    "bopper-springs": {
+      "ops": [
+        {"cap":"round","d":"M-.09 -.435L-.0835 -.4656L-.119 -.4962L-.0985 -.5269L-.134 -.5575L-.1135 -.5881L-.149 -.6187L-.1285 -.6494L-.164 -.68","join":"round","op":"stroke","paint":"#2A1410D9","w":0.012},
+        {"d":"M-.15 -.6305C-.238 -.691 -.1995 -.757 -.15 -.7047C-.1005 -.757 -.062 -.691 -.15 -.6305Z","op":"fill","paint":{"lin":[-0.15,-0.735,-0.15,-0.625],"stops":[[0,"#FF7AA8FF"],[1,"#E8195AFF"]]}},
+        {"d":"M-.15 -.6305C-.238 -.691 -.1995 -.757 -.15 -.7047C-.1005 -.757 -.062 -.691 -.15 -.6305Z","join":"round","op":"stroke","paint":"#2A1410FF","w":0.01},
+        {"d":"M-.161 -.6965C-.161 -.6922 -.1664 -.6888 -.1731 -.6888C-.1798 -.6888 -.1852 -.6922 -.1852 -.6965C-.1852 -.7008 -.1798 -.7042 -.1731 -.7042C-.1664 -.7042 -.161 -.7008 -.161 -.6965Z","op":"fill","paint":"#FFFFFFBF"},
+        {"cap":"round","d":"M.09 -.435L.1115 -.4656L.091 -.4962L.1265 -.5269L.106 -.5575L.1415 -.5881L.121 -.6187L.1565 -.6494L.136 -.68","join":"round","op":"stroke","paint":"#2A1410D9","w":0.012},
+        {"d":"M.15 -.6305C.062 -.691 .1005 -.757 .15 -.7047C.1995 -.757 .238 -.691 .15 -.6305Z","op":"fill","paint":{"lin":[0.15,-0.735,0.15,-0.625],"stops":[[0,"#FF7AA8FF"],[1,"#E8195AFF"]]}},
+        {"d":"M.15 -.6305C.062 -.691 .1005 -.757 .15 -.7047C.1995 -.757 .238 -.691 .15 -.6305Z","join":"round","op":"stroke","paint":"#2A1410FF","w":0.01},
+        {"d":"M.139 -.6965C.139 -.6922 .1336 -.6888 .1269 -.6888C.1202 -.6888 .1148 -.6922 .1148 -.6965C.1148 -.7008 .1202 -.7042 .1269 -.7042C.1336 -.7042 .139 -.7008 .139 -.6965Z","op":"fill","paint":"#FFFFFFBF"}
+      ]
+    }
+  },
+  "pivots": {"bopper-springs":[0,-0.38]},
+  "motion": {
+    "bopper-springs": {"kind":"sway","deg":6,"period":1.6}
+  }
+}

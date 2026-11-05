@@ -1,0 +1,1 @@
+{"name":"flamey-skin-convert","private":true,"type":"module","dependencies":{"pdfjs-dist":"^4.10.38","playwright-core":"^1.64.1","pngjs":"^7.0.0"}}

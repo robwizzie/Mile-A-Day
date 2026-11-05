@@ -1,0 +1,31 @@
+{
+  "format": 1,
+  "id": "sunburst",
+  "order": 34,
+  "slot": "color",
+  "name": "Sunburst",
+  "family": "monthly",
+  "unlock": {"month":6},
+  "unlock_copy": "Walk your mile every day of June",
+  "holidays": [],
+  "mood_prop": false,
+  "compact": true,
+  "tier": 97,
+  "auto_eligible": false,
+  "rules": {"hides":[],"clashes":[]},
+  "palette": {
+    "angular": false,
+    "bodyOpacity": 1,
+    "core": "#FFFFFFFF",
+    "effects": ["sheen","sunRays"],
+    "end": [0.5,1],
+    "eye": "#3A2000FF",
+    "glow": "#FFC83AFF",
+    "inner": ["#FFFFFFFF","#FFF0A0FF"],
+    "innerOpacity": null,
+    "outer": ["#FFF8C0FF","#FFD23AFF","#FF9A1AFF","#E0560AFF"],
+    "rim": "#FFFBE0CC",
+    "start": [0.5,0]
+  },
+  "art": {}
+}
