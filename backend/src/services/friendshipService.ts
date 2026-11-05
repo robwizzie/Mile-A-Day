@@ -7,22 +7,25 @@ import {
   STREAK_QUALIFYING_MILES,
   STREAK_QUALIFYING_STEPS,
 } from "./streakFeatureCore.js";
-import { START_OF_TODAY_ET_SQL } from "./dailyResetTime.js";
+import { START_OF_TODAY_ET_SQL, userOffsetMinutesSql } from "./dailyResetTime.js";
 import { CLIENT_FEATURES, supportsClientFeatureSql } from "./clientFeatures.js";
 
 const db = PostgresService.getInstance();
 
 /**
- * Minutes until a user's local midnight: their latest workout's offset, the
- * same day `userTodaySql` uses. One rule for the Today board and the nudge
- * push.
+ * Minutes until a user's local midnight. One rule for the Today board and the
+ * nudge push.
+ *
+ * The offset is the CURRENT one (`userOffsetMinutesSql`: what the app reports
+ * on every launch, the latest workout's only when the app never sent one) —
+ * the same offset `userTodaySql` uses. A workout's offset is frozen at the time of
+ * that workout: after a DST change it is an hour off until they log another
+ * one, which counted a friend's midnight an hour early ("1h 51m left" at
+ * 9:09 PM EST for a friend whose last walk was in EDT).
  */
 export function minutesLeftTodaySql(alias: string): string {
   return `(SELECT (EXTRACT(EPOCH FROM (date_trunc('day', lt.now_local) + INTERVAL '1 day' - lt.now_local)) / 60)::int
-				FROM (SELECT (NOW() AT TIME ZONE 'UTC') + (COALESCE((
-					SELECT w.timezone_offset FROM workouts w
-					WHERE w.user_id = ${alias}.user_id
-					ORDER BY w.device_end_date DESC LIMIT 1), 0) || ' minutes')::interval AS now_local) lt
+				FROM (SELECT (NOW() AT TIME ZONE 'UTC') + (${userOffsetMinutesSql(`${alias}.user_id`)} || ' minutes')::interval AS now_local) lt
 			)`;
 }
 
@@ -283,7 +286,7 @@ export interface FriendActivity {
   /** Additive: their current streak (decay applied, `effectiveStreakSql`). */
   current_streak: number;
   /**
-   * Additive: minutes until THEIR local midnight (their latest workout's
+   * Additive: minutes until THEIR local midnight (their current
    * offset, the same day `userTodaySql` uses). With `current_streak` it lets
    * the Today board say "2h 10m left" on a friend whose streak is at risk.
    */
@@ -307,10 +310,7 @@ export async function getFriendsActivityToday(
 				WHERE w.user_id = u.user_id
 				AND w.local_date = (
 					NOW() + (
-						COALESCE(
-							(SELECT timezone_offset FROM workouts WHERE user_id = u.user_id ORDER BY device_end_date DESC LIMIT 1),
-							0
-						) || ' minutes'
+						${userOffsetMinutesSql("u.user_id")} || ' minutes'
 					)::interval
 				)::date
 				AND w.deleted_at IS NULL AND w.exclusion_reason IS NULL

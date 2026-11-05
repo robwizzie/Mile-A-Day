@@ -67,6 +67,7 @@ Details: docs/conventions/backend.md § Database
 - Raw parameterized SQL and Drizzle share one pool; new code may use the ORM.
 - Connection string comes from `DATABASE_URL`.
 - `server.ts` must `import 'dotenv/config'` as its FIRST line.
+- A user's local now/today offset is ALWAYS `userOffsetMinutesSql(col)` / `USER_OFFSET_MINUTES_P1_SQL` / `userOffsetMinutesOrNullSql` (`dailyResetTime.ts`); never inline `SELECT timezone_offset FROM workouts … ORDER BY device_end_date DESC LIMIT 1`. A workout's own `local_date` is its own.
 
 ## Drizzle ORM + Migrations
 Details: docs/conventions/backend.md § Drizzle ORM + Migrations
@@ -109,7 +110,7 @@ Details: docs/conventions/backend.md § Competition Resolution
 ## Hypes & Posts
 Details: docs/conventions/backend.md § Hypes & Posts
 - 'mile' hypes key on `<userId>:<localDate>`; match via `mileHypeKeyMatchSql`.
-- `/friends/activity/today` serves `current_streak` (`effectiveStreakSql`) and `minutes_left_today` (`minutesLeftTodaySql`) additively; the nudge push words what's at stake via `nudgeCopy(getStreakStakes)` (same type/data).
+- `/friends/activity/today` serves `current_streak` (`effectiveStreakSql`) and `minutes_left_today` (`minutesLeftTodaySql`, offset via `userOffsetMinutesSql`) additively; the nudge push words what's at stake via `nudgeCopy(getStreakStakes)` (same type/data).
 - Keep the `express.json` limit at 2mb.
 - `posts.is_auto` is tri-state; a user post replaces only an auto post, else 409.
 - Wrap `media_url` responses in `signMediaUrlsDeep(...)`; `stripMediaQuery(...)` inputs; store bare paths.
@@ -146,7 +147,7 @@ Details: docs/conventions/backend.md § Push Notifications
 - Only small backfills in migrations (30s boot timeout); big ones and `CREATE INDEX CONCURRENTLY` run post-`listen()`.
 - Held pushes flush as a morning briefing (`planBriefing`). Check: `morning-briefing-check`.
 - Push `data` values must be strings; inbox previews authorize via `visiblePostPreviews`.
-- Checks that read `in_app_notifications` after a `sendPush` POLL for the row (`sendPush` stores it unawaited on the no-token/quiet/cap paths); compare nudge words via `nudgeCopy`, never a literal. Check: `flamey-check`.
+- `sendPush` AWAITS its inbox row (`storeInboxSafely`: awaited, errors logged, never thrown), never fire-and-forget; checks compare nudge words via `nudgeCopy`, never a literal. Check: `flamey-check`.
 - Gate client-visible changes PER DEVICE (`client_features`, `userSupports`); never reuse a string; env flags are kill switches only.
 - Widget refresh = silent `widget_refresh` push, only to `widget_refresh_push_v1` devices with matching `widget_kinds`, one per window. Check: `widget-refresh-check`.
 - Every desk PWA push (`pushTo`) must show in the remote's Activity (`boxActivity`): read it from its own table, else add the kind to `LOGGED_KINDS` (`desk_push_log`). Check: `display-check`.

@@ -11,6 +11,7 @@ import { areFriends } from "../services/friendshipService.js";
 import { getMatchupHistory } from "../services/h2hMatchupService.js";
 import { PostgresService } from "../services/DbService.js";
 import hasRequiredKeys from "../utils/hasRequiredKeys.js";
+import { USER_OFFSET_MINUTES_P1_SQL } from "../services/dailyResetTime.js";
 
 const db = PostgresService.getInstance();
 
@@ -122,13 +123,10 @@ export async function getMatchupHistoryForUser(
 }
 
 async function resolveUserLocalDate(userId: string): Promise<string> {
-  // Match existing pattern in workoutService.getTodayMiles: today in user's last-known timezone.
+  // Same "today" as workoutService.getTodayMiles: the user's current offset.
   const rows = await db.query<{ local_date: string }>(
     `SELECT (NOW() + (
-			COALESCE(
-				(SELECT timezone_offset FROM workouts WHERE user_id = $1 ORDER BY device_end_date DESC LIMIT 1),
-				0
-			) || ' minutes'
+			${USER_OFFSET_MINUTES_P1_SQL} || ' minutes'
 		)::interval)::date::text AS local_date`,
     [userId],
   );

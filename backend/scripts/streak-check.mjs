@@ -55,6 +55,9 @@ async function cleanup() {
   await db.query(`DELETE FROM workouts WHERE user_id LIKE 'sc-%'`);
   await db.query(`DELETE FROM daily_steps WHERE user_id LIKE 'sc-%'`);
   await db.query(`DELETE FROM user_badges WHERE user_id LIKE 'sc-%'`);
+  await db.query(
+    `DELETE FROM notification_settings WHERE user_id LIKE 'sc-%'`,
+  );
   await db.query(`DELETE FROM users WHERE user_id LIKE 'sc-%'`);
 }
 
@@ -1074,6 +1077,69 @@ console.log("M. reconcile");
     before,
   );
   ok("…and the number stands", (await row("sc-long")).current_streak, 2500);
+}
+
+// ── N. "Today" uses the CURRENT offset, not the latest workout's ───────────
+// A workout's offset is frozen when it was logged. After a DST change (EDT
+// −240 → EST −300) a user whose last walk was in EDT has a workout offset an
+// hour ahead of their real clock. In the last local hour before midnight the
+// stale offset already reads TOMORROW, so a streak valid through today
+// decayed to 0 (and the writer stored 0) until they logged another walk.
+//
+// NOW() can't be frozen, so the case is shifted to the CI clock: the settings
+// offset S puts the user at 23:30 local right now and the stale workout
+// offset is S + 60, exactly the −300 / −240 shape at 04:30 UTC.
+console.log("N. stale workout offset vs current offset");
+{
+  const id = "sc-dst";
+  const { s, local_today } = (
+    await db.query(
+      `WITH c AS (
+         SELECT ((23 * 60 + 30) - (EXTRACT(HOUR FROM NOW() AT TIME ZONE 'UTC') * 60
+                 + EXTRACT(MINUTE FROM NOW() AT TIME ZONE 'UTC')))::int AS raw
+       ), n AS (
+         -- Normalise into [-720, 780) so S + 60 stays a real offset.
+         SELECT CASE WHEN raw >= 780 THEN raw - 1440
+                     WHEN raw < -720 THEN raw + 1440 ELSE raw END AS s FROM c
+       )
+       SELECT s, to_char((NOW() + (s || ' minutes')::interval)::date, 'YYYY-MM-DD') AS local_today
+         FROM n`,
+    )
+  )[0];
+  const stale = s + 60;
+  await mkUser(id);
+  // Walked the 5 days up to local yesterday, all logged at the stale offset.
+  await db.query(
+    `INSERT INTO workouts (workout_id,user_id,distance,local_date,date,timezone_offset,
+       workout_type,device_end_date,calories,total_duration,source,speed_flagged,feed_role)
+     SELECT $1 || '-dst-' || d, $1, 1.2, ($2::date - d)::date, ($2::date - d)::date, $3::int,
+            'walking', (($2::date - d)::timestamp + interval '9 hours'), 100, 1200,
+            'healthkit', false, 'extra'
+       FROM generate_series(1, 5) d`,
+    [id, local_today, stale],
+  );
+  await db.query(
+    `INSERT INTO notification_settings (user_id, timezone_offset_minutes) VALUES ($1, $2)`,
+    [id, s],
+  );
+  const local = (
+    await db.query(
+      `SELECT to_char(${core.userTodaySql("u")}, 'YYYY-MM-DD') AS today
+         FROM users u WHERE u.user_id = $1`,
+      [id],
+    )
+  )[0].today;
+  ok("userTodaySql reads the settings offset's day", local, local_today);
+  ok("refreshCurrentStreak (writer) keeps the run", await refreshCurrentStreak(id), 5);
+  const r = await row(id);
+  ok("…valid through local today", r.valid_through, local_today);
+  const eff = (
+    await db.query(
+      `SELECT (${core.effectiveStreakSql("u")})::int AS s FROM users u WHERE u.user_id = $1`,
+      [id],
+    )
+  )[0].s;
+  ok("effectiveStreakSql (reader) is NOT 0 at 23:30 local", eff, 5);
 }
 
 await cleanup();

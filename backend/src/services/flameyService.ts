@@ -13,6 +13,7 @@ import {
   ownedFlameyItemIds,
   type FlameySlot,
 } from "./flameyCatalog.js";
+import { userOffsetMinutesSql } from "./dailyResetTime.js";
 
 const db = PostgresService.getInstance();
 
@@ -74,10 +75,7 @@ export async function flameyBlockFor(
   }>(
     `SELECT u.dashboard_style, u.flamey_look, u.flamey_name,
 	        GREATEST(u.longest_streak, (${effectiveStreakSql("u")}))::int AS longest_streak,
-	        to_char(((u.created_at AT TIME ZONE 'UTC') + (COALESCE(
-	            (SELECT ns.timezone_offset_minutes FROM notification_settings ns WHERE ns.user_id = u.user_id),
-	            (SELECT w.timezone_offset FROM workouts w WHERE w.user_id = u.user_id ORDER BY w.device_end_date DESC LIMIT 1),
-	            0) || ' minutes')::interval)::date, 'YYYY-MM-DD') AS signup_date
+	        to_char(((u.created_at AT TIME ZONE 'UTC') + (${userOffsetMinutesSql("u.user_id")} || ' minutes')::interval)::date, 'YYYY-MM-DD') AS signup_date
 	   FROM users u WHERE u.user_id = $1`,
     [targetUserId],
   );

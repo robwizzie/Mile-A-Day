@@ -17,6 +17,7 @@ import {
   readStoredStreak,
   STREAK_QUALIFYING_STEPS,
 } from "./streakFeatureCore.js";
+import { USER_OFFSET_MINUTES_P1_SQL } from "./dailyResetTime.js";
 
 const db = PostgresService.getInstance();
 
@@ -1096,17 +1097,14 @@ export async function recomputeFeedRolesForDay(
 }
 
 /**
- * Today's date (YYYY-MM-DD) in the user's local timezone, derived from the
- * timezone_offset of their most recent workout (UTC if they have none).
+ * Today's date (YYYY-MM-DD) in the user's local timezone, from their current
+ * offset (`USER_OFFSET_MINUTES_P1_SQL`: app-reported, else latest workout's, else UTC).
  */
 export async function getUserLocalToday(userId: string): Promise<string> {
   const todayResult = await db.query<{ user_today: string }>(
     `
     SELECT to_char(
-      (NOW() + (COALESCE(
-        (SELECT timezone_offset FROM workouts WHERE user_id = $1 ORDER BY device_end_date DESC LIMIT 1),
-        0
-      ) || ' minutes')::interval)::date,
+      (NOW() + (${USER_OFFSET_MINUTES_P1_SQL} || ' minutes')::interval)::date,
       'YYYY-MM-DD'
     ) AS user_today
   `,
@@ -1480,16 +1478,13 @@ export async function getUserRoutes(userId: string, limit: number = 1000) {
 }
 
 /**
- * Today's date ('YYYY-MM-DD') in the user's local timezone, derived from their
- * most recent workout's timezone_offset (matches workouts.local_date format).
- * Falls back to the server's UTC date if the user has no workouts.
+ * Today's date ('YYYY-MM-DD') in the user's local timezone, from their current
+ * offset (`USER_OFFSET_MINUTES_P1_SQL`; matches workouts.local_date format).
+ * Falls back to the server's UTC date if no offset is known.
  */
 export async function getUserLocalDate(userId: string): Promise<string> {
   const rows = await db.query<{ local_date: string }>(
-    `SELECT (NOW() + (COALESCE(
-			(SELECT timezone_offset FROM workouts WHERE user_id = $1 ORDER BY device_end_date DESC LIMIT 1),
-			0
-		) || ' minutes')::interval)::date::text AS local_date`,
+    `SELECT (NOW() + (${USER_OFFSET_MINUTES_P1_SQL} || ' minutes')::interval)::date::text AS local_date`,
     [userId],
   );
   return rows[0].local_date;
@@ -1508,17 +1503,14 @@ export const DAILY_GOAL_TOLERANCE = 0.95;
 
 /**
  * The user's synced step total for their local today — the same "today"
- * getTodayMiles uses (latest workout's offset, UTC without one). 0 when the
+ * getTodayMiles uses (`USER_OFFSET_MINUTES_P1_SQL`). 0 when the
  * phone hasn't posted steps for that day.
  */
 export async function getTodaySteps(userId: string): Promise<number> {
   const rows = await db.query<{ steps: number }>(
     `SELECT ds.steps FROM daily_steps ds
       WHERE ds.user_id = $1
-        AND ds.local_date = (NOW() + (COALESCE(
-          (SELECT timezone_offset FROM workouts WHERE user_id = $1 ORDER BY device_end_date DESC LIMIT 1),
-          0
-        ) || ' minutes')::interval)::date`,
+        AND ds.local_date = (NOW() + (${USER_OFFSET_MINUTES_P1_SQL} || ' minutes')::interval)::date`,
     [userId],
   );
   return Number(rows[0]?.steps ?? 0);
@@ -1537,14 +1529,11 @@ export function dailyGoalMet(miles: number, steps: number): boolean {
 }
 
 export async function getTodayMiles(userId: string) {
-  // Use the user's timezone offset from their most recent workout to determine
+  // Use the user's current timezone offset (USER_OFFSET_MINUTES_P1_SQL) to determine
   // what "today" is in their local time (local_date is stored in user's timezone)
   const todayMilesQuery = `
 	WITH user_tz AS (
-		SELECT COALESCE(
-			(SELECT timezone_offset FROM workouts WHERE user_id = $1 ORDER BY device_end_date DESC LIMIT 1),
-			0
-		) AS tz_offset
+		SELECT ${USER_OFFSET_MINUTES_P1_SQL} AS tz_offset
 	)
 	SELECT SUM(w.distance) as total_distance FROM workouts w, user_tz
 	WHERE w.user_id = $1
@@ -1558,7 +1547,7 @@ export async function getTodayMiles(userId: string) {
 
 /**
  * Per-day mile totals for the user's last 7 LOCAL days (their "today" plus
- * the 6 before it, derived from their latest workout's timezone offset the
+ * the 6 before it, derived from their current offset the
  * same way getTodayMiles does). Every day is present — zero-mile days
  * included — so clients can render a week without inferring gaps.
  *
@@ -1574,10 +1563,7 @@ export async function getLast7DayMiles(
 ): Promise<{ date: string; miles: number }[]> {
   const query = `
 	WITH user_tz AS (
-		SELECT COALESCE(
-			(SELECT timezone_offset FROM workouts WHERE user_id = $1 ORDER BY device_end_date DESC LIMIT 1),
-			0
-		) AS tz_offset
+		SELECT ${USER_OFFSET_MINUTES_P1_SQL} AS tz_offset
 	),
 	days AS (
 		SELECT ((NOW() + (user_tz.tz_offset || ' minutes')::interval)::date - offs.n) AS day
@@ -1671,10 +1657,7 @@ export interface TodayStats {
 export async function getTodayStats(userId: string): Promise<TodayStats> {
   const query = `
 	WITH user_tz AS (
-		SELECT COALESCE(
-			(SELECT timezone_offset FROM workouts WHERE user_id = $1 ORDER BY device_end_date DESC LIMIT 1),
-			0
-		) AS tz_offset
+		SELECT ${USER_OFFSET_MINUTES_P1_SQL} AS tz_offset
 	),
 	today_workouts AS (
 		SELECT w.workout_id, w.distance, w.total_duration

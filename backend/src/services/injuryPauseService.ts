@@ -9,6 +9,7 @@ import {
 } from "./streakFeatureCore.js";
 import { refreshCurrentStreak } from "./leaderboardService.js";
 import { BadRequestError } from "../errors/Errors.js";
+import { USER_OFFSET_MINUTES_P1_SQL, userOffsetMinutesSql } from "./dailyResetTime.js";
 
 const db = PostgresService.getInstance();
 
@@ -87,14 +88,11 @@ export interface InjuryPauseStatus {
   max_backdate_days: number;
 }
 
-/** This user's local calendar date, from their most recent workout's offset. */
+/** This user's local calendar date, from their current offset. */
 async function getLocalToday(userId: string): Promise<string> {
   const rows = await db.query<{ user_today: string }>(
     `SELECT to_char(
-       (NOW() + (COALESCE(
-         (SELECT timezone_offset FROM workouts WHERE user_id = $1
-           ORDER BY device_end_date DESC LIMIT 1), 0
-       ) || ' minutes')::interval)::date, 'YYYY-MM-DD') AS user_today`,
+       (NOW() + (${USER_OFFSET_MINUTES_P1_SQL} || ' minutes')::interval)::date, 'YYYY-MM-DD') AS user_today`,
     [userId],
   );
   return rows[0].user_today;
@@ -426,10 +424,7 @@ export async function expirePausesPastCap(): Promise<number> {
       WHERE sp.resumed_on IS NULL
         AND sp.expired_at IS NULL
         AND sp.started_on + $1::int <= (
-          NOW() + (COALESCE((
-            SELECT timezone_offset FROM workouts w
-             WHERE w.user_id = sp.user_id
-             ORDER BY device_end_date DESC LIMIT 1), 0) || ' minutes')::interval
+          NOW() + (${userOffsetMinutesSql("sp.user_id")} || ' minutes')::interval
         )::date
       RETURNING sp.user_id`,
     [MAX_PAUSE_DAYS],

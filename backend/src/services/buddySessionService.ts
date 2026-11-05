@@ -43,6 +43,7 @@ import {
   type BuddySessionPost,
   buddySessionPostIds,
 } from "./postService.js";
+import { userOffsetMinutesOrNullSql } from "./dailyResetTime.js";
 
 const db = PostgresService.getInstance();
 
@@ -407,13 +408,7 @@ export function validateGoal(
  */
 async function hostUtcOffsetMinutes(hostUserId: string): Promise<number> {
   const rows = await db.query<{ offset: number | null }>(
-    `SELECT COALESCE(
-              (SELECT ns.timezone_offset_minutes FROM notification_settings ns
-                WHERE ns.user_id = $1::text),
-              (SELECT w.timezone_offset FROM workouts w
-                WHERE w.user_id = $1::varchar
-                ORDER BY w.device_end_date DESC LIMIT 1)
-            )::int AS offset`,
+    `SELECT ${userOffsetMinutesOrNullSql("$1::text")}::int AS offset`,
     [hostUserId],
   );
   const offset = rows[0]?.offset;

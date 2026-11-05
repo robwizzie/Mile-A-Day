@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import { PostgresService } from "./DbService.js";
 import { getPublicStats } from "./publicStatsService.js";
-import { START_OF_TODAY_ET_SQL, TODAY_ET_DATE_SQL } from "./dailyResetTime.js";
+import { START_OF_TODAY_ET_SQL, TODAY_ET_DATE_SQL, USER_OFFSET_MINUTES_P1_SQL } from "./dailyResetTime.js";
 import { LIVE_PRESENCE_WINDOW_SECONDS } from "./liveTrackingService.js";
 import {
   DAILY_GOAL_TOLERANCE,
@@ -748,8 +748,7 @@ export async function getRival(userId: string): Promise<DisplayRival | null> {
   const [rows, today, coverage, liveRows] = await Promise.all([
     db.query<{ streak: number; week: number | null }>(
       `WITH tz AS (
-         SELECT COALESCE((SELECT timezone_offset FROM workouts
-                           WHERE user_id = $1 ORDER BY device_end_date DESC LIMIT 1), 0) AS off
+         SELECT ${USER_OFFSET_MINUTES_P1_SQL} AS off
        ), loc AS (
          SELECT (NOW() AT TIME ZONE 'UTC') + (tz.off || ' minutes')::interval AS t FROM tz
        )
@@ -1451,8 +1450,7 @@ export async function getDisplayFeed(
       longest_streak: number | null;
     }>(
       `WITH tz AS (
-         SELECT COALESCE((SELECT timezone_offset FROM workouts
-                           WHERE user_id = $1 ORDER BY device_end_date DESC LIMIT 1), 0) AS off
+         SELECT ${USER_OFFSET_MINUTES_P1_SQL} AS off
        ), loc AS (
          SELECT (NOW() AT TIME ZONE 'UTC') + (tz.off || ' minutes')::interval AS t FROM tz
        )
@@ -1598,8 +1596,7 @@ export async function getDisplayFeed(
     // The owner's own last 64 local days (the streak heatmap).
     db.query<{ miles: number; covered: boolean; stepped: boolean }>(
       `WITH tz AS (
-         SELECT COALESCE((SELECT timezone_offset FROM workouts
-                           WHERE user_id = $1 ORDER BY device_end_date DESC LIMIT 1), 0) AS off
+         SELECT ${USER_OFFSET_MINUTES_P1_SQL} AS off
        ), today AS (
          SELECT ((NOW() AT TIME ZONE 'UTC') + (tz.off || ' minutes')::interval)::date AS d FROM tz
        ), days AS (

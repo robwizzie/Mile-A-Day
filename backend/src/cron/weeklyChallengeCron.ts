@@ -14,6 +14,7 @@ import {
   sundayWeekStartSql,
   weekWindowForUser,
 } from "../services/weeklyChallengeService.js";
+import { userOffsetMinutesOrNullSql } from "../services/dailyResetTime.js";
 
 const db = PostgresService.getInstance();
 
@@ -40,10 +41,7 @@ function dueUsersSql(dow: number, hour: number, kind: string): string {
 		WITH user_tz AS (
 			SELECT
 				u.user_id,
-				COALESCE(
-					ns.timezone_offset_minutes,
-					(SELECT timezone_offset FROM workouts WHERE user_id = u.user_id ORDER BY device_end_date DESC LIMIT 1)
-				) AS tz_offset,
+				${userOffsetMinutesOrNullSql("u.user_id")} AS tz_offset,
 				COALESCE(ns.weekly_challenge_enabled, TRUE) AS enabled
 			FROM users u
 			LEFT JOIN notification_settings ns ON ns.user_id = u.user_id

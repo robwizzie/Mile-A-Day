@@ -24,6 +24,7 @@ import {
   PLUS_STREAK_ASSIST_TARGET_DAYS,
   PLUS_STREAK_SAVE_TARGET_RUN_DAYS,
 } from "./plusCatalog.js";
+import { userOffsetMinutesSql } from "./dailyResetTime.js";
 
 const db = PostgresService.getInstance();
 
@@ -627,11 +628,7 @@ export async function runStreakFeaturesSweep(): Promise<{
     `SELECT u.user_id, to_char(t.local_now::date, 'YYYY-MM-DD') AS user_today
      FROM users u
      CROSS JOIN LATERAL (
-       SELECT NOW() + (COALESCE(
-         (SELECT timezone_offset FROM workouts w
-          WHERE w.user_id = u.user_id ORDER BY device_end_date DESC LIMIT 1),
-         0
-       ) || ' minutes')::interval AS local_now
+       SELECT NOW() + (${userOffsetMinutesSql("u.user_id")} || ' minutes')::interval AS local_now
      ) t
      WHERE u.streak_features_at IS NOT NULL
        AND EXTRACT(HOUR FROM t.local_now) BETWEEN 6 AND 11`,
@@ -1637,11 +1634,7 @@ export async function getAssistableFriends(
      FROM friendships f
      JOIN users u ON u.user_id = f.friend_id
      CROSS JOIN LATERAL (
-       SELECT (NOW() + (COALESCE((
-         SELECT w.timezone_offset FROM workouts w
-         WHERE w.user_id = u.user_id
-         ORDER BY w.device_end_date DESC LIMIT 1
-       ), 0) || ' minutes')::interval)::date AS today
+       SELECT (NOW() + (${userOffsetMinutesSql("u.user_id")} || ' minutes')::interval)::date AS today
      ) t
      LEFT JOIN LATERAL (
        SELECT array_agg(x.d) AS days FROM (

@@ -1,4 +1,5 @@
 import { PostgresService } from "./DbService.js";
+import { userOffsetMinutesSql } from "./dailyResetTime.js";
 
 const db = PostgresService.getInstance();
 
@@ -210,8 +211,8 @@ export async function fetchCoveredDays(
  * still rendered "0.00 / 1 mi · 0%" with a Nudge button, i.e. the app telling
  * you the rescue you just paid for did nothing.
  *
- * Each user's "today" is resolved from their OWN last device offset, the same
- * derivation `getUserLocalToday` and the sweep use — a shared CURRENT_DATE
+ * Each user's "today" is `userTodaySql`, the same derivation
+ * `getUserLocalToday` and the sweep use — a shared CURRENT_DATE
  * would read the wrong day for anyone a timezone away.
  *
  * Coverage is only reported for users it is ACTIVE for (enrolled, kill switch
@@ -228,12 +229,7 @@ export async function fetchTodayCoverage(
             su.username AS source_username
        FROM users u
        CROSS JOIN LATERAL (
-         SELECT (NOW() + (COALESCE(
-           (SELECT w.timezone_offset FROM workouts w
-             WHERE w.user_id = u.user_id
-             ORDER BY w.device_end_date DESC LIMIT 1),
-           0
-         ) || ' minutes')::interval)::date AS d
+         SELECT ${userTodaySql("u")} AS d
        ) t
        JOIN streak_coverage sc
          ON sc.user_id = u.user_id AND sc.local_date = t.d
@@ -366,17 +362,13 @@ export function dateStrPlus(dateStr: string, days: number): string {
 
 /**
  * Today's date in the user's local timezone, as a SQL expression over a
- * `users` row aliased `alias`: derived from the timezone_offset of their most
- * recent workout (UTC if they have none) — the same derivation every streak
- * and stats surface uses, so "today" can never mean two things.
- * Index-backed per row (idx_workouts_user_device_end), so it's fine inside a
- * list query.
+ * `users` row aliased `alias`: their CURRENT offset (`userOffsetMinutesSql`:
+ * app-reported first, latest workout's as fallback, UTC last) — the same
+ * derivation every streak and stats surface uses, so "today" can never mean
+ * two things. Index-backed per row, so it's fine inside a list query.
  */
 export function userTodaySql(alias: string): string {
-  return `(NOW() + (COALESCE((
-      SELECT w.timezone_offset FROM workouts w
-      WHERE w.user_id = ${alias}.user_id
-      ORDER BY w.device_end_date DESC LIMIT 1), 0) || ' minutes')::interval)::date`;
+  return `(NOW() + (${userOffsetMinutesSql(`${alias}.user_id`)} || ' minutes')::interval)::date`;
 }
 
 /**

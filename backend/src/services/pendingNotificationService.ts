@@ -10,6 +10,7 @@ import {
 } from "./audienceSettingsService.js";
 import { getFriendActivityRecipientPool } from "./notificationService.js";
 import { getUserLocalDate } from "./workoutService.js";
+import { userOffsetMinutesSql } from "./dailyResetTime.js";
 
 const db = PostgresService.getInstance();
 
@@ -422,25 +423,18 @@ export async function dismissAllPending(
 /**
  * Expire all pending rows whose local_date is before the current date in the
  * user's timezone. Uses the same timezone_offset source as getUserLocalDate
- * (most recent workout's timezone_offset, default UTC when unknown).
+ * (`userOffsetMinutesSql`, default UTC when unknown).
  *
  * Safe to call repeatedly — only touches rows that are genuinely stale.
  */
 export async function expireStalePendingNotifications(): Promise<number> {
   const result = await db.query<{ count: string }>(
     `WITH user_local AS (
-			-- Compute each user's current local date using their most recent workout
-			-- timezone_offset (minutes), defaulting to UTC when unknown. Mirrors
+			-- Compute each user's current local date from their current offset
+			-- (userOffsetMinutesSql), defaulting to UTC when unknown. Mirrors
 			-- getUserLocalDate exactly.
 			SELECT DISTINCT pfn.user_id,
-				(NOW() + (COALESCE(
-					(SELECT w.timezone_offset
-					 FROM workouts w
-					 WHERE w.user_id = pfn.user_id
-					 ORDER BY w.device_end_date DESC
-					 LIMIT 1),
-					0
-				) || ' minutes')::interval)::date AS local_today
+				(NOW() + (${userOffsetMinutesSql("pfn.user_id")} || ' minutes')::interval)::date AS local_today
 			FROM pending_friend_notifications pfn
 			WHERE pfn.status = 'pending'
 		),

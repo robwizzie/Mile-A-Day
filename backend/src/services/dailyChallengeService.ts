@@ -27,6 +27,7 @@ import {
   getOrAssignRival,
   hasH2hRivalCandidates,
 } from "./h2hMatchupService.js";
+import { USER_OFFSET_MINUTES_P1_SQL } from "./dailyResetTime.js";
 
 const db = PostgresService.getInstance();
 
@@ -190,9 +191,7 @@ async function missedDaysInWindow(
   const windowRows = await db.query<{ local_date: string }>(
     `WITH bounds AS (
 			SELECT
-				(NOW() + (COALESCE(
-					(SELECT timezone_offset FROM workouts WHERE user_id = $1 ORDER BY device_end_date DESC LIMIT 1),
-					0) || ' minutes')::interval)::date AS today,
+				(NOW() + (${USER_OFFSET_MINUTES_P1_SQL} || ' minutes')::interval)::date AS today,
 				(SELECT created_at::date FROM users WHERE user_id = $1) AS joined
 		)
 		SELECT d::date::text AS local_date
@@ -369,17 +368,14 @@ export async function evaluateChallengesForBatch(
 
 /**
  * The user's "today" expressed as a local-date string (YYYY-MM-DD), derived
- * from their most recent workout's timezone offset. Falls back to UTC if the
- * user has no workouts yet (in which case they have nothing to backfill anyway).
+ * from their current offset (`USER_OFFSET_MINUTES_P1_SQL`). Falls back to UTC if
+ * no offset is known yet (in which case they have nothing to backfill anyway).
  */
 async function getUserTodayLocalDate(userId: string): Promise<string | null> {
   const rows = await db.query<{ local_date: string }>(
     `SELECT to_char(
 			(now() AT TIME ZONE 'UTC') +
-			COALESCE(
-				(SELECT timezone_offset FROM workouts WHERE user_id = $1 ORDER BY device_end_date DESC LIMIT 1),
-				0
-			) * INTERVAL '1 minute',
+			${USER_OFFSET_MINUTES_P1_SQL} * INTERVAL '1 minute',
 			'YYYY-MM-DD'
 		) AS local_date`,
     [userId],
@@ -451,10 +447,7 @@ export async function evaluateAddFriendCompletion(
   // Local "today" preferring the app-reported offset — brand-new users have
   // no workouts to derive a timezone from.
   const rows = await db.query<{ local_date: string }>(
-    `SELECT ((NOW() AT TIME ZONE 'UTC') + (COALESCE(
-			(SELECT ns.timezone_offset_minutes FROM notification_settings ns WHERE ns.user_id = $1),
-			(SELECT w.timezone_offset FROM workouts w WHERE w.user_id = $1 ORDER BY w.device_end_date DESC LIMIT 1),
-			0) || ' minutes')::interval)::date::text AS local_date`,
+    `SELECT ((NOW() AT TIME ZONE 'UTC') + (${USER_OFFSET_MINUTES_P1_SQL} || ' minutes')::interval)::date::text AS local_date`,
     [userId],
   );
   const localDate = rows[0]?.local_date;
@@ -924,9 +917,7 @@ async function distinctHypesToday(
       `SELECT COUNT(DISTINCT target_id)::text AS c
 			FROM hype_log
 			WHERE sender_id = $1
-				AND (created_at + (COALESCE(
-					(SELECT timezone_offset FROM workouts WHERE user_id = $1 ORDER BY device_end_date DESC LIMIT 1), 0
-				) || ' minutes')::interval)::date = $2::date`,
+				AND (created_at + (${USER_OFFSET_MINUTES_P1_SQL} || ' minutes')::interval)::date = $2::date`,
       [userId, localDate],
     );
     return parseInt(rows[0]?.c ?? "0", 10) || 0;
@@ -938,9 +929,7 @@ async function distinctHypesToday(
 /** Distinct friends the user nudged on `localDate` (friend + competition nudges). */
 async function nudgesToday(userId: string, localDate: string): Promise<number> {
   try {
-    const tzExpr = `(created_at + (COALESCE(
-				(SELECT timezone_offset FROM workouts WHERE user_id = $1 ORDER BY device_end_date DESC LIMIT 1), 0
-			) || ' minutes')::interval)::date = $2::date`;
+    const tzExpr = `(created_at + (${USER_OFFSET_MINUTES_P1_SQL} || ' minutes')::interval)::date = $2::date`;
     const rows = await db.query<{ c: string }>(
       `SELECT (
 				(SELECT COUNT(*) FROM friend_nudge_log WHERE sender_id = $1 AND ${tzExpr})
@@ -1470,10 +1459,7 @@ function shapeCrossTrain(
 async function resolveUserLocalDate(userId: string): Promise<string> {
   const rows = await db.query<{ local_date: string }>(
     `SELECT (NOW() + (
-			COALESCE(
-				(SELECT timezone_offset FROM workouts WHERE user_id = $1 ORDER BY device_end_date DESC LIMIT 1),
-				0
-			) || ' minutes'
+			${USER_OFFSET_MINUTES_P1_SQL} || ' minutes'
 		)::interval)::date::text AS local_date`,
     [userId],
   );
