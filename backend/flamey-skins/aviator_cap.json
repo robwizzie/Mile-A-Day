@@ -10,6 +10,8 @@
   "holidays": [],
   "mood_prop": false,
   "compact": true,
+  "tier": 70,
+  "auto_eligible": true,
   "rules": {"hides":[],"clashes":[],"head_rise":0.05,"head_scale":1.14},
   "art": {
     "front": {

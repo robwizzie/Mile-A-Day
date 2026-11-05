@@ -10,6 +10,8 @@
   "holidays": [],
   "mood_prop": false,
   "compact": false,
+  "tier": 30,
+  "auto_eligible": true,
   "rules": {"hides":[],"clashes":[]},
   "effects": ["bubble:pixel"],
   "art": {}

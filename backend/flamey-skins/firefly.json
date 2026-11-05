@@ -10,6 +10,8 @@
   "holidays": [],
   "mood_prop": false,
   "compact": false,
+  "tier": 20,
+  "auto_eligible": true,
   "rules": {"hides":[],"clashes":[],"floats":true},
   "art": {
     "companion-body@pose=cheeks": {

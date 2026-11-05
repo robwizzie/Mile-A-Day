@@ -10,6 +10,8 @@
   "holidays": [],
   "mood_prop": false,
   "compact": true,
+  "tier": 15,
+  "auto_eligible": false,
   "rules": {
     "hides": ["chest","eyes","feet","head"],
     "clashes": [],

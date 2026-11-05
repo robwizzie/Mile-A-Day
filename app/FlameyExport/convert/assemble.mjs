@@ -43,6 +43,24 @@ for (const line of enumBody.split('\n')) {
   }
 }
 
+// Closet tier ("Best look" takes the highest owned in a slot): FlameyItem.tier.
+const caseRaw = new Map();
+for (const line of enumBody.split('\n')) {
+  const code = line.replace(/\/\/.*$/, '').replace(/^\s*case\s+/, '');
+  if (!/^\s*[a-z]\w*\s*(=\s*"[^"]+"\s*)?(,|$)/.test(code)) continue;
+  for (const part of code.split(',')) {
+    const m = part.trim().match(/^([a-z]\w*)(?:\s*=\s*"([^"]+)")?$/);
+    if (m) caseRaw.set(m[1], m[2] ?? m[1]);
+  }
+}
+const tierBody = wardrobe.slice(wardrobe.indexOf('var tier: Int {'), wardrobe.indexOf('var hides: Set<FlameySlot>'));
+const tiers = new Map();
+for (const m of tierBody.matchAll(/case\s+([^:]+):\s*return\s+(\d+)/g)) {
+  for (const name of m[1].split(',').map((x) => x.trim().replace(/^\./, ''))) {
+    if (caseRaw.has(name)) tiers.set(caseRaw.get(name), Number(m[2]));
+  }
+}
+
 const AURAS = new Set(['spectral_glow', 'flicker', 'spotlight', 'paparazzi']);
 const problems = [];
 const written = [];
@@ -118,6 +136,10 @@ for (const file of fs.readdirSync(RAW).filter((f) => f.endsWith('.json')).sort()
     holidays: raw.holidays,
     mood_prop: raw.mood_prop,
     compact: raw.compact,
+    tier: tiers.get(id) ?? 0,
+    // FlameyItem.autoEligible: what "Best look" may pick.
+    auto_eligible: !raw.mood_prop && !(raw.holidays || []).length && raw.slot !== 'costume' && id !== 'phantom'
+      && (server?.unlock ?? 'always') !== 'plus' && !(server?.unlock?.month),
     rules,
   };
   if (raw.palette) skin.palette = raw.palette;
@@ -142,6 +164,7 @@ for (const id of serverUnlock.keys()) {
   if (!fs.existsSync(path.join(RAW, `${id}.json`))) problems.push(`${id}: on the server but the exporter didn't record it`);
 }
 
+if (tiers.size < 120) problems.push(`only ${tiers.size} tiers parsed from FlameyItem.tier`);
 if (enumOrder.length !== new Set(enumOrder).size) problems.push('FlameyItem case order parsed with duplicates');
 
 for (const p of problems) console.log('PROBLEM ' + p);

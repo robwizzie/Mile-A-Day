@@ -10,6 +10,8 @@
   "holidays": ["new_years_eve"],
   "mood_prop": false,
   "compact": true,
+  "tier": 5,
+  "auto_eligible": false,
   "rules": {"hides":[],"clashes":[],"head_rise":0.29},
   "art": {
     "front": {

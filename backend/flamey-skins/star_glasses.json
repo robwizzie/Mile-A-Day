@@ -10,6 +10,8 @@
   "holidays": ["new_years_day"],
   "mood_prop": false,
   "compact": true,
+  "tier": 5,
+  "auto_eligible": false,
   "rules": {"hides":[],"clashes":["sweatband"]},
   "art": {
     "front": {

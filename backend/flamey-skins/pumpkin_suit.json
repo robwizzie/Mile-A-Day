@@ -10,6 +10,8 @@
   "holidays": ["halloween"],
   "mood_prop": false,
   "compact": true,
+  "tier": 5,
+  "auto_eligible": false,
   "rules": {"hides":["chest","feet","head","held"],"clashes":[],"head_rise":0.09},
   "art": {
     "front": {

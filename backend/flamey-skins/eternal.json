@@ -10,6 +10,8 @@
   "holidays": [],
   "mood_prop": false,
   "compact": true,
+  "tier": 1000,
+  "auto_eligible": true,
   "rules": {"hides":[],"clashes":[]},
   "palette": {
     "angular": false,
