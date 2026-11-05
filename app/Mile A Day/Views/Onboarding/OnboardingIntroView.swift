@@ -648,35 +648,78 @@ private struct IntroWidget: View {
 private struct IntroFeedArt: View {
     let height: CGFloat
     @Environment(\.introArtWidth) private var artWidth
+    @Environment(\.introActive) private var active
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let photos: [ShowcasePhoto]
+
+    /// Which photo is the front post. Every few seconds it's dealt away and
+    /// the next one rises in; the prints behind show the two after it, so
+    /// every photo gets its turn in front. Holds still off-page / under
+    /// Reduce Motion.
+    @State private var index = 0
+    private let ticker = Timer.publish(every: 3.2, on: .main, in: .common).autoconnect()
 
     var body: some View {
         let width = min(height * 0.52, 190)
+        let count = max(photos.count, 1)
+        let front = index % count
         ZStack {
-            card(2, width: width * 0.86)
+            backPrint(at: front + 2, width: width * 0.86)
                 .rotationEffect(.degrees(9))
                 .offset(x: width * 0.66, y: 14)
                 .introPop(0.2)
-            card(1, width: width * 0.86)
+            backPrint(at: front + 1, width: width * 0.86)
                 .rotationEffect(.degrees(-9))
                 .offset(x: -width * 0.66, y: 14)
                 .introPop(0.12)
             // The front one is the feed's real post card, scaled down
             // (`PostCardView` .stacked: header, 4:5 photo, clap + comment +
             // share, streak pill, caption).
-            IntroFeedPost(photo: photos.first, height: height,
+            IntroFeedPost(photo: photos.isEmpty ? nil : photos[front], height: height,
                           // Whole card (it's ~1.72× as tall as wide) so the
                           // clap row, streak and caption show; only a very
                           // short hero (SE) falls back to a peek.
                           maxWidth: max(min(artWidth * 0.58, 240, height / 1.72), min(150, artWidth * 0.5)))
+                .id(front)
+                .transition(.asymmetric(
+                    insertion: .scale(scale: 0.88).combined(with: .opacity),
+                    removal: .dealAway))
                 .introPop(0)
                 .introBob(4, period: 3.6)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onReceive(ticker) { _ in
+            guard active, !reduceMotion, photos.count > 1 else { return }
+            withAnimation(.spring(response: 0.62, dampingFraction: 0.84)) { index += 1 }
+        }
     }
 
-    private func card(_ slot: Int, width: CGFloat) -> some View {
-        IntroPhotoCard(photo: photos.indices.contains(slot) ? photos[slot] : nil, slot: slot, width: width)
+    /// A tilted print of the photo `offset` places after the front one,
+    /// cross-fading when the rotation moves on.
+    private func backPrint(at offset: Int, width: CGFloat) -> some View {
+        let slot = photos.isEmpty ? offset % 3 : offset % photos.count
+        return IntroPhotoCard(photo: photos.isEmpty ? nil : photos[slot], slot: slot, width: width)
+            .id(slot)
+            .transition(.opacity)
+    }
+}
+
+/// The front post leaving: it tips and slides off to the left, like a card
+/// dealt away, while the next one rises in its place.
+private struct DealAway: ViewModifier {
+    let progress: Double
+
+    func body(content: Content) -> some View {
+        content
+            .rotationEffect(.degrees(-14 * progress))
+            .offset(x: -170 * progress, y: 30 * progress)
+            .opacity(1 - progress)
+    }
+}
+
+private extension AnyTransition {
+    static var dealAway: AnyTransition {
+        .modifier(active: DealAway(progress: 1), identity: DealAway(progress: 0))
     }
 }
 
@@ -1148,7 +1191,13 @@ struct ShowcasePhoto: Decodable, Identifiable, Equatable {
                       username: "rob", profile_image_url: nil, bundledImage: "onboarding-post-2"),
         ShowcasePhoto(post_id: "69626d63-32e6-4abd-8210-14d0d9017735", media_url: "",
                       caption: "Sunsets are too nice here 🌅", distance: 1.28, streak: 485,
-                      username: "rob", profile_image_url: nil, bundledImage: "onboarding-post-3")
+                      username: "rob", profile_image_url: nil, bundledImage: "onboarding-post-3"),
+        ShowcasePhoto(post_id: "0b9cde98-56fd-4c5a-a44b-e25ac11372a0", media_url: "",
+                      caption: "Concert Mile 🎤", distance: 1.26, streak: 453,
+                      username: "rob", profile_image_url: nil, bundledImage: "onboarding-post-4"),
+        ShowcasePhoto(post_id: "04305ad4-2536-44bf-96d2-1b6fde894ae2", media_url: "",
+                      caption: "@mad and Cape May 🌊", distance: 1.08, streak: 446,
+                      username: "rob", profile_image_url: nil, bundledImage: "onboarding-post-5")
     ]
 }
 
@@ -1177,9 +1226,9 @@ final class ShowcasePhotoStore: ObservableObject {
             guard (response as? HTTPURLResponse)?.statusCode == 200 else { return }
             let decoded = try JSONDecoder().decode(Response.self, from: data).photos
             loaded = true
-            // Front post + two prints. All of them still in the bundle (or
+            // The rotation's photos. All of them still in the bundle (or
             // the showcase turned off): keep the bundled copies, no swap.
-            let picks = Array(decoded.prefix(3))
+            let picks = Array(decoded.prefix(5))
             let bundledIds = Set(ShowcasePhoto.bundled.map(\.post_id))
             guard !picks.isEmpty, !picks.allSatisfy({ bundledIds.contains($0.post_id) }) else { return }
             // New picks: download first, then swap, so nothing flashes empty.

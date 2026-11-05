@@ -17,11 +17,14 @@ const db = PostgresService.getInstance();
  * sample cards).
  */
 export const DEFAULT_SHOWCASE_POST_IDS = [
-  // Scenery and group walks (also bundled in the app as onboarding-post-1..3,
-  // same order): beach buddy walk, photo op with stickers, sunset.
+  // Scenery and group walks (also bundled in the app as onboarding-post-1..5,
+  // same order; onboarding rotates through them): beach buddy walk, photo
+  // op with stickers, sunset, skyline, Cape May.
   "07e8f0b6-7dd5-4bb7-ac64-7fd3f71c35a2",
   "81c1895c-3f0d-47ce-9872-321f4e50f4ab",
   "69626d63-32e6-4abd-8210-14d0d9017735",
+  "0b9cde98-56fd-4c5a-a44b-e25ac11372a0",
+  "04305ad4-2536-44bf-96d2-1b6fde894ae2",
 ];
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
