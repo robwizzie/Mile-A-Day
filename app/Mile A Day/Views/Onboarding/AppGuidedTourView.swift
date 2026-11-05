@@ -32,14 +32,21 @@ struct AppGuidedTourView: View {
     private static let surface = Color(red: 0.09, green: 0.06, blue: 0.075)
 
     var body: some View {
+        // The OUTER reader respects the safe area, so its insets are real
+        // (one that ignores the safe area reads them as zero, which put a top
+        // card under the status bar); the content then fills the screen.
         GeometryReader { geo in
-            let origin = geo.frame(in: .global).origin
-            let hole = spotlight(in: geo.size, origin: origin)
-            let cardOnTop = hole.map { $0.midY > geo.size.height * 0.55 } ?? false
+            let insets = geo.safeAreaInsets
+            let size = CGSize(width: geo.size.width + insets.leading + insets.trailing,
+                              height: geo.size.height + insets.top + insets.bottom)
+            let frame = geo.frame(in: .global)
+            let origin = CGPoint(x: frame.minX - insets.leading, y: frame.minY - insets.top)
+            let hole = spotlight(in: size, origin: origin)
+            let cardOnTop = hole.map { $0.midY > size.height * 0.5 } ?? false
 
             ZStack {
                 // Dim everything except the spotlight; absorbs taps on the app.
-                SpotlightShape(hole: hole ?? CGRect(x: geo.size.width / 2, y: geo.size.height / 2, width: 0, height: 0),
+                SpotlightShape(hole: hole ?? CGRect(x: size.width / 2, y: size.height / 2, width: 0, height: 0),
                                radius: 18)
                     .fill(Color.black.opacity(0.62), style: FillStyle(eoFill: true))
                     .contentShape(Rectangle())
@@ -53,20 +60,22 @@ struct AppGuidedTourView: View {
                         .allowsHitTesting(false)
                 }
 
-                VStack {
+                VStack(spacing: 0) {
                     if !cardOnTop { Spacer(minLength: 0) }
                     card
                         .padding(.horizontal, 16)
-                        .padding(.top, cardOnTop ? geo.safeAreaInsets.top + 12 : 0)
-                        .padding(.bottom, cardOnTop ? 0 : 96) // clear the tab bar
+                        .padding(.top, cardOnTop ? insets.top + 8 : 0)
+                        // Clear the tab bar (~49pt) above the home indicator.
+                        .padding(.bottom, cardOnTop ? 0 : insets.bottom + 62)
                     if cardOnTop { Spacer(minLength: 0) }
                 }
             }
+            .frame(width: size.width, height: size.height)
+            .offset(x: -insets.leading, y: -insets.top)
             .opacity(shown ? 1 : 0)
         }
-        .ignoresSafeArea()
-        .animation(.spring(response: 0.5, dampingFraction: 0.86), value: step)
-        .animation(.spring(response: 0.5, dampingFraction: 0.86), value: anchors.version)
+        // Only a step change animates; anchor reports apply as they come.
+        .animation(.spring(response: 0.42, dampingFraction: 0.88), value: step)
         .onAppear(perform: start)
         .onDisappear { anchors.isRecording = false }
     }
@@ -108,6 +117,9 @@ struct AppGuidedTourView: View {
                     .foregroundColor(.white.opacity(0.75))
                     .fixedSize(horizontal: false, vertical: true)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .id(step)
+            .transition(.opacity)
             .opacity(textVisible ? 1 : 0)
 
             HStack(spacing: 12) {
@@ -155,39 +167,39 @@ struct AppGuidedTourView: View {
         }
     }
 
-    /// Tap → text fades at once (instant feedback) → tab switches while
-    /// nothing animates → when the new screen has reported its element (or
-    /// after a short cap) the spotlight glides there and the text fades in.
+    /// Same tab: the spotlight and text move at once, on the tap.
+    /// New tab: the text fades at once (feedback), the tab switches right
+    /// away, and the spotlight + text arrive as soon as the new screen has
+    /// reported its element (0.5s cap) — never mid-build.
     private func go(to newStep: Int) {
         guard !busy else { return }
-        busy = true
         MADHaptics.tap()
-        withAnimation(.easeOut(duration: 0.12)) { textVisible = false }
-        let changesTab = steps[newStep].tabIndex != current.tabIndex
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.13) {
-            if changesTab { switchToTab(steps[newStep].tabIndex) }
-            settle(on: newStep) { busy = false }
+        guard steps[newStep].tabIndex != current.tabIndex else {
+            step = newStep
+            return
         }
+        busy = true
+        withAnimation(.easeOut(duration: 0.1)) { textVisible = false }
+        switchToTab(steps[newStep].tabIndex)
+        settle(on: newStep) { busy = false }
     }
 
-    /// Wait (up to 0.6s) for the step's element to report, then show it.
+    /// Wait (up to 0.5s) for the step's element to report, then show it.
     private func settle(on newStep: Int, then done: @escaping () -> Void) {
         let target = steps[newStep].anchor
-        let deadline = Date().addingTimeInterval(0.6)
+        let deadline = Date().addingTimeInterval(0.5)
         func check() {
-            let ready = target == nil || (anchors.frames[target!]?.width ?? 0) > 0
+            let ready = target.map { (anchors.frames[$0]?.width ?? 0) > 0 } ?? true
             if ready || Date() >= deadline {
-                // One more run loop so the tab's first layout has landed.
-                DispatchQueue.main.async {
-                    step = newStep
-                    withAnimation(.easeOut(duration: 0.2).delay(0.05)) { textVisible = true }
-                    done()
-                }
+                step = newStep
+                withAnimation(.easeOut(duration: 0.18)) { textVisible = true }
+                done()
             } else {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { check() }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.04) { check() }
             }
         }
-        check()
+        // One run loop first so the tab switch lands before we look.
+        DispatchQueue.main.async { check() }
     }
 
     private func finish() {

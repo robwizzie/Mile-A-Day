@@ -729,7 +729,10 @@ struct TodayBoardView: View {
                             .padding(.bottom, 7)
                     }
                     .overlay(alignment: .topTrailing) {
-                        if !hasSharedWorkout {
+                        // "+" once you can post. The lock (posting waits on
+                        // your mile) only on an EMPTY tile: over your own live
+                        // story it read as "your story is locked".
+                        if !hasSharedWorkout && (canPost || myGroup == nil) {
                             Image(systemName: canPost ? "plus.circle.fill" : "lock.circle.fill")
                                 .font(.system(size: 20))
                                 .foregroundStyle(.white, canPost ? MADTheme.Colors.madRed : Color.gray)
