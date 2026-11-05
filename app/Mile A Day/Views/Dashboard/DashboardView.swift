@@ -756,7 +756,7 @@ struct DashboardView: View {
         // feature and mode. Replaces the old spotlight overlay, which
         // mis-highlighted dashboard elements that were scrolled off-screen.
         .fullScreenCover(isPresented: $showWelcomeTour) {
-            WelcomeTourView {
+            OnboardingIntroView(finishButtonTitle: "Start my streak") {
                 showWelcomeTour = false
                 hasSeenWelcomeTour = true
                 // Completing the tour supersedes the welcome banner.
