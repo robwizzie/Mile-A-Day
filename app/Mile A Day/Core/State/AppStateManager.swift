@@ -71,11 +71,11 @@ class AppStateManager: ObservableObject {
         DispatchQueue.main.async { self.splashOverlay = false }
     }
 
-    /// Never leave the overlay up: `SplashView` reveals by ~4.4s at the latest
+    /// Never leave the overlay up: `SplashView` reveals by ~6s at the latest
     /// even if the dashboard never reports ready; this is the backstop for a
     /// splash that never appeared at all.
     private func startSplashOverlayFallback() {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 6) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 8) {
             self.splashOverlay = false
         }
     }
@@ -360,7 +360,7 @@ class AppStateManager: ObservableObject {
     /// (`SplashView.handoffDelay`) once it has actually been on screen; this
     /// only fires if the view never appeared, so it sits well after that.
     private func startSplashTimer() {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3.5) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
             self.completeSplash()
         }
     }
