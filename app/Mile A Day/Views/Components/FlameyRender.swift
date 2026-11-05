@@ -183,7 +183,6 @@ struct FlameyOutfitLayer: View {
 
     @ViewBuilder
     private var behind: some View {
-        let a = anchors
         let u = self.u
         let reach = self.reach
         let look = self.look
@@ -288,7 +287,6 @@ struct FlameyOutfitLayer: View {
         let a = anchors
         let u = self.u
         let look = self.look
-        let palette = self.palette
         let jets = look.detail == .full
         let reach = self.reach
         ZStack {
