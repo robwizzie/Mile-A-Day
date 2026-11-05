@@ -247,7 +247,7 @@ struct DashboardView: View {
         for workout in healthManager.todaysWorkouts {
             let miles = workout.madDistanceMiles
             let existing = byType[workout.workoutActivityType] ?? (0, 0)
-            byType[workout.workoutActivityType] = (existing.distance + miles, existing.duration + workout.duration)
+            byType[workout.workoutActivityType] = (existing.distance + miles, existing.duration + workout.madDuration)
         }
         return byType.map { type, data in
             WorkoutBreakdown(

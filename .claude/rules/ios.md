@@ -66,6 +66,8 @@ Details: docs/conventions/ios.md § Key Patterns
 - Goal scoring uses `isGoalCompleted(current:goal:)` (clamp goal > 0), never `>= goal` (in-workout alert and competitions excepted); day miles via `countedMiles(onLocalDay:)`.
 - The DAY is done at a mile OR 10k steps (`isDayComplete`, `dailyStepGoal`); steps-done reads `StepGoalDayStore.isTodayMet()`, never `todaysSteps`; walks union `StepGoalDayStore`, behind `#if !os(watchOS)` in Watch-member files; celebration/posting stay miles.
 - Never use `HKWorkout.totalDistance` for display/sums: use `madDistanceMiles` (tracked floor, `userOverride` wins); sync uploads it too.
+- Never read `HKWorkout.duration` for display/pace/sums: use `madDuration` (`userOverrideDuration` wins; raw only for dedup) and `madMovingSeconds`; sync uploads it too.
+- Edit flags come only from `WorkoutEditPolicy` (lenient, judged vs RECORDED figures): plausible ⇒ `.healthkit`, totally off ⇒ `.manual`; edit screens never emit `.edited`.
 - Dedup via `WorkoutDedup.breakdown(in:)` (consent first); grandfather sources by timestamp.
 - The tracker's WALK · OUTDOOR descriptor is the distance caption; never back in the top bar.
 - `AvatarWithRing` fits inside `size`; paused/stale roster tiles keep their distance (stale: greyscale, `.outOfRange`, `lastHeardAgo`); never send an age as a timestamp.

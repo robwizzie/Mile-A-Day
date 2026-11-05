@@ -50,8 +50,8 @@ enum ShoeActivity: String, CaseIterable, Identifiable, Hashable {
         case .cycling: return nil
         default:
             let miles = workout.madDistanceMiles
-            guard miles > 0, workout.duration > 0 else { return .walking }
-            return workout.duration / miles < walkRunPaceSeconds ? .running : .walking
+            guard miles > 0, workout.madDuration > 0 else { return .walking }
+            return workout.madDuration / miles < walkRunPaceSeconds ? .running : .walking
         }
     }
 }

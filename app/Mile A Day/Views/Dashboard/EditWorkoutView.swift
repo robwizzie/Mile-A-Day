@@ -1,12 +1,17 @@
 import SwiftUI
 
 struct EditWorkoutView: View {
-    private static let manualEntryDistanceIncreaseThreshold = 0.25
-
     let workoutId: String
     let currentDistance: Double
     let currentDuration: TimeInterval
     let currentWorkoutType: String
+    /// What the device measured before any edit — what `WorkoutEditPolicy`
+    /// judges against, so a correction can't be stacked one save at a time.
+    /// Nil falls back to the current figures (older callers).
+    var recordedDistance: Double? = nil
+    var recordedDuration: TimeInterval? = nil
+    /// Treadmill / indoor: far more room for distance corrections.
+    var isIndoor: Bool = false
 
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var healthManager: HealthKitManager
@@ -35,6 +40,17 @@ struct EditWorkoutView: View {
         distanceChanged || durationChanged || typeChanged
     }
 
+    /// Flagged "Edited" under the old rules, which flagged ANY time or type
+    /// change. Saving re-judges it under `WorkoutEditPolicy`, so Save stays
+    /// enabled even with nothing changed — that's how an old badge comes off.
+    private var carriesOldEditFlag: Bool {
+        ManualWorkoutRegistry.sourceFor(workoutId) == .edited
+    }
+
+    private var canSave: Bool {
+        isValid && (hasChanges || carriesOldEditFlag) && !isSaving
+    }
+
     private var isValid: Bool {
         guard let d = distance, d > 0, d < 100 else { return false }
         return totalDuration > 0
@@ -53,23 +69,19 @@ struct EditWorkoutView: View {
         workoutType != currentWorkoutType
     }
 
-    private var addsMoreThan25Percent: Bool {
-        guard currentDistance > 0, let d = distance else { return false }
-        return d > currentDistance * (1 + Self.manualEntryDistanceIncreaseThreshold)
-    }
-
-    private var manualEntryDistanceIncreaseText: String {
-        Self.manualEntryDistanceIncreaseThreshold.formatted(.percent.precision(.fractionLength(0)))
+    private var flagReason: WorkoutEditPolicy.Reason? {
+        guard let d = distance else { return nil }
+        return WorkoutEditPolicy.flagReason(
+            recordedDistance: recordedDistance ?? currentDistance,
+            recordedDuration: recordedDuration ?? currentDuration,
+            newDistance: d,
+            newDuration: totalDuration,
+            isIndoor: isIndoor
+        )
     }
 
     private var editSource: WorkoutSource {
-        if addsMoreThan25Percent {
-            return .manual
-        }
-        if distanceChanged && !durationChanged && !typeChanged {
-            return .healthkit
-        }
-        return .edited
+        flagReason == nil ? .healthkit : .manual
     }
 
     var body: some View {
@@ -97,8 +109,8 @@ struct EditWorkoutView: View {
                         Text("miles")
                             .foregroundColor(.secondary)
                     }
-                    if currentDistance > 0 {
-                        Text("Original: \(String(format: "%.2f", currentDistance)) mi")
+                    if (recordedDistance ?? currentDistance) > 0 {
+                        Text("Recorded: \(String(format: "%.2f", recordedDistance ?? currentDistance)) mi")
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
@@ -114,9 +126,9 @@ struct EditWorkoutView: View {
                         durationPicker(value: $seconds, label: "sec", range: 0...59)
                     }
                     .listRowInsets(EdgeInsets(top: 4, leading: 8, bottom: 4, trailing: 8))
-                    let origMin = Int(currentDuration) / 60
-                    let origSec = Int(currentDuration) % 60
-                    Text("Original: \(origMin)m \(origSec)s")
+                    let origMin = Int(recordedDuration ?? currentDuration) / 60
+                    let origSec = Int(recordedDuration ?? currentDuration) % 60
+                    Text("Recorded: \(origMin)m \(origSec)s")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 } header: {
@@ -153,7 +165,7 @@ struct EditWorkoutView: View {
                         distanceFieldFocused = false
                         saveTapped()
                     }
-                    .disabled(!isValid || !hasChanges || isSaving)
+                    .disabled(!canSave)
                     .fontWeight(.semibold)
                 }
                 // The decimal pad has no return key — without this there is no
@@ -202,19 +214,17 @@ struct EditWorkoutView: View {
             }
             Button("Cancel", role: .cancel) { }
         } message: {
-            Text("This edit adds more than \(manualEntryDistanceIncreaseText) to the recorded distance, so it will be visible as a manual entry.")
+            Text(WorkoutEditPolicy.explanation(for: flagReason ?? .distance))
         }
     }
 
     private var editWarningText: String {
-        switch editSource {
-        case .manual:
-            return "Adding more than \(manualEntryDistanceIncreaseText) marks this workout as manually entered."
-        case .edited:
-            return "Changing time or type marks this workout as manually edited."
-        case .healthkit:
-            return "Distance corrections within \(manualEntryDistanceIncreaseText) are not flagged as manual."
+        if let flagReason {
+            return WorkoutEditPolicy.explanation(for: flagReason)
         }
+        return isIndoor
+            ? "Treadmill corrections to distance, time or type aren't flagged. Only a change far beyond what was recorded shows as manual."
+            : "Corrections to distance, time or type aren't flagged. Only a change far beyond what was recorded shows as manual."
     }
 
     private func cancelTapped() {
@@ -285,6 +295,12 @@ struct EditWorkoutView: View {
             // `madDistanceMiles` would floor the display back to the tracked
             // value and the edit would silently never take on any local screen.
             TrackedWorkoutLedger.shared.userOverride(workoutId: workoutId, miles: distance)
+            // Same for the time. HealthKit can't be rewritten, and every screen
+            // used to read `HKWorkout.duration` directly — the server took the
+            // edit while the phone kept showing (and re-offering) the old time.
+            if durationChanged || TrackedWorkoutLedger.shared.userDuration(forWorkoutId: workoutId) != nil {
+                TrackedWorkoutLedger.shared.userOverrideDuration(workoutId: workoutId, seconds: totalDuration)
+            }
 
             // Force full index rebuild to pick up the source change
             WorkoutIndex.clear()

@@ -4,7 +4,10 @@
 
 import { OWNER_NOT_PRIVATE_SQL } from "../visibilityService.js";
 import { servedRouteFrom } from "../routePrivacy.js";
-import { CLIENT_FEATURES, supportsClientFeatureSql } from "../clientFeatures.js";
+import {
+  CLIENT_FEATURES,
+  supportsClientFeatureSql,
+} from "../clientFeatures.js";
 import { postHypedByViewerMatchSql, postHypeMatchSql } from "../hypeService.js";
 
 // Shared circle + symmetric-block fragment. `$1` is always the viewer id.
@@ -69,8 +72,16 @@ const MIN_MOVING_COVERAGE = 0.5;
  * `w`'s moving time when it may be believed, NULL otherwise — drop-in for a
  * bare `<alias>.moving_seconds` anywhere a pace divides by it.
  */
+/**
+ * A duration the user EDITED retires the moving clock: it measured the old
+ * figure, so it still covering 50% of the new one says nothing. Without this a
+ * treadmill time corrected 8:30 → 9:30 kept printing the device's pace, so the
+ * edit looked saved and changed nothing on the card. `original_duration` is set
+ * only by `updateWorkout`, holding the pre-edit figure.
+ */
 export const displayMovingSecondsSql = (w: string) => `(CASE
 		WHEN ${w}.moving_seconds > 0
+			AND (${w}.original_duration IS NULL OR ${w}.original_duration = ${w}.total_duration)
 			AND ${w}.total_duration > 0
 			AND ${w}.moving_seconds <= ${w}.total_duration
 			AND ${w}.moving_seconds >= ${w}.total_duration * ${MIN_MOVING_COVERAGE}
@@ -114,7 +125,9 @@ export const rollupPaceSql = (movingSeconds: string, distance: string) =>
 		AND ${movingSeconds} / ${distance} BETWEEN 120 AND 3600
 	THEN ${movingSeconds} / ${distance} END)`;
 
-export const authorFlameySql = (u: string) => `CASE WHEN ${u}.dashboard_style = 'fun'
+export const authorFlameySql = (
+  u: string,
+) => `CASE WHEN ${u}.dashboard_style = 'fun'
 	THEN jsonb_build_object('look', ${u}.flamey_look, 'name', ${u}.flamey_name) END`;
 
 /**
@@ -220,7 +233,9 @@ const POST_COLUMNS = `
  * after bob blocked alice contradicts that. Severing the tag, not the post: the
  * media and the run are the author's, so it simply reverts to a solo post.
  */
-export const collabActiveSql = (a: string) => `(${a}.coauthor_status = 'accepted'
+export const collabActiveSql = (
+  a: string,
+) => `(${a}.coauthor_status = 'accepted'
 	AND NOT EXISTS (
 		SELECT 1 FROM user_blocks cb
 		WHERE (cb.blocker_id = ${a}.user_id AND cb.blocked_id = ${a}.coauthor_user_id)
@@ -288,7 +303,10 @@ export const COLLAB_ACTIVE = collabActiveSql("p");
  *
  * `coauthorParam` must be the id of the person whose grid is being built.
  */
-export const coauthorOnProfileSql = (a: string, coauthorParam: string) => `COALESCE(
+export const coauthorOnProfileSql = (
+  a: string,
+  coauthorParam: string,
+) => `COALESCE(
 	${a}.coauthor_on_profile,
 	(SELECT ns.tagged_posts_on_profile FROM notification_settings ns
 		WHERE ns.user_id = ${coauthorParam}),

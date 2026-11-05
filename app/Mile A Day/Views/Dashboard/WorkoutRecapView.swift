@@ -503,7 +503,6 @@ struct WorkoutRecapView: View {
 }
 
 private struct TreadmillDistanceAdjustmentCard: View {
-    private static let manualEntryDistanceIncreaseThreshold = 0.25
 
     let workoutId: String
     let recordedDistance: Double
@@ -528,13 +527,23 @@ private struct TreadmillDistanceAdjustmentCard: View {
         Double(distanceString.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
-    private var addsMoreThan25Percent: Bool {
-        guard recordedDistance > 0, let enteredDistance else { return false }
-        return enteredDistance > recordedDistance * (1 + Self.manualEntryDistanceIncreaseThreshold)
-    }
+    /// The time on the card: what the user set on the edit sheet, else what
+    /// the tracker recorded. Re-read when the sheet closes.
+    @State private var editedDuration: TimeInterval?
 
-    private var manualEntryDistanceIncreaseText: String {
-        Self.manualEntryDistanceIncreaseThreshold.formatted(.percent.precision(.fractionLength(0)))
+    private var shownDuration: TimeInterval { editedDuration ?? duration }
+
+    /// Treadmill rules from `WorkoutEditPolicy` — lenient: only a distance
+    /// far beyond what the treadmill time supports is flagged manual.
+    private var flagReason: WorkoutEditPolicy.Reason? {
+        guard let enteredDistance else { return nil }
+        return WorkoutEditPolicy.flagReason(
+            recordedDistance: recordedDistance,
+            recordedDuration: duration,
+            newDistance: enteredDistance,
+            newDuration: shownDuration,
+            isIndoor: true
+        )
     }
 
     private var canSave: Bool {
@@ -543,7 +552,7 @@ private struct TreadmillDistanceAdjustmentCard: View {
     }
 
     private var formattedTime: String {
-        let totalSeconds = Int(duration)
+        let totalSeconds = Int(shownDuration)
         let hours = totalSeconds / 3600
         let minutes = (totalSeconds % 3600) / 60
         let seconds = totalSeconds % 60
@@ -633,11 +642,11 @@ private struct TreadmillDistanceAdjustmentCard: View {
                 .foregroundColor(.white)
             }
 
-            if addsMoreThan25Percent {
+            if let flagReason {
                 HStack(alignment: .top, spacing: 8) {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .font(.system(size: 12, weight: .bold))
-                    Text("Adding more than \(manualEntryDistanceIncreaseText) will mark this workout as manually entered.")
+                    Text(WorkoutEditPolicy.explanation(for: flagReason))
                         .font(.system(size: 12, weight: .semibold, design: .rounded))
                 }
                 .foregroundColor(.orange)
@@ -669,21 +678,26 @@ private struct TreadmillDistanceAdjustmentCard: View {
             }
             Button("Cancel", role: .cancel) { }
         } message: {
-            Text("This treadmill distance adds more than \(manualEntryDistanceIncreaseText) to the recorded workout, so it will be visible as a manual entry.")
+            Text(WorkoutEditPolicy.explanation(for: flagReason ?? .distance))
         }
-        .sheet(isPresented: $showEditSheet) {
+        .sheet(isPresented: $showEditSheet, onDismiss: {
+            editedDuration = TrackedWorkoutLedger.shared.userDuration(forWorkoutId: workoutId)
+        }) {
             EditWorkoutView(
                 workoutId: workoutId,
                 currentDistance: currentDistance,
-                currentDuration: duration,
-                currentWorkoutType: workoutType
+                currentDuration: shownDuration,
+                currentWorkoutType: workoutType,
+                recordedDistance: recordedDistance,
+                recordedDuration: duration,
+                isIndoor: true
             )
             .environmentObject(healthManager)
         }
     }
 
     private func saveTapped() {
-        if addsMoreThan25Percent {
+        if flagReason != nil {
             showManualFlagConfirmation = true
         } else {
             Task { await saveDistance(source: .healthkit) }

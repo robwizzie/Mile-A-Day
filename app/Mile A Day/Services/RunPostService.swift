@@ -153,7 +153,7 @@ enum RunPostService {
             return RunStatsInput(
                 distance: distance,
                 paceSecondsPerMile: pace,
-                durationSeconds: workout.duration > 0 ? workout.duration : nil,
+                durationSeconds: workout.madDuration > 0 ? workout.madDuration : nil,
                 streak: postableStreak(),
             competition: defaultCompetitionSticker(),
                 calories: calories > 0 ? calories : nil,
@@ -225,9 +225,9 @@ enum RunPostService {
     /// (raw workout cards, the flyover) have to apply the identical one to
     /// the same workout.
     private static func paceDuration(of workout: HKWorkout) -> TimeInterval {
-        let moving = workout.metadata?[WorkoutLocationManager.movingSecondsMetadataKey] as? Double
-        return DisplayPace.divisor(movingSeconds: moving, elapsedSeconds: workout.duration)
-            ?? workout.duration
+        let moving = workout.madMovingSeconds
+        return DisplayPace.divisor(movingSeconds: moving, elapsedSeconds: workout.madDuration)
+            ?? workout.madDuration
     }
 
     /// The ghost WIN stamped on this workout, if it beat its ghost.
@@ -285,7 +285,7 @@ enum RunPostService {
     static func estimatedCalories(_ workout: HKWorkout) -> Double {
         WorkoutEnergyEstimate.activeKilocalories(
             meters: workout.madDistanceMiles * 1609.344,
-            activeSeconds: workout.duration,
+            activeSeconds: workout.madDuration,
             bodyMassKilograms: nil
         ) ?? 0
     }

@@ -72,8 +72,8 @@ struct WorkoutDetailView: View {
 
     /// Average speed in mph for this workout (0 if we can't compute it).
     private var averageSpeedMph: Double {
-        guard workout.duration > 0, distanceMiles > 0 else { return 0 }
-        return distanceMiles / (workout.duration / 3600.0)
+        guard workout.madDuration > 0, distanceMiles > 0 else { return 0 }
+        return distanceMiles / (workout.madDuration / 3600.0)
     }
 
     /// A human can't run/walk a mile faster than ~15 mph (world record), so high
@@ -322,8 +322,11 @@ struct WorkoutDetailView: View {
                 EditWorkoutView(
                     workoutId: workout.uuid.uuidString,
                     currentDistance: distanceMiles,
-                    currentDuration: workout.duration,
-                    currentWorkoutType: workoutTypeString == "Run" ? "running" : workoutTypeString == "Walk" ? "walking" : "running"
+                    currentDuration: workout.madDuration,
+                    currentWorkoutType: workoutTypeString == "Run" ? "running" : workoutTypeString == "Walk" ? "walking" : "running",
+                    recordedDistance: workout.recordedDistanceMiles,
+                    recordedDuration: workout.duration,
+                    isIndoor: workout.isIndoorWorkout
                 )
             }
             .task(id: isActive) {
@@ -819,9 +822,9 @@ struct WorkoutDetailView: View {
             paceSecondsPerMile: DisplayPace.secondsPerMile(
                 distanceMiles: distanceMiles,
                 movingSeconds: movingSeconds,
-                elapsedSeconds: workout.duration
+                elapsedSeconds: workout.madDuration
             ),
-            durationSeconds: workout.duration > 0 ? workout.duration : nil,
+            durationSeconds: workout.madDuration > 0 ? workout.madDuration : nil,
             streak: UserManager.shared.currentUser.streak,
             totalMiles: UserManager.shared.currentUser.totalMiles,
             activityName: workoutTypeString,
@@ -843,7 +846,7 @@ struct WorkoutDetailView: View {
     /// The tracker's own moving clock when it recorded one, so a shared card's
     /// pace matches the card the feed prints for the same walk.
     private var movingSeconds: Double? {
-        workout.metadata?[WorkoutLocationManager.movingSecondsMetadataKey] as? Double
+        workout.madMovingSeconds
     }
 
     /// Does this run have a drawable GPS trace (drives the hero "Route" tag).
@@ -1080,7 +1083,7 @@ struct WorkoutDetailView: View {
                 routeStats = await RouteMatcher.routeStats(
                     for: routeCoordinates,
                     workoutId: workoutId,
-                    currentDuration: workout.duration,
+                    currentDuration: workout.madDuration,
                     durationFor: { healthManager.workoutRecord(forUUID: $0)?.duration }
                 )
             }

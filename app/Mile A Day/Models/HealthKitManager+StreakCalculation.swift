@@ -206,7 +206,7 @@ extension HealthKitManager {
         for workout in streakWorkouts {
             let miles = workout.madDistanceMiles
             guard miles >= 0.95 else { continue }
-            let avgPace = workout.duration / 60.0 / miles
+            let avgPace = workout.madDuration / 60.0 / miles
             // If average pace is close to all-time fastest, this workout likely contains it
             if abs(avgPace - fastestMilePace) <= tolerance {
                 return workout

@@ -90,7 +90,7 @@ export interface FeedSegment {
 // One row of the unified feed — either a photo `post` or a raw `workout`
 // activity. Type-specific columns are null for the other kind.
 export interface FeedEntryRow {
-  /** Raw daily-mile workout cards only: the owner's streak on that day. */
+  /** Raw workout cards (the day's mile and extra walks after it): the owner's streak on that day. */
   day_streak?: number | null;
   kind: "post" | "workout";
   id: string;
@@ -309,10 +309,12 @@ const FEED_ENTRY_PROJECTION = `
 			-- every plain walk. Counted from the current streak's start to the
 			-- card's day, capped at the stored streak (a pause inside the
 			-- streak elides days the span still counts — the cap keeps that
-			-- from ever overstating). NULL off-streak, for posts, and for
-			-- non-anchor workouts (an extra walk isn't the day's mile).
+			-- from ever overstating). NULL off-streak and for posts. 'extra'
+			-- walks carry it too: 'extra' only exists on a day that already
+			-- reached the mile, so the streak as of that day is just as true —
+			-- and a friend's second walk with no streak read as a broken one.
 			CASE
-				WHEN page.kind = 'workout' AND wt.feed_role = 'daily_mile'
+				WHEN page.kind = 'workout' AND wt.feed_role IN ('daily_mile', 'extra')
 					AND u.streak_start_date IS NOT NULL
 					AND wt.local_date >= u.streak_start_date
 					AND (u.streak_valid_through IS NULL OR wt.local_date <= u.streak_valid_through)

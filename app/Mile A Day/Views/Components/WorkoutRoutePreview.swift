@@ -344,7 +344,7 @@ struct WorkoutMediaPreviewCard: View {
     /// map prints — the HUD and the row must not disagree about one walk.
     private var flyoverStats: PostStats {
         let miles = distanceMiles
-        let seconds = workout.duration
+        let seconds = workout.madDuration
         return PostStats(
             distance: miles > 0 ? miles : nil,
             pace: miles > 0 && seconds > 0 ? seconds / miles : nil,

@@ -617,7 +617,7 @@ struct ProfileView: View {
                         userId: userId,
                         date: Self.localDayFormatter.string(from: day),
                         distance: workout.madDistanceMiles,
-                        totalDuration: workout.duration,
+                        totalDuration: workout.madDuration,
                         workoutType: Self.workoutTypeName(for: workout),
                         deviceEndDate: Self.isoFormatter.string(from: workout.endDate),
                         calories: nil,

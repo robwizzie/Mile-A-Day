@@ -51,7 +51,7 @@ struct WorkoutRecord: Codable, Identifiable {
         
         self.timezoneOffset = timezoneOffset
         self.distance = workout.madDistanceMiles
-        self.duration = workout.duration
+        self.duration = workout.madDuration
         
         switch workout.workoutActivityType {
         case .running:
@@ -1028,7 +1028,7 @@ class HealthKitManager: ObservableObject {
     
     /// Today's total workout duration in seconds (uses todaysWorkouts for accuracy)
     var todaysTotalDuration: TimeInterval {
-        return todaysWorkouts.reduce(0) { $0 + $1.duration }
+        return todaysWorkouts.reduce(0) { $0 + $1.madDuration }
     }
 
     /// Today's average pace in minutes per mile (calculated from today's workouts only)
@@ -1040,7 +1040,7 @@ class HealthKitManager: ObservableObject {
         for workout in todaysWorkouts {
             let miles = workout.madDistanceMiles
             if miles > 0 {
-                totalDuration += workout.duration
+                totalDuration += workout.madDuration
                 totalMiles += miles
             }
         }
@@ -1067,7 +1067,7 @@ class HealthKitManager: ObservableObject {
         for workout in todaysWorkouts {
             let miles = workout.madDistanceMiles
             if miles >= 0.3 { // Only consider workouts with meaningful distance
-                let pace = (workout.duration / 60.0) / miles
+                let pace = (workout.madDuration / 60.0) / miles
                 // Sanity check: pace should be between 2:00/mi and 30:00/mi
                 if pace >= 2.0 && pace < fastestPace {
                     fastestPace = pace
@@ -1930,6 +1930,7 @@ final class TrackedWorkoutLedger {
 
     private init() {
         entries = Self.decode(defaults.data(forKey: Self.storageKey)) ?? [:]
+        durations = Self.decodeDurations(defaults.data(forKey: Self.durationStorageKey)) ?? [:]
     }
 
     private static func decode(_ data: Data?) -> [String: Entry]? {
@@ -2027,6 +2028,67 @@ final class TrackedWorkoutLedger {
         persistLocked()
     }
 
+    /// What the tracker measured, if this app measured the workout and the
+    /// user hasn't typed over it. The edit screen's baseline for "how far did
+    /// this edit move the number".
+    func trackerMiles(forWorkoutId workoutId: String) -> Double? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let entry = entries[workoutId], entry.isTrackerMeasured, !entry.isUserChosen
+        else { return nil }
+        return entry.miles
+    }
+
+    // MARK: Edited durations
+
+    /// The time the user typed on the edit screen, keyed by workout id.
+    ///
+    /// HealthKit is read-only for workouts this app didn't write, so an edited
+    /// duration can't go back into Apple Health — and every screen read
+    /// `HKWorkout.duration` directly. The edit saved on the server, the row
+    /// said "edited", and the time on screen (and in the edit sheet when it
+    /// was reopened) stayed exactly what the phone recorded. Kept apart from
+    /// the distance entries because a time edit doesn't make a distance.
+    private static let durationStorageKey = "com.mileaday.userWorkoutDurationsV1"
+
+    private struct DurationEntry: Codable {
+        let seconds: TimeInterval
+        let recordedAt: Date
+    }
+
+    /// Guarded by `lock`, like `entries`.
+    private var durations: [String: DurationEntry]
+
+    private static func decodeDurations(_ data: Data?) -> [String: DurationEntry]? {
+        guard let data else { return nil }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try? decoder.decode([String: DurationEntry].self, from: data)
+    }
+
+    /// The user's own time for this workout. Wins outright, like
+    /// `userOverride` does for distance.
+    func userOverrideDuration(workoutId: String, seconds: TimeInterval) {
+        guard seconds > 0 else { return }
+        lock.lock()
+        defer { lock.unlock() }
+        durations[workoutId] = DurationEntry(seconds: seconds, recordedAt: Date())
+        let cutoff = Date().addingTimeInterval(-Self.retention)
+        durations = durations.filter { $0.value.recordedAt >= cutoff }
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        if let data = try? encoder.encode(durations) {
+            defaults.set(data, forKey: Self.durationStorageKey)
+        }
+    }
+
+    /// The time the user chose for this workout, if they edited it.
+    func userDuration(forWorkoutId workoutId: String) -> TimeInterval? {
+        lock.lock()
+        defer { lock.unlock() }
+        return durations[workoutId]?.seconds
+    }
+
     /// Caller must hold `lock`.
     private func persistLocked() {
         let encoder = JSONEncoder()
@@ -2048,6 +2110,24 @@ extension HKWorkout {
         let stored = totalDistance?.doubleValue(for: HKUnit.mile()) ?? 0
         return TrackedWorkoutLedger.shared.resolvedMiles(
             forWorkoutId: uuid.uuidString, healthKitMiles: stored)
+    }
+
+    /// THE duration for this workout, in seconds: what the user typed on the
+    /// edit screen if they edited it, else what HealthKit recorded. Every
+    /// surface that shows a workout's time or a pace from it reads this, for
+    /// the same reason distance goes through `madDistanceMiles`. Duplicate
+    /// detection keeps the raw `duration`, which is about when the device
+    /// recorded, not how long the user says it took.
+    var madDuration: TimeInterval {
+        TrackedWorkoutLedger.shared.userDuration(forWorkoutId: uuid.uuidString) ?? duration
+    }
+
+    /// What the device measured, before any edit — the baseline the edit
+    /// screen judges a correction against. The tracker's receipt when it
+    /// measured more than HealthKit stored (see `TrackedWorkoutLedger`).
+    var recordedDistanceMiles: Double {
+        let stored = totalDistance?.doubleValue(for: HKUnit.mile()) ?? 0
+        return max(stored, TrackedWorkoutLedger.shared.trackerMiles(forWorkoutId: uuid.uuidString) ?? 0)
     }
 }
 

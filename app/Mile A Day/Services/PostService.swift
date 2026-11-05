@@ -678,9 +678,9 @@ struct FeedEntry: Codable, Identifiable {
     let splits: [FeedSplit]?
     /// HealthKit's indoor flag — nil means UNKNOWN, never "outdoor".
     let is_indoor: Bool?
-    /// Raw workout cards: the owner's streak on that day, for the walk that
-    /// completed the day's mile (posts carry theirs in `stats_snapshot`).
-    /// nil from older servers, off-streak, and on extra walks.
+    /// Raw workout cards: the owner's streak on that day, on the walk that
+    /// completed the day's mile AND every extra walk after it (posts carry
+    /// theirs in `stats_snapshot`). nil from older servers and off-streak.
     let day_streak: Int?
     /// May the viewer launch this entry's flyover (author's
     /// flyover_visibility)? nil = older server ⇒ behave as before the gate.

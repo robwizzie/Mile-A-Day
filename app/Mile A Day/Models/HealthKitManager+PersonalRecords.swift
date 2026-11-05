@@ -328,7 +328,7 @@ extension HealthKitManager {
             }
 
             // Fallback to average pace calculation
-            let avgPaceMinutesPerMile = workout.duration / 60.0 / miles
+            let avgPaceMinutesPerMile = workout.madDuration / 60.0 / miles
             self.log("[HealthKit] ✅ Using average pace fallback: \(self.formatPace(minutesPerMile: avgPaceMinutesPerMile))")
             completion(avgPaceMinutesPerMile)
         }

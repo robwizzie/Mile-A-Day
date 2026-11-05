@@ -1452,7 +1452,7 @@ class WorkoutSyncService: ObservableObject {
                 "workoutType": workoutType,
                 "deviceEndDate": deviceEndDate,
                 "calories": calories,
-                "totalDuration": workout.duration,
+                "totalDuration": workout.madDuration,
                 "splits": splitsData,
                 "source": "healthkit",
                 // WHICH app wrote this into HealthKit. The server needs it to
