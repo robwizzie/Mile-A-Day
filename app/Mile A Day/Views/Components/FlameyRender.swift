@@ -176,7 +176,7 @@ struct FlameyOutfitLayer: View {
     }
 
     private var needsMotion: Bool {
-        look[.trail] != nil || look[.companion] != nil || look.wears(.heartBopper) || look.glow != .none
+        look.glow != .none || look.items.contains { $0.slot != .held && !($0.skin?.motion.isEmpty ?? true) }
     }
 
     // MARK: Behind
@@ -234,15 +234,16 @@ struct FlameyOutfitLayer: View {
                 }
             }
         case .aura(let aura):
-            switch aura {
-            case .spectralGlow:
+            // Auras are built-in effect pieces a skin names (`effects`).
+            switch aura.skin?.effects.first(where: { $0.hasPrefix("aura:") }) {
+            case "aura:spectral_glow":
                 FlameBuddyOuterShape(wobble: 0)
                     .fill(FlameyPalette.hex(0x5CFFC8))
                     .frame(width: 0.82 * u * 1.24, height: u * 1.16)
                     .blur(radius: u * 0.07)
                     .opacity(moving && phase ? 0.55 : 0.88)
                     .offset(y: a.bottom - 0.52 * u)
-            case .flicker:
+            case "aura:flicker":
                 // Afterimages trailing him, flickering like a bad signal.
                 ForEach(0..<2, id: \.self) { i in
                     FlameBuddyOuterShape(wobble: 0)
@@ -252,7 +253,7 @@ struct FlameyOutfitLayer: View {
                         .opacity((i == 0 ? 0.30 : 0.15) * (moving && phase ? 0.45 : 1))
                         .offset(x: -(tight ? 0.05 + 0.04 * CGFloat(i) : 0.17 + 0.15 * CGFloat(i)) * u, y: a.bottom - 0.5 * u)
                 }
-            case .spotlight:
+            case "aura:spotlight":
                 Canvas { ctx, canvas in
                     ctx.translateBy(x: canvas.width / 2, y: canvas.height / 2)
                     let g = a.ground
@@ -362,7 +363,7 @@ struct FlameyOutfitLayer: View {
                 .offset(x: x, y: lift + (moving && phase ? -(floats ? 0.05 : 0.02) * u : 0))
             }
 
-            if look.glow == .aura(.paparazzi) {
+            if case .aura(let aura) = look.glow, aura.skin?.effects.contains("aura:paparazzi") == true {
                 FlameyPaparazzi(u: u, flash: moving && phase, spread: tight ? 0.56 : 1, rise: tight ? 0.78 : 1)
                     .offset(y: a.bottom - 0.5 * u)
             }
@@ -381,6 +382,10 @@ struct FlameyOutfitLayer: View {
         let reach = self.reach
         let motion = FlameyArt.heldMotion(item)
         let on = moving && heldPhase
+        let pump: (scale: CGFloat, dy: CGFloat)? = {
+            guard let m = item.skin?.motion["held-body"], m["kind"] as? String == "pump" else { return nil }
+            return (CGFloat((m["scale"] as? NSNumber)?.doubleValue ?? 1.07), CGFloat((m["dy"] as? NSNumber)?.doubleValue ?? -0.012))
+        }()
         let grip = unitPoint(FlameyArt.heldPoint(item, FlameyArt.heldGrip(item), a: a, u: u, reach: reach))
         let accentAt = FlameyArt.heldAccentPivot(item).map { unitPoint(FlameyArt.heldPoint(item, $0, a: a, u: u, reach: reach)) }
         ZStack {
@@ -398,9 +403,9 @@ struct FlameyOutfitLayer: View {
                 .modifier(FlameyHeldAccent(kind: moving ? motion.accent : .none, on: on, anchor: accentAt))
             }
         }
-        // Pom-poms shake (a quick pump up and out) rather than swing.
-        .scaleEffect(item == .pomPoms && on ? 1.07 : 1, anchor: grip)
-        .offset(y: item == .pomPoms && on ? -0.012 * u : 0)
+        // Some props pump (pom-poms: a quick shake up and out) rather than swing.
+        .scaleEffect(pump.map { on ? $0.scale : 1 } ?? 1, anchor: grip)
+        .offset(y: pump.map { on ? $0.dy * u : 0 } ?? 0)
         // A still (widget, share card, Reduce Motion) draws the prop at rest.
         .rotationEffect(.degrees(!moving ? 0 : (on ? motion.wobble : -motion.wobble * 0.35)), anchor: grip)
     }
@@ -420,53 +425,10 @@ struct FlameyOutfitLayer: View {
     /// to size/2 + (y - 0.5) u at any body scale — he shrinks toward his base.
     private func skin(_ item: FlameyItem, _ part: String, _ conditions: [String: String] = [:],
                       place: SkinPlace = .body, in ctx: inout GraphicsContext) {
-        if Self.legacyArt {
-            legacy(item, part, conditions, in: &ctx)
-            return
-        }
         guard let sk = item.skin, let layer = sk.layer(part, conditions) else { return }
         var c = ctx
         c.translateBy(x: 0, y: size / 2 - 0.5 * u + (place == .body ? -look.hoverLift * u : 0))
         FlameySkinArt.draw(layer, in: &c, u: u, palette: palette)
-    }
-
-    /// MATCH CHECK ONLY (app/FlameyExport/match.sh): draw with the Swift art
-    /// code the skins were recorded from, through this same composition, so
-    /// both renders differ only in where the art comes from. Never set in the
-    /// app. Goes away with FlameyArt's drawing code.
-    nonisolated(unsafe) static var legacyArt = false
-
-    private func legacy(_ item: FlameyItem, _ part: String, _ conditions: [String: String],
-                        in ctx: inout GraphicsContext) {
-        let a = anchors
-        let u = self.u
-        switch part {
-        case "behind":
-            if item.slot == .trail {
-                FlameyArt.drawTrail(item, in: &ctx, a: a, u: u, reach: reach, low: conditions["low"] == "1")
-            } else {
-                FlameyArt.drawBack(item, in: &ctx, a: a, u: u, reach: reach, glow: conditions["glow"] == "1")
-            }
-        case "front":
-            FlameyArt.drawFront(item, in: &ctx, a: a, u: u, palette: palette, jets: conditions["jets"] != "0")
-        case "crown":
-            FlameyArt.drawMonthCrown(item, in: &ctx, a: a, u: u)
-        case "bopper-band", "bopper-springs":
-            guard item == .heartBopper else { return }
-            var c = ctx
-            c.translateBy(x: 0, y: a.topY + FlameyArt.bopperSeat * u)
-            if part == "bopper-band" { FlameyArt.drawHeartBopperBand(in: &c, u: u) } else { FlameyArt.drawHeartBopper(in: &c, u: u) }
-        case "held-body", "held-accent":
-            var c = ctx
-            FlameyArt.applyHeldTight(item, &c, a: a, u: u, reach: reach)
-            FlameyArt.held(item, &c, a, u, layer: part == "held-body" ? .body : .accent)
-        case "companion-shadow":
-            FlameyArt.drawCompanionShadow(item, in: &ctx, a: a, u: u, floats: Self.floats(item))
-        case "companion-body":
-            FlameyArt.drawCompanion(item, in: &ctx, a: a, u: u, palette: palette, pose: companionPose)
-        default:
-            break
-        }
     }
 
     /// A recorded body-unit point (a pivot) in this canvas's coordinates.
@@ -480,12 +442,7 @@ struct FlameyOutfitLayer: View {
         UnitPoint(x: (1.5 * size + p.x) / (3 * size), y: (1.5 * size + p.y) / (3 * size))
     }
 
-    static func floats(_ companion: FlameyItem) -> Bool {
-        switch companion {
-        case .spark, .sparkTrio, .firefly, .lantern, .friendlyGhost: return true
-        default: return false
-        }
-    }
+    static func floats(_ companion: FlameyItem) -> Bool { FlameyArt.floats(companion) }
 }
 
 // MARK: - Halo-class effects
@@ -706,15 +663,10 @@ extension FlameyDressedBody where Skin == EmptyView, Prop == EmptyView {
                        blink: Bool = false, vigor: CGFloat? = nil, scale: CGFloat,
                        asleep: Bool = false) -> FlameBuddyFigure {
         FlameBuddyFigure(health: health, flickerPhase: flickerPhase, blink: blink, size: size,
-                         showsFace: !look.wears(.ghostSheet), vigor: vigor, asleep: asleep, grounded: true,
+                         showsFace: look.showsFace, vigor: vigor, asleep: asleep, grounded: true,
                          palette: health == .dead ? nil : look.figurePalette,
                          lift: look.bodyLift * scale, legLength: look.standLift)
     }
-}
-
-extension FlameyItem {
-    /// This item's skin (its art and rules as data), from the catalog.
-    var skin: FlameySkin? { FlameySkinCatalog.shared[rawValue] }
 }
 
 extension FlameyLook {
@@ -727,7 +679,7 @@ extension FlameyLook {
         for slot in slots { l.takeOff(slot) }
         switch l.glow {
         case .aura where l[.aura] == nil: l.glow = .none
-        case .wings where !l.wears(.goldenWings): l.glow = .none
+        case .wings where !l.items.contains(where: { $0.skin?.ruleString("glow") == "wings" }): l.glow = .none
         default: break
         }
         return l

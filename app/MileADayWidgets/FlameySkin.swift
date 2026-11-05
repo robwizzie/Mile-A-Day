@@ -31,6 +31,8 @@ final class FlameySkin {
     let holidays: [String]
     let moodProp: Bool
     let compact: Bool
+    let tier: Int
+    let autoEligible: Bool?
     let rules: [String: Any]
     let palette: [String: Any]?
     let effects: [String]
@@ -54,6 +56,8 @@ final class FlameySkin {
         holidays = json["holidays"] as? [String] ?? []
         moodProp = json["mood_prop"] as? Bool ?? false
         compact = json["compact"] as? Bool ?? false
+        tier = json["tier"] as? Int ?? 0
+        autoEligible = json["auto_eligible"] as? Bool
         rules = json["rules"] as? [String: Any] ?? [:]
         palette = json["palette"] as? [String: Any]
         effects = json["effects"] as? [String] ?? []
@@ -119,6 +123,23 @@ final class FlameySkin {
             }
         }
         return (String(parts[0]), conds)
+    }
+
+    /// The colour's palette (colour slot), parsed once.
+    var flameyPalette: FlameyPalette? { cachedPalette(\.paletteCache, palette) }
+    /// The palette a costume skins his whole figure in (`rules.figure_palette`).
+    var figurePalette: FlameyPalette? { cachedPalette(\.figurePaletteCache, rules["figure_palette"] as? [String: Any]) }
+
+    private var paletteCache: FlameyPalette??
+    private var figurePaletteCache: FlameyPalette??
+
+    private func cachedPalette(_ key: ReferenceWritableKeyPath<FlameySkin, FlameyPalette??>,
+                               _ json: [String: Any]?) -> FlameyPalette? {
+        lock.lock(); defer { lock.unlock() }
+        if let cached = self[keyPath: key] { return cached }
+        let p = json.flatMap(FlameyPalette.init(json:))
+        self[keyPath: key] = .some(p)
+        return p
     }
 
     // Typed rules.
@@ -413,6 +434,7 @@ final class FlameySkinCatalog {
 
     private let lock = NSLock()
     private var skins: [String: FlameySkin] = [:]
+    private var sorted: [FlameySkin] = []
     private(set) var version: String = ""
 
     /// The App Group container's copy of the last download.
@@ -452,7 +474,7 @@ final class FlameySkinCatalog {
     /// Every skin this renderer can draw, in Closet order.
     var all: [FlameySkin] {
         lock.lock(); defer { lock.unlock() }
-        return skins.values.sorted { ($0.order, $0.id) < ($1.order, $1.id) }
+        return sorted
     }
 
     /// Loads `{ "version", "skins": [...] }` (or a bare array). Skins with a
@@ -474,6 +496,7 @@ final class FlameySkinCatalog {
         }
         lock.lock()
         if replacing { skins = parsed } else { skins.merge(parsed) { _, new in new } }
+        sorted = skins.values.sorted { ($0.order, $0.id) < ($1.order, $1.id) }
         if !v.isEmpty { version = v }
         lock.unlock()
         return parsed.count

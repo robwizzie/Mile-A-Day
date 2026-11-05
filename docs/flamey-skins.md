@@ -32,6 +32,8 @@ his body moves with him when he hovers; see `attach` below.
   "holidays": [],              // HolidayKey raw values: worn automatically on those days
   "mood_prop": false,          // automatic mood dressing, never in the Closet
   "compact": true,             // drawn on small surfaces (widgets, Live Activity)
+  "tier": 1000,                // order within its slot; Closet "Best look" takes the highest owned
+  "auto_eligible": true,       // may "Best look" pick it (false: holiday, costume, Plus, Monthly)
   "rules": { … },              // how it fits with the rest of him (below)
   "palette": { … },            // colour slot only
   "effects": ["aura:spotlight"],   // built-in effect pieces it uses (below)
@@ -131,10 +133,24 @@ an app update and a `format` bump.
 3. `node backend/scripts/flamey-skins-check.mjs` (also runs in CI).
 4. Open a PR. Merging deploys it.
 
-## Migrating the shipped items
+## In the app
 
-`app/FlameyExport/run.sh` (Mac) records every item from the Swift art code
-into `app/FlameyExport/out/skins-raw/` with reference renders in `out/ref/`.
-`node app/FlameyExport/convert/assemble.mjs` turns those into the files here.
-`node app/FlameyExport/convert/match.mjs` re-draws them on a canvas and diffs
-them against the reference renders.
+`FlameyItem` is an id backed by the skin catalog (`FlameyWardrobe.swift`):
+every property (slot, unlock, tier, hides, copy, palette) reads the item's
+skin, and `FlameyItem(rawValue:)` accepts any id the catalog has. The named
+constants (`.partyHat`, `.classic`, …) are only the items the app's own logic
+refers to. `FlameyOutfitLayer` draws every piece from skin layers;
+`FlameyArt.swift` keeps only shared geometry (anchors, tight surfaces,
+headroom, where held props and companions go). The catalog is the bundled
+`FlameySkins.json` (regenerate with `node app/FlameyExport/convert/bundle.mjs`
+before a release) or, when newer, the last download from `GET /flamey/skins`
+(`FlameySkinSync`).
+
+## Migrating the shipped items (done)
+
+The 133 shipped items were exported from their Swift art code with
+`app/FlameyExport/run.sh` on a Mac (it compiled a copy of FlameyArt.swift
+drawing into a recording `GraphicsContext`), assembled with
+`convert/assemble.mjs`, and checked with `match.sh`: 490/490 renders within 1%
+of the code's own. The Swift art and those tools were then deleted; they live
+at commit `82f9f07a` if a re-export is ever needed.
