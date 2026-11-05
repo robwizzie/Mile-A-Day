@@ -26,7 +26,6 @@ Details: docs/conventions/ios.md § HealthKit
 - Splits only via `SplitCalculator`: a sample > ½ mi is timed from the route (`splitsFromRoute`, pauses excluded); no route + a whole-mile sample ⇒ `[]`, never interpolated averages; the file is also a Watch member, so the route path stays `#if !os(watchOS)`.
 - Never write `hk.retroactiveStreak` raw to UI/widgets/watch: go through `updateUserWithHealthKitData` (`vettedHealthKitStreak`) / `max(hk, user.streak)`.
 - Never claim HealthKit READ auth (`HealthAccessMonitor`); offer "Grant access" only on `.needsRequest`; keep `healthKitReadTypes/WriteTypes` non-private.
-- One settings page, `MADSettingsView`, behind the Dashboard gear; it owns its alerts, sheets and account actions.
 - Onboarding: splash frames are a pure function of time (`SplashView`, `TimelineView`) and it hands off itself (`handoffDelay`), ending on the dashboard's cards only when `splashLeadsToMain`; the tour is `OnboardingIntroView` (also the dashboard replay), setup screens use `OnboardingStepScaffold`; example photos only from `/public/showcase` (`ShowcasePhotoStore`, drawn fallback); the system notification prompt waits for `NotificationPrePromptView` (`NotificationPrePrompt.hold/release/notNow`).
 - One settings page, `MADSettingsView`, pushed (`navigationDestination`) from the Dashboard gear and the own-profile banner gear; it owns its alerts, sheets and account actions.
 - Recalibrate's running state is `WorkoutSyncService.recalibration` (drives `SyncStatusBanner` + the Settings row), never view `@State`.
