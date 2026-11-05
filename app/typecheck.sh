@@ -8,6 +8,18 @@
 # Logs: app/typecheck-app.log, app/typecheck-widgets.log (gitignored).
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
+
+# The iPhone SDK ships inside Xcode, not the Command Line Tools: if xcrun is
+# pointed at the tools (xcode-select), use the newest Xcode in /Applications.
+if ! xcrun --sdk iphoneos --show-sdk-path > /dev/null 2>&1; then
+  XCODE=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort | tail -1)
+  if [ -z "$XCODE" ]; then
+    echo "No Xcode found in /Applications — the iPhone SDK comes with Xcode."
+    exit 1
+  fi
+  export DEVELOPER_DIR="$XCODE/Contents/Developer"
+  echo "Using $XCODE"
+fi
 SDK=$(xcrun --sdk iphoneos --show-sdk-path)
 status=0
 
