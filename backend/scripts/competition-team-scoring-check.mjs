@@ -90,11 +90,23 @@ async function cleanup() {
   );
   // Resolution pushes a "competition finished" row per participant, which FKs
   // to users — so the teardown has to outlive the feature it exercises.
-  await db.query(
-    `DELETE FROM in_app_notifications WHERE user_id = ANY($1::text[])`,
-    [ALL],
-  );
-  await db.query(`DELETE FROM users WHERE user_id = ANY($1::text[])`, [ALL]);
+  // Lead-change / finished pushes are fired WITHOUT being awaited by the
+  // code under test, so one can still be writing its inbox row after this
+  // delete: clear the inbox and retry the users delete until it sticks
+  // (a few short tries) instead of failing on in_app_notifications' FK.
+  for (let attempt = 0; ; attempt++) {
+    await db.query(
+      `DELETE FROM in_app_notifications WHERE user_id = ANY($1::text[])`,
+      [ALL],
+    );
+    try {
+      await db.query(`DELETE FROM users WHERE user_id = ANY($1::text[])`, [ALL]);
+      return;
+    } catch (err) {
+      if (err?.code !== "23503" || attempt >= 20) throw err;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+  }
 }
 
 let w = 0;
