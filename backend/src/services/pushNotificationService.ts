@@ -718,6 +718,18 @@ export async function sendPush(
 ): Promise<void> {
   const storeInbox = (): Promise<void> =>
     opts.skipInbox ? Promise.resolve() : storeInAppNotification(userId, payload);
+  // Awaited, never thrown: the inbox row exists by the time sendPush (and
+  // the request that sent it) returns. It used to be fire-and-forget, so a
+  // caller could answer, or a check could read or tear down the user, before
+  // the row landed: flamey-check read an empty inbox, and
+  // competition-team-scoring-check's cleanup hit the users FK. One insert.
+  const storeInboxSafely = async (): Promise<void> => {
+    try {
+      await storeInbox();
+    } catch (err: any) {
+      console.error("[Push] Error storing in-app notification:", err?.message ?? err);
+    }
+  };
   // Record it, don't ring. For an event the user has already been told about
   // — a re-hype of something they were pushed about before — the history is
   // still worth keeping and the phone is not worth buzzing. Deliberately the
@@ -746,9 +758,7 @@ export async function sendPush(
       await queueForBriefing(userId, payload, "quiet");
       if (chargesBudget) await logNotificationSent(userId, payload.type);
       // Still store in inbox so user can see it later
-      storeInbox().catch((err) =>
-        console.error("[Push] Error storing in-app notification:", err.message),
-      );
+      await storeInboxSafely();
       return;
     }
 
@@ -765,9 +775,7 @@ export async function sendPush(
       await queueForBriefing(userId, payload, "cap");
       if (chargesBudget) await logNotificationSent(userId, payload.type);
       // Still store in inbox
-      storeInbox().catch((err) =>
-        console.error("[Push] Error storing in-app notification:", err.message),
-      );
+      await storeInboxSafely();
       return;
     }
   }
@@ -777,9 +785,7 @@ export async function sendPush(
   if (tokens.length === 0) {
     console.log(`[Push] No device tokens found for user ${userId}`);
     // Still store in inbox even without device tokens
-    storeInbox().catch((err) =>
-      console.error("[Push] Error storing in-app notification:", err.message),
-    );
+    await storeInboxSafely();
     return;
   }
 
@@ -803,9 +809,7 @@ export async function sendPush(
   }
 
   // Always store in-app notification regardless of push delivery
-  storeInbox().catch((err) =>
-    console.error("[Push] Error storing in-app notification:", err.message),
-  );
+  await storeInboxSafely();
 }
 
 /**

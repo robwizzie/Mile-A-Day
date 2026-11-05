@@ -147,7 +147,7 @@ Details: docs/conventions/backend.md § Push Notifications
 - Only small backfills in migrations (30s boot timeout); big ones and `CREATE INDEX CONCURRENTLY` run post-`listen()`.
 - Held pushes flush as a morning briefing (`planBriefing`). Check: `morning-briefing-check`.
 - Push `data` values must be strings; inbox previews authorize via `visiblePostPreviews`.
-- Checks that read `in_app_notifications` after a `sendPush` POLL for the row (`sendPush` stores it unawaited on the no-token/quiet/cap paths); compare nudge words via `nudgeCopy`, never a literal. Check: `flamey-check`.
+- `sendPush` AWAITS its inbox row (`storeInboxSafely`: awaited, errors logged, never thrown), never fire-and-forget; checks compare nudge words via `nudgeCopy`, never a literal. Check: `flamey-check`.
 - Gate client-visible changes PER DEVICE (`client_features`, `userSupports`); never reuse a string; env flags are kill switches only.
 - Widget refresh = silent `widget_refresh` push, only to `widget_refresh_push_v1` devices with matching `widget_kinds`, one per window. Check: `widget-refresh-check`.
 - Every desk PWA push (`pushTo`) must show in the remote's Activity (`boxActivity`): read it from its own table, else add the kind to `LOGGED_KINDS` (`desk_push_log`). Check: `display-check`.
