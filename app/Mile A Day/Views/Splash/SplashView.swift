@@ -6,9 +6,11 @@ import UIKit
 /// Three red flap tiles rattle through numbers like a departures board and
 /// land, one after another, on M · A · D (a tick each). They merge into the
 /// app icon with a thump. Then:
-/// - heading into the app, the icon rises and shrinks while the home
-///   screen's flat cards fade in beneath it, so the splash becomes the
-///   dashboard it hands off to;
+/// - heading into the app, the icon flies up into the dashboard's real
+///   header (`MADTabHeader`: "Mile A Day", today's date, bell + gear) and
+///   dissolves into its title while the home screen's flat cards fade in, so
+///   the splash becomes the dashboard it hands off to (the dashboard has no
+///   icon of its own; the title IS the brand there);
 /// - heading into onboarding or sign-in (no dashboard yet), "Mile A Day"
 ///   rises under the icon instead.
 ///
@@ -79,8 +81,14 @@ struct SplashView: View {
 
         let merge = Self.easeInOut(Self.progress(t, Beat.mergeStart, Beat.mergeEnd))
         let rise = intoApp ? Self.easeInOut(Self.progress(t, Beat.riseStart, Beat.riseEnd)) : 0
-        let iconY = center.y + (size.height * 0.12 - center.y) * CGFloat(rise)
-        let iconScale = (0.6 + 0.4 * Self.easeOutBack(merge)) * (1 - 0.55 * rise)
+        // Fly to where the header's title sits (16pt in, ~23pt down: its
+        // padding + half the 26pt line) and shrink to about the title's
+        // height, fading out over the second half as the title fades in.
+        let target = CGPoint(x: MADTheme.Spacing.md + 18, y: MADTheme.Spacing.sm + 15)
+        let iconX = center.x + (target.x - center.x) * CGFloat(rise)
+        let iconY = center.y + (target.y - center.y) * CGFloat(rise)
+        let iconScale = (0.6 + 0.4 * Self.easeOutBack(merge)) * (1 - 0.87 * rise)
+        let iconOpacity = merge * (1 - Self.progress(rise, 0.45, 1))
 
         return ZStack {
             // Soft red light behind the mark; fades as the app takes over.
@@ -89,7 +97,7 @@ struct SplashView: View {
                            startRadius: 0, endRadius: width * 0.7)
 
             if intoApp && rise > 0 {
-                dashboardCards(size: size, opacity: rise)
+                appPreview(size: size, opacity: rise)
             }
 
             // The flaps, sliding together and fading as they merge.
@@ -106,8 +114,8 @@ struct SplashView: View {
                 .frame(width: iconSize, height: iconSize)
                 .clipShape(RoundedRectangle(cornerRadius: iconSize * 0.23, style: .continuous))
                 .scaleEffect(CGFloat(iconScale))
-                .opacity(merge)
-                .position(x: center.x, y: iconY)
+                .opacity(iconOpacity)
+                .position(x: iconX, y: iconY)
 
             if !intoApp {
                 wordmark(at: t)
@@ -150,27 +158,47 @@ struct SplashView: View {
         .frame(width: width, height: height)
     }
 
-    /// The home screen's flat cards (`DashboardCardSurface`'s fill and radius)
-    /// in roughly the dashboard's layout, so the hand-off lands on it.
-    private func dashboardCards(size: CGSize, opacity: Double) -> some View {
-        let gutter = size.width * 0.06
+    /// The top of the home screen: its real header (same component, title,
+    /// date and bell + gear as `DashboardView`) over flat cards in
+    /// `DashboardCardSurface`'s fill and radius, so the hand-off lands on it.
+    private func appPreview(size: CGSize, opacity: Double) -> some View {
         let card = Color.white.opacity(0.045)
         let shape = RoundedRectangle(cornerRadius: 18, style: .continuous)
-        return VStack(spacing: size.height * 0.02) {
-            shape.fill(card).frame(height: size.height * 0.26)
-            HStack(spacing: gutter) {
-                shape.fill(card)
-                shape.fill(card)
+        let gap: CGFloat = 12
+        return VStack(spacing: gap) {
+            MADTabHeader(
+                title: "Mile A Day",
+                subtitle: Self.headerDateFormatter.string(from: Date()),
+                actions: [
+                    MADHeaderAction(id: "bell", systemImage: "bell.fill", style: .notification(count: 0)) {},
+                    MADHeaderAction(id: "settings", systemImage: "gearshape.fill") {}
+                ]
+            )
+            Group {
+                shape.fill(card).frame(height: size.height * 0.3)
+                HStack(spacing: gap) {
+                    shape.fill(card)
+                    shape.fill(card)
+                }
+                .frame(height: size.height * 0.13)
+                shape.fill(card).frame(height: size.height * 0.1)
+                Capsule().fill(red).frame(height: 54)
             }
-            .frame(height: size.height * 0.13)
-            shape.fill(card).frame(height: size.height * 0.1)
-            Capsule().fill(red).frame(height: size.height * 0.06)
+            .padding(.horizontal, MADTheme.Spacing.md)
+            .offset(y: CGFloat(1 - opacity) * 20)
+            Spacer(minLength: 0)
         }
-        .frame(width: size.width - gutter * 2)
-        .position(x: size.width / 2, y: size.height * 0.53)
+        .frame(width: size.width, height: size.height, alignment: .top)
         .opacity(opacity)
-        .offset(y: CGFloat(1 - opacity) * 24)
+        .allowsHitTesting(false)
     }
+
+    /// The dashboard's header date format ("Tuesday, July 21").
+    private static let headerDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "EEEE, MMMM d"
+        return f
+    }()
 
     private func wordmark(at t: Double) -> some View {
         let title = Self.easeOut(Self.progress(t, Beat.wordmarkIn, Beat.wordmarkIn + Beat.textSettle))
