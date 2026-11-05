@@ -23,13 +23,17 @@ fi
 SDK=$(xcrun --sdk iphoneos --show-sdk-path)
 status=0
 
+# check <name> <folder> [extra files…]
 check() {
   local name="$1" dir="$2" log="$HERE/typecheck-$1.log"
-  local count
-  count=$(find "$dir" -name '*.swift' | wc -l | tr -d ' ')
-  echo "Type-checking $name ($count files)…"
-  if find "$dir" -name '*.swift' -print0 | xargs -0 xcrun swiftc -typecheck \
-      -sdk "$SDK" -target arm64-apple-ios17.0 -swift-version 5 > "$log" 2>&1; then
+  shift 2
+  local list
+  list=$(mktemp)
+  find "$dir" -name '*.swift' -print0 > "$list"
+  for f in "$@"; do printf '%s\0' "$f" >> "$list"; done
+  echo "Type-checking $name ($(tr -dc '\0' < "$list" | wc -c | tr -d ' ') files)…"
+  if xargs -0 xcrun swiftc -typecheck \
+      -sdk "$SDK" -target arm64-apple-ios17.0 -swift-version 5 < "$list" > "$log" 2>&1; then
     echo "  $name: OK"
   else
     echo "  $name: FAILED — first errors:"
@@ -39,5 +43,11 @@ check() {
 }
 
 check app "$HERE/Mile A Day"
-check widgets "$HERE/MileADayWidgets"
+# The widget extension also compiles these app-folder files (its membership
+# exceptions in the Xcode project).
+check widgets "$HERE/MileADayWidgets" \
+  "$HERE/Mile A Day/Shared/WidgetDataStore.swift" \
+  "$HERE/Mile A Day/Widgets/StreakCountWidget.swift" \
+  "$HERE/Mile A Day/Widgets/TodayProgressWidget.swift" \
+  "$HERE/Mile A Day/Widgets/WorkoutLiveActivity.swift"
 exit $status
