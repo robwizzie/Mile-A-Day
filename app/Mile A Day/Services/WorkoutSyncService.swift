@@ -235,6 +235,36 @@ class WorkoutSyncService: ObservableObject {
     // MARK: - Initialization
     private init() {
         self.lastSyncDate = UserDefaults.standard.object(forKey: lastSyncedWorkoutDateKey) as? Date
+        // Joining Mile A Day+ lifts the history floor (`HistoryWindow`):
+        // bring in everything from before it.
+        NotificationCenter.default.addObserver(forName: .madHistoryFloorLifted, object: nil, queue: .main) { _ in
+            Task { @MainActor in WorkoutSyncService.shared.importFullHistoryAfterUnlock() }
+        }
+    }
+
+    /// They just joined Mile A Day+ (or redeemed a gift), so the one-year
+    /// floor is gone: re-run the historical import over ALL of Apple Health.
+    /// The upload is an idempotent upsert with `fullSync` (no friend pushes,
+    /// medals absorbed quietly), so re-sending the year they already have is
+    /// harmless; the older workouts the server dropped before are what's new.
+    /// Also rebuilds the local index and the step-goal history from scratch.
+    func importFullHistoryAfterUnlock() {
+        Task { @MainActor in
+            // Never two imports at once: wait out one that's running.
+            var waited = 0
+            while isSyncing && waited < 600 {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                waited += 1
+            }
+            UserDefaults.standard.removeObject(forKey: lastSyncedWorkoutDateKey)
+            UserDefaults.standard.removeObject(forKey: uploadedWorkoutIdsKey)
+            lastSyncDate = nil
+            uploadedIdCache = nil
+            startInitialSyncIfNeeded()
+            await DailyStepsSyncService.shared.syncStepGoalHistory(force: true)
+            await HealthKitManager.shared.buildWorkoutIndex()
+            HealthKitManager.shared.fetchAllWorkoutData()
+        }
     }
 
     // MARK: - Initial Sync Resume State
@@ -748,7 +778,7 @@ class WorkoutSyncService: ObservableObject {
             let sort = NSSortDescriptor(key: HKSampleSortIdentifierEndDate, ascending: false)
             let query = HKSampleQuery(
                 sampleType: HKObjectType.workoutType(),
-                predicate: predicate,
+                predicate: HistoryWindow.limit(predicate),
                 limit: 1000,
                 sortDescriptors: [sort]
             ) { _, samples, error in
@@ -1066,7 +1096,7 @@ class WorkoutSyncService: ObservableObject {
 
             let query = HKSampleQuery(
                 sampleType: HKObjectType.workoutType(),
-                predicate: compoundPredicate,
+                predicate: HistoryWindow.limit(compoundPredicate),
                 limit: HKObjectQueryNoLimit,
                 sortDescriptors: [sortDescriptor]
             ) { query, samples, error in
@@ -1963,7 +1993,7 @@ class WorkoutSyncService: ObservableObject {
 
             let query = HKSampleQuery(
                 sampleType: HKObjectType.workoutType(),
-                predicate: predicate,
+                predicate: HistoryWindow.limit(predicate),
                 limit: HKObjectQueryNoLimit,
                 sortDescriptors: [sortDescriptor]
             ) { _, samples, error in

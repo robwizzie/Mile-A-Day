@@ -202,7 +202,10 @@ final class DailyStepsSyncService {
             // Health's own floor, but never before HealthKit existed (iOS 8,
             // Sept 2014): the platform constraint can be far older, and the
             // collection query walks every day in the range.
-            start = calendar.startOfDay(for: max(healthStore.earliestPermittedSampleDate(), Self.healthKitEpoch))
+            // A non-member's history window starts a year before signup
+            // (`HistoryWindow`); the server drops older step days too.
+            let earliest = max(healthStore.earliestPermittedSampleDate(), Self.healthKitEpoch)
+            start = calendar.startOfDay(for: HistoryWindow.clamp(earliest) ?? earliest)
         } else {
             start = calendar.date(byAdding: .day, value: -14, to: calendar.startOfDay(for: now)) ?? now
         }

@@ -6,6 +6,7 @@ import {
   PLUS_PRODUCTS,
   PLUS_STREAK_SAVE_TARGET_RUN_DAYS,
   PLUS_STREAK_ASSIST_TARGET_DAYS,
+  HISTORY_WINDOW_DAYS,
   RENEWAL_GRACE_SQL,
   giftMonths,
   plusProductKind,
@@ -38,6 +39,37 @@ export const plusActiveSql = (u: string) => `(
 		WHERE pg.redeemed_by = ${u}.user_id AND pg.voided_at IS NULL
 		  AND pg.grant_starts_at <= now() AND pg.grant_ends_at > now())
 )`;
+
+/**
+ * SQL boolean: does the users row aliased `u` get its FULL workout history.
+ * Founding Runners, and anyone who has EVER had Plus (any purchase row, even
+ * a lapsed or refunded one, or a redeemed gift). Once unlocked it stays
+ * unlocked: if the floor came back after a lapse, the phone's streak (built
+ * from all of HealthKit) and the server's (built from capped uploads) would
+ * fight forever.
+ */
+export const fullHistorySql = (u: string) => `(
+	${u}.created_at < '${FOUNDING_CUTOFF}'::timestamptz
+	OR EXISTS (SELECT 1 FROM plus_purchases pp WHERE pp.user_id = ${u}.user_id)
+	OR EXISTS (SELECT 1 FROM plus_gifts pg WHERE pg.redeemed_by = ${u}.user_id)
+)`;
+
+/**
+ * SQL: the earliest local date (`YYYY-MM-DD` text) whose workouts and steps
+ * count for the users row aliased `u`, or NULL for full history. One year
+ * (plus a day of slack for time zones) before the signup date.
+ */
+export const historyFloorSql = (u: string) => `(CASE WHEN ${fullHistorySql(u)} THEN NULL
+	ELSE ((${u}.created_at AT TIME ZONE 'UTC')::date - ${HISTORY_WINDOW_DAYS + 1})::text END)`;
+
+/** The user's history floor (`YYYY-MM-DD`), or null for full history. */
+export async function getHistoryFloor(userId: string): Promise<string | null> {
+  const rows = await db.query<{ floor: string | null }>(
+    `SELECT ${historyFloorSql("u")} AS floor FROM users u WHERE u.user_id = $1`,
+    [userId],
+  );
+  return rows[0]?.floor ?? null;
+}
 
 export async function isPlusActive(userId: string): Promise<boolean> {
   const rows = await db.query<{ plus: boolean }>(
@@ -77,6 +109,14 @@ export interface PlusStatus {
    * trying on the Plus looks). Stable per account.
    */
   paywall_variant: PaywallVariant;
+  /**
+   * Additive. The earliest local date (`YYYY-MM-DD`) of workout history this
+   * account imports, or null for its full history (Founding Runners and
+   * anyone who has ever had Plus). The phone reads Apple Health from here.
+   */
+  history_floor: string | null;
+  /** Additive: true when there is no floor (`history_floor` is null). */
+  full_history: boolean;
 }
 
 export type PaywallVariant = "streak" | "flamey";
@@ -104,13 +144,14 @@ interface PurchaseRow {
 export async function getPlusStatus(
   userId: string,
 ): Promise<PlusStatus | null> {
-  const users = await db.query<{ founding: boolean }>(
-    `SELECT (u.created_at < '${FOUNDING_CUTOFF}'::timestamptz) AS founding
+  const users = await db.query<{ founding: boolean; history_floor: string | null }>(
+    `SELECT (u.created_at < '${FOUNDING_CUTOFF}'::timestamptz) AS founding,
+            ${historyFloorSql("u")} AS history_floor
        FROM users u WHERE u.user_id = $1`,
     [userId],
   );
   if (!users.length) return null;
-  const { founding } = users[0];
+  const { founding, history_floor } = users[0];
 
   const [purchases, gifts] = await Promise.all([
     db.query<PurchaseRow>(
@@ -172,6 +213,8 @@ export async function getPlusStatus(
       streak_assist_target: PLUS_STREAK_ASSIST_TARGET_DAYS,
     },
     paywall_variant: paywallVariantFor(userId),
+    history_floor: history_floor ?? null,
+    full_history: !history_floor,
   };
 }
 

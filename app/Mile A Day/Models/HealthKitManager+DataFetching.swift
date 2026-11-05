@@ -83,7 +83,7 @@ extension HealthKitManager {
 
         let query = HKSampleQuery(
             sampleType: HKObjectType.workoutType(),
-            predicate: compoundPredicate,
+            predicate: HistoryWindow.limit(compoundPredicate),
             limit: HKObjectQueryNoLimit,
             sortDescriptors: [sortDescriptor]
         ) { [weak self] _, samples, error in
@@ -155,7 +155,7 @@ extension HealthKitManager {
 
         let query = HKSampleQuery(
             sampleType: HKObjectType.workoutType(),
-            predicate: finalPredicate,
+            predicate: HistoryWindow.limit(finalPredicate),
             limit: HKObjectQueryNoLimit,
             sortDescriptors: [sortDescriptor]
         ) { [weak self] _, samples, error in
@@ -357,7 +357,7 @@ extension HealthKitManager {
 
         let workoutQuery = HKSampleQuery(
             sampleType: HKObjectType.workoutType(),
-            predicate: finalPredicate,
+            predicate: HistoryWindow.limit(finalPredicate),
             limit: HKObjectQueryNoLimit,
             sortDescriptors: nil
         ) { [weak self] _, samples, error in

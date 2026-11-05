@@ -221,7 +221,7 @@ struct FoundingRunnerCard: View {
                     .foregroundColor(.white)
                     .fixedSize(horizontal: false, vertical: true)
                 if !compact {
-                    Text("You were here before Plus existed, so you never pay for it. No subscription, nothing to do. Thank you.")
+                    Text("You were here before Plus existed, so you never pay for it: faster streak tokens, your full workout history and every Plus look. No subscription, nothing to do. Thank you.")
                         .madFont(size: 13, weight: .medium, design: .rounded)
                         .foregroundColor(.white.opacity(0.7))
                         .fixedSize(horizontal: false, vertical: true)

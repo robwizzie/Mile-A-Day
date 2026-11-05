@@ -27,6 +27,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { PostgresService } from "../dist/services/DbService.js";
+import { FOUNDING_CUTOFF } from "../dist/services/plusCatalog.js";
 import { authenticateToken } from "../dist/middleware/auth.js";
 import userRoutes from "../dist/routes/usersRoutes.js";
 import { generateAccessToken } from "../dist/services/tokenService.js";
@@ -122,6 +123,12 @@ try {
     );
   }
   await db.query(`UPDATE users SET dashboard_style = 'fun' WHERE user_id = ANY($1)`, [ALL]);
+  // Created AFTER the Founding Runner cutoff, so these are ordinary (non-Plus)
+  // accounts: a founder owns every Plus item, which isn't what this checks.
+  await db.query(
+    `UPDATE users SET created_at = GREATEST(now(), $2::timestamptz + interval '1 day') WHERE user_id = ANY($1)`,
+    [ALL, FOUNDING_CUTOFF],
+  );
   await db.query(
     `INSERT INTO friendships (user_id, friend_id, status) VALUES ($1, $2, 'accepted'), ($2, $1, 'accepted')`,
     [OWNER, FRIEND],

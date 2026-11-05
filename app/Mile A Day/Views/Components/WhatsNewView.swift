@@ -26,46 +26,66 @@ enum WhatsNewCatalog {
     /// Newest first. Edit copy freely — keep it user-facing (no internal
     /// names, no "beta"), one short line per feature.
     static let releases: [WhatsNewRelease] = [
+        // id 7, not 6: the Halloween draft (6) never shipped to the App
+        // Store but TestFlight saw it, and a new id shows this one again.
         WhatsNewRelease(
-            id: 6,
-            versionLabel: "Halloween 2026 Update",
-            headline: "Monthly Flames, and Mile A Day+",
+            id: 7,
+            versionLabel: "November 2026 Update",
+            headline: "Mile A Day+ is here, and it's yours",
             features: [
+                WhatsNewFeature(
+                    icon: "medal.fill",
+                    title: "You're a Founding Runner",
+                    blurb: "Everyone who joined before Mile A Day+ gets it free, forever: faster streak tokens, your full workout history and every Plus look for Flamey. No subscription, nothing to do. Find your card in Settings › Mile A Day+.",
+                    tint: Color(red: 1.0, green: 0.80, blue: 0.36)
+                ),
                 WhatsNewFeature(
                     icon: "calendar",
                     title: "Monthly Flames",
-                    blurb: "Walk your mile every single day of a month to unlock that month's Flamey form, from Frostbite in January to Twinkle Lights in December. Perfect months you've already had count too.",
+                    blurb: "Get your mile in every single day of a month to unlock that month's Flamey form. Perfect months you've already had count too.",
                     tint: .orange
                 ),
                 WhatsNewFeature(
-                    icon: "theatermasks.fill",
-                    title: "Halloween costumes",
-                    blurb: "The Pumpkin Suit is redrawn for Halloween, and the glow-in-the-dark Skeleton Suit joins it for Mile A Day+ members.",
+                    icon: "person.crop.rectangle.stack.fill",
+                    title: "Today, at the top of the feed",
+                    blurb: "One row of every friend: who's out walking right now, new stories, who's done and who isn't yet. Stories open out of their tile and flip between friends.",
+                    tint: .pink
+                ),
+                WhatsNewFeature(
+                    icon: "hourglass",
+                    title: "Streaks ending tonight",
+                    blurb: "See which friends' streaks end tonight and how long they have left, and nudge each one. Their reminder says exactly what's at stake.",
+                    tint: MADTheme.Colors.madRed
+                ),
+                WhatsNewFeature(
+                    icon: "house.fill",
+                    title: "A cleaner home",
+                    blurb: "Your streak front and center beside Flamey, each number said once, and after your mile a quick way to share it or go another.",
+                    tint: .teal
+                ),
+                WhatsNewFeature(
+                    icon: "face.smiling.inverse",
+                    title: "Stickers on your photos",
+                    blurb: "Add Flamey, your route, your stats, text or emoji to a post, then pinch, twist and place them anywhere.",
                     tint: .purple
                 ),
                 WhatsNewFeature(
                     icon: "figure.walk",
                     title: "Walks earn a Streak Save",
-                    blurb: "A walk day now counts as half a run toward your Streak Save, so walkers can earn one too. Running is still the fastest way there.",
+                    blurb: "A walk day now counts as half a run toward your Streak Save, and the app tells you when a Save is about to cover a missed day.",
                     tint: MADTheme.Colors.walkBlue
                 ),
                 WhatsNewFeature(
-                    icon: "sparkles",
-                    title: "Mile A Day+",
-                    blurb: "An optional membership: streak tokens in about half the time, Plus-only Flamey looks and Family Sharing. Your daily mile stays free, forever.",
-                    tint: MADTheme.Colors.madRed
+                    icon: "dot.radiowaves.left.and.right", // figure.walk.treadmill is iOS 18+
+                    title: "Connect a gym treadmill",
+                    blurb: "On indoor walks, connect to many Bluetooth treadmills and count the belt's distance.",
+                    tint: .indigo
                 ),
                 WhatsNewFeature(
-                    icon: "square.grid.2x2.fill",
-                    title: "This month, on your dashboard",
-                    blurb: "An optional card follows your Monthly Flame day by day. Add it from Customize.",
-                    tint: .teal
-                ),
-                WhatsNewFeature(
-                    icon: "gift.fill",
-                    title: "Gift a year of Plus",
-                    blurb: "Buy a year for a friend and send them a code from Settings › Mile A Day+.",
-                    tint: .pink
+                    icon: "bolt.fill",
+                    title: "Faster, and posts that wait for signal",
+                    blurb: "The app is snappier, and a post that can't send without signal is saved and goes out on its own once you're back online.",
+                    tint: Color(red: 1.0, green: 0.84, blue: 0.35)
                 ),
             ]
         ),

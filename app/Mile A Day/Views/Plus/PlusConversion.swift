@@ -130,6 +130,8 @@ struct PlusWelcomeView: View {
                         unlockedRow(icon: "flame.fill", tint: .orange,
                                     text: "Streak tokens fill about twice as fast",
                                     detail: doubleDownLine)
+                        unlockedRow(icon: "clock.arrow.circlepath", tint: .teal,
+                                    text: "Your full workout history, importing now", detail: nil)
                         unlockedRow(icon: "paintpalette.fill", tint: Color(red: 0.31, green: 0.55, blue: 1.0),
                                     text: "4 colors and the Skeleton Suit, in your Closet", detail: nil)
                         unlockedRow(icon: "person.3.fill", tint: .green,

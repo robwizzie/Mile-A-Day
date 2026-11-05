@@ -46,7 +46,17 @@ export function giftMonths(productId: string): number {
  * people who were told they have it); moving it forward also widens the
  * check scripts' seeded users into Founding Runners, so seed them after it.
  */
-export const FOUNDING_CUTOFF = "2026-10-15T00:00:00Z";
+export const FOUNDING_CUTOFF = "2026-11-06T05:00:00Z";
+
+/**
+ * How far back a non-member's workout history is imported: one year before
+ * the day they signed up — FIXED at signup, never a rolling "last 365 days"
+ * (that would shorten a growing streak a day at a time). Founding Runners and
+ * anyone who has ever had Plus have no floor (`fullHistorySql`). The phone
+ * reads the floor from `/plus/status` (`history_floor`) and the upload drops
+ * workouts and step days before it, so the two never disagree about a streak.
+ */
+export const HISTORY_WINDOW_DAYS = 365;
 
 /**
  * Streak-token perks: Plus fills all three meters faster — Double Down in 5

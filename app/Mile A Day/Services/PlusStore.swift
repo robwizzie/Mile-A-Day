@@ -33,6 +33,11 @@ struct PlusStatus: Codable, Equatable {
     let perks: Perks?
     /// Onboarding paywall A/B arm: "streak" | "flamey" (newer servers).
     let paywall_variant: String?
+    /// The earliest local day ("yyyy-MM-dd") of workout history this account
+    /// imports, or nil for its full history (Founding Runners and anyone who
+    /// has ever had Plus). Newer servers; absent = full history.
+    let history_floor: String?
+    let full_history: Bool?
 
     struct Perks: Codable, Equatable {
         let double_down_target: Int
@@ -118,6 +123,8 @@ final class PlusStore: ObservableObject {
 
     private init() {
         status = cachedStatus()
+        // Only an explicit answer sets or clears the floor (no cache = keep).
+        if let status { HistoryWindow.update(floor: status.history_floor, fullHistory: status.full_history) }
     }
 
     private var userId: String? {
@@ -163,6 +170,7 @@ final class PlusStore: ObservableObject {
     func reset() {
         status = nil
         trialEligible = true
+        HistoryWindow.reset()
     }
 
     func fetchStatus() async {
@@ -175,6 +183,10 @@ final class PlusStore: ObservableObject {
     private func apply(_ fresh: PlusStatus, for userId: String) {
         let changed = fresh.is_plus != status?.is_plus
         status = fresh
+        if HistoryWindow.update(floor: fresh.history_floor, fullHistory: fresh.full_history) {
+            // They joined: bring in everything before the old floor.
+            NotificationCenter.default.post(name: .madHistoryFloorLifted, object: nil)
+        }
         if let data = try? JSONEncoder().encode(fresh) {
             UserDefaults.standard.set(data, forKey: statusCachePrefix + userId)
         }

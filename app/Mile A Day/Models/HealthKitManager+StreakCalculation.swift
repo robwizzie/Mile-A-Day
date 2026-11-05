@@ -379,7 +379,7 @@ extension HealthKitManager {
 
         let query = HKSampleQuery(
             sampleType: HKObjectType.workoutType(),
-            predicate: finalPredicate,
+            predicate: HistoryWindow.limit(finalPredicate),
             limit: HKObjectQueryNoLimit,
             sortDescriptors: [sortDescriptor]
         ) { [weak self] _, samples, error in

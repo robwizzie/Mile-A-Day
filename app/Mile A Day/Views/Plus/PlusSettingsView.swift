@@ -100,11 +100,27 @@ struct PlusSettingsView: View {
                     .madFont(size: 24, weight: .black, design: .rounded)
                     .foregroundStyle(LinearGradient(colors: [Color(red: 1.0, green: 0.82, blue: 0.45), .orange, MADTheme.Colors.madRed],
                                                     startPoint: .leading, endPoint: .trailing))
-                Text("Faster streak tokens, Plus-only Flamey looks and Family Sharing — while everything you love stays free.")
+                Text(PlusPerk.summary + " Your daily mile stays free.")
                     .madFont(size: 14, weight: .regular, design: .rounded)
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
+                if let floor = HistoryWindow.floor {
+                    // Said plainly where they'd look: what came in, and what
+                    // joining brings.
+                    Label {
+                        Text("Your workouts since \(floor.formatted(.dateTime.month(.wide).day().year())) are imported. Join to bring in every workout before that too.")
+                            .madFont(size: 13, weight: .medium, design: .rounded)
+                            .foregroundColor(.primary.opacity(0.8))
+                            .fixedSize(horizontal: false, vertical: true)
+                    } icon: {
+                        Image(systemName: "clock.arrow.circlepath")
+                            .foregroundColor(.teal)
+                    }
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color.teal.opacity(0.1)))
+                }
                 Button {
                     MADHaptics.action()
                     showPaywall = true
@@ -264,7 +280,7 @@ struct PlusSettingsView: View {
                 .foregroundColor(.secondary)
             PlusTokenComparison(onDark: false)
             Divider().overlay(Color.white.opacity(0.06))
-            ForEach([PlusPerk.flameyColors, .family, .support]) { perk in
+            ForEach(PlusPerk.extras) { perk in
                 HStack(alignment: .top, spacing: MADTheme.Spacing.md) {
                     Image(systemName: perk.icon)
                         .madFont(size: 15, weight: .bold, maxScale: 1.3)
