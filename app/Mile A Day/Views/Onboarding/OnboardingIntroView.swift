@@ -94,7 +94,8 @@ struct OnboardingIntroView: View {
         .background(Self.sheetColor.ignoresSafeArea())
         // Local only: `preferredColorScheme` would flip the whole window.
         .environment(\.colorScheme, .dark)
-        .task { await showcase.load() }
+        // Onboarding shows the bundled photos only: a server list that
+        // changed (or lagged a deploy) once swapped selfies back in.
     }
 
     // MARK: - Hero backdrop
@@ -652,74 +653,68 @@ private struct IntroFeedArt: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let photos: [ShowcasePhoto]
 
-    /// Which photo is the front post. Every few seconds it's dealt away and
-    /// the next one rises in; the prints behind show the two after it, so
-    /// every photo gets its turn in front. Holds still off-page / under
-    /// Reduce Motion.
-    @State private var index = 0
+    /// A deck of real post cards. Every few seconds the deck turns: the card
+    /// at the back-left swings to the front, the front one swings out to the
+    /// back-right, the back-right one tucks away behind, and the next waiting
+    /// card comes up at the back-left. Cards MOVE (position, tilt, scale on
+    /// one spring); the only fading happens out of sight, behind the front.
+    /// Holds still off-page / under Reduce Motion.
+    @State private var turn = 0
     private let ticker = Timer.publish(every: 3.2, on: .main, in: .common).autoconnect()
 
+    private struct Placement {
+        var x: CGFloat
+        var y: CGFloat
+        var angle: Double
+        var scale: CGFloat
+        var opacity: Double
+        var z: Double
+    }
+
     var body: some View {
-        let width = min(height * 0.52, 190)
-        let count = max(photos.count, 1)
-        let front = index % count
+        // Whole card (it's ~1.72× as tall as wide) so the clap row, streak
+        // and caption show; only a very short hero (SE) falls back to a peek.
+        let width = max(min(artWidth * 0.58, 240, height / 1.72), min(150, artWidth * 0.5))
+        let deck: [ShowcasePhoto?] = photos.isEmpty ? [nil] : photos.map { Optional($0) }
         ZStack {
-            backPrint(at: front + 2, width: width * 0.86)
-                .rotationEffect(.degrees(9))
-                .offset(x: width * 0.66, y: 14)
-                .introPop(0.2)
-            backPrint(at: front + 1, width: width * 0.86)
-                .rotationEffect(.degrees(-9))
-                .offset(x: -width * 0.66, y: 14)
-                .introPop(0.12)
-            // The front one is the feed's real post card, scaled down
-            // (`PostCardView` .stacked: header, 4:5 photo, clap + comment +
-            // share, streak pill, caption).
-            IntroFeedPost(photo: photos.isEmpty ? nil : photos[front], height: height,
-                          // Whole card (it's ~1.72× as tall as wide) so the
-                          // clap row, streak and caption show; only a very
-                          // short hero (SE) falls back to a peek.
-                          maxWidth: max(min(artWidth * 0.58, 240, height / 1.72), min(150, artWidth * 0.5)))
-                .id(front)
-                .transition(.asymmetric(
-                    insertion: .scale(scale: 0.88).combined(with: .opacity),
-                    removal: .dealAway))
-                .introPop(0)
-                .introBob(4, period: 3.6)
+            ForEach(Array(deck.enumerated()), id: \.offset) { i, photo in
+                let place = placement(for: slot(of: i, count: deck.count), count: deck.count, width: width)
+                IntroFeedPost(photo: photo, height: height, maxWidth: width)
+                    .scaleEffect(place.scale)
+                    .rotationEffect(.degrees(place.angle))
+                    .offset(x: place.x, y: place.y)
+                    .opacity(place.opacity)
+                    .zIndex(place.z)
+            }
         }
+        .animation(.spring(response: 0.75, dampingFraction: 0.86), value: turn)
+        .introPop(0)
+        .introBob(4, period: 3.6)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onReceive(ticker) { _ in
-            guard active, !reduceMotion, photos.count > 1 else { return }
-            withAnimation(.spring(response: 0.62, dampingFraction: 0.84)) { index += 1 }
+            guard active, !reduceMotion, deck.count > 1 else { return }
+            turn += 1
         }
     }
 
-    /// A tilted print of the photo `offset` places after the front one,
-    /// cross-fading when the rotation moves on.
-    private func backPrint(at offset: Int, width: CGFloat) -> some View {
-        let slot = photos.isEmpty ? offset % 3 : offset % photos.count
-        return IntroPhotoCard(photo: photos.isEmpty ? nil : photos[slot], slot: slot, width: width)
-            .id(slot)
-            .transition(.opacity)
+    /// 0 = front, 1 = back-left (next up), count-1 = back-right (just shown),
+    /// anything else = tucked away behind the front.
+    private func slot(of index: Int, count: Int) -> Int {
+        ((index - turn) % count + count) % count
     }
-}
 
-/// The front post leaving: it tips and slides off to the left, like a card
-/// dealt away, while the next one rises in its place.
-private struct DealAway: ViewModifier {
-    let progress: Double
-
-    func body(content: Content) -> some View {
-        content
-            .rotationEffect(.degrees(-14 * progress))
-            .offset(x: -170 * progress, y: 30 * progress)
-            .opacity(1 - progress)
-    }
-}
-
-private extension AnyTransition {
-    static var dealAway: AnyTransition {
-        .modifier(active: DealAway(progress: 1), identity: DealAway(progress: 0))
+    private func placement(for slot: Int, count: Int, width: CGFloat) -> Placement {
+        let spread = min(width * 0.5, max(0, (artWidth - width * 0.8) / 2))
+        if slot == 0 {
+            return Placement(x: 0, y: 0, angle: 0, scale: 1, opacity: 1, z: 3)
+        }
+        if slot == 1 {
+            return Placement(x: -spread, y: 14, angle: -8, scale: 0.8, opacity: 1, z: 2)
+        }
+        if slot == count - 1 {
+            return Placement(x: spread, y: 14, angle: 8, scale: 0.8, opacity: 1, z: 1)
+        }
+        return Placement(x: 0, y: 24, angle: 0, scale: 0.7, opacity: 0, z: 0)
     }
 }
 
