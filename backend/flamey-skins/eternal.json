@@ -1,0 +1,29 @@
+{
+  "format": 1,
+  "id": "eternal",
+  "order": 23,
+  "slot": "color",
+  "name": "Eternal",
+  "family": "streakDays",
+  "unlock": {"badge":"streak_1000"},
+  "unlock_copy": "Reach a 1,000-day streak",
+  "holidays": [],
+  "mood_prop": false,
+  "compact": true,
+  "rules": {"hides":[],"clashes":[]},
+  "palette": {
+    "angular": false,
+    "bodyOpacity": 1,
+    "core": "#FFFFFFFF",
+    "effects": ["embers","halo","hotCore"],
+    "end": [0.5,1],
+    "eye": "#3A2410FF",
+    "glow": "#FFE8A8FF",
+    "inner": ["#FFFFFFFF","#FFFFFFFF"],
+    "innerOpacity": 1,
+    "outer": ["#FFFFFFFF","#FFF8DCFF","#FFDE8AFF","#FFB547FF"],
+    "rim": "#FFFFFFE6",
+    "start": [0.5,0]
+  },
+  "art": {}
+}

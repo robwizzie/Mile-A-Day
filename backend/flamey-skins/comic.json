@@ -1,0 +1,16 @@
+{
+  "format": 1,
+  "id": "comic",
+  "order": 126,
+  "slot": "bubble",
+  "name": "Comic",
+  "family": "nudges",
+  "unlock": {"badge":"nudge_1"},
+  "unlock_copy": "Send a nudge",
+  "holidays": [],
+  "mood_prop": false,
+  "compact": false,
+  "rules": {"hides":[],"clashes":[]},
+  "effects": ["bubble:comic"],
+  "art": {}
+}

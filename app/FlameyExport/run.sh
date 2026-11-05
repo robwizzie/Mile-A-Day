@@ -37,6 +37,7 @@ if ! xcrun swiftc -parse-as-library -O -swift-version 5 \
     "$W/FlameyPalettes.swift" \
     "$W/FlameyRender.swift" \
     "$W/FlameyWardrobe.swift" \
+    "$W/FlameySkin.swift" \
     "$BUILD/FlameyArtRec.swift" \
     "$HERE/RecContext.swift" \
     "$HERE/FlameyExporter.swift" \

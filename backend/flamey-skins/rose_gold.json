@@ -1,0 +1,29 @@
+{
+  "format": 1,
+  "id": "rose_gold",
+  "order": 26,
+  "slot": "color",
+  "name": "Rose Gold",
+  "family": "plus",
+  "unlock": "plus",
+  "unlock_copy": "Included with Mile A Day+",
+  "holidays": [],
+  "mood_prop": false,
+  "compact": true,
+  "rules": {"hides":[],"clashes":[]},
+  "palette": {
+    "angular": false,
+    "bodyOpacity": 1,
+    "core": "#FFE6DAFF",
+    "effects": ["sheen"],
+    "end": [0.5,1],
+    "eye": "#3A1618FF",
+    "glow": "#F29A86FF",
+    "inner": ["#FFF6F0FF","#FFCDB8FF"],
+    "innerOpacity": null,
+    "outer": ["#FFE3D6FF","#F0A58CFF","#C86E62FF","#6E3233FF"],
+    "rim": "#FFE9DECC",
+    "start": [0,0]
+  },
+  "art": {}
+}

@@ -1,0 +1,29 @@
+{
+  "format": 1,
+  "id": "lava_lamp",
+  "order": 16,
+  "slot": "color",
+  "name": "Lava Lamp",
+  "family": "streakDays",
+  "unlock": {"badge":"streak_180"},
+  "unlock_copy": "Reach a 180-day streak",
+  "holidays": [],
+  "mood_prop": false,
+  "compact": true,
+  "rules": {"hides":[],"clashes":[]},
+  "palette": {
+    "angular": false,
+    "bodyOpacity": 1,
+    "core": "#FFF3B0FF",
+    "effects": ["lava"],
+    "end": [0.5,1],
+    "eye": null,
+    "glow": "#FF5A6AFF",
+    "inner": ["#FFEDB8FF","#FFB24DFF"],
+    "innerOpacity": null,
+    "outer": ["#FF9A4AFF","#E8386FFF","#6E1A5CFF"],
+    "rim": null,
+    "start": [0.5,0]
+  },
+  "art": {}
+}

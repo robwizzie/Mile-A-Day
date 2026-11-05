@@ -1,0 +1,29 @@
+{
+  "format": 1,
+  "id": "sapphire",
+  "order": 7,
+  "slot": "color",
+  "name": "Sapphire",
+  "family": "streakDays",
+  "unlock": {"badge":"streak_30"},
+  "unlock_copy": "Reach a 30-day streak",
+  "holidays": [],
+  "mood_prop": false,
+  "compact": true,
+  "rules": {"hides":[],"clashes":[]},
+  "palette": {
+    "angular": false,
+    "bodyOpacity": 1,
+    "core": "#CFE6FFFF",
+    "effects": [],
+    "end": [0.5,1],
+    "eye": "#0A1640FF",
+    "glow": "#3D7BFFFF",
+    "inner": ["#E8F4FFFF","#93C7FFFF"],
+    "innerOpacity": null,
+    "outer": ["#9CC8FFFF","#2F6BFFFF","#1230A8FF"],
+    "rim": null,
+    "start": [0.5,0]
+  },
+  "art": {}
+}

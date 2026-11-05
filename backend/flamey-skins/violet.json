@@ -1,0 +1,29 @@
+{
+  "format": 1,
+  "id": "violet",
+  "order": 8,
+  "slot": "color",
+  "name": "Violet",
+  "family": "streakDays",
+  "unlock": {"badge":"streak_45"},
+  "unlock_copy": "Reach a 45-day streak",
+  "holidays": [],
+  "mood_prop": false,
+  "compact": true,
+  "rules": {"hides":[],"clashes":[]},
+  "palette": {
+    "angular": false,
+    "bodyOpacity": 1,
+    "core": "#E8D6FFFF",
+    "effects": [],
+    "end": [0.5,1],
+    "eye": "#220A45FF",
+    "glow": "#9B4DFFFF",
+    "inner": ["#F5EAFFFF","#CCA3FFFF"],
+    "innerOpacity": null,
+    "outer": ["#DDB6FFFF","#9B4DFFFF","#541CB0FF"],
+    "rim": null,
+    "start": [0.5,0]
+  },
+  "art": {}
+}

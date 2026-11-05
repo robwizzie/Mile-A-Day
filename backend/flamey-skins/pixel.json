@@ -1,0 +1,16 @@
+{
+  "format": 1,
+  "id": "pixel",
+  "order": 128,
+  "slot": "bubble",
+  "name": "Pixel",
+  "family": "nudges",
+  "unlock": {"badge":"nudge_100"},
+  "unlock_copy": "Send 100 nudges",
+  "holidays": [],
+  "mood_prop": false,
+  "compact": false,
+  "rules": {"hides":[],"clashes":[]},
+  "effects": ["bubble:pixel"],
+  "art": {}
+}

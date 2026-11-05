@@ -1,0 +1,29 @@
+{
+  "format": 1,
+  "id": "gold",
+  "order": 20,
+  "slot": "color",
+  "name": "Gold",
+  "family": "streakDays",
+  "unlock": {"badge":"streak_365"},
+  "unlock_copy": "Reach a 365-day streak",
+  "holidays": [],
+  "mood_prop": false,
+  "compact": true,
+  "rules": {"hides":[],"clashes":[]},
+  "palette": {
+    "angular": false,
+    "bodyOpacity": 1,
+    "core": "#FFF3B0FF",
+    "effects": ["embers","sheen"],
+    "end": [0.5,1],
+    "eye": "#3A2400FF",
+    "glow": "#FFC83AFF",
+    "inner": ["#FFFDEBFF","#FFE08AFF"],
+    "innerOpacity": null,
+    "outer": ["#FFF4C0FF","#F2C230FF","#B67A08FF","#5E3A00FF"],
+    "rim": "#FFF6C8D9",
+    "start": [0,0]
+  },
+  "art": {}
+}

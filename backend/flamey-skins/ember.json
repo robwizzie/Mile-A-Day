@@ -1,0 +1,29 @@
+{
+  "format": 1,
+  "id": "ember",
+  "order": 1,
+  "slot": "color",
+  "name": "Ember",
+  "family": "streakDays",
+  "unlock": {"badge":"consistency_3"},
+  "unlock_copy": "Walk 3 days in a row",
+  "holidays": [],
+  "mood_prop": false,
+  "compact": true,
+  "rules": {"hides":[],"clashes":[]},
+  "palette": {
+    "angular": false,
+    "bodyOpacity": 1,
+    "core": "#FFD0B8FF",
+    "effects": [],
+    "end": [0.5,1],
+    "eye": "#3A0A04FF",
+    "glow": "#FF3D1AFF",
+    "inner": ["#FFE0C8FF","#FF8052FF"],
+    "innerOpacity": null,
+    "outer": ["#FF9A6BFF","#F03A1CFF","#9A1206FF"],
+    "rim": null,
+    "start": [0.5,0]
+  },
+  "art": {}
+}

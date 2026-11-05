@@ -1,0 +1,29 @@
+{
+  "format": 1,
+  "id": "obsidian",
+  "order": 27,
+  "slot": "color",
+  "name": "Obsidian",
+  "family": "plus",
+  "unlock": "plus",
+  "unlock_copy": "Included with Mile A Day+",
+  "holidays": [],
+  "mood_prop": false,
+  "compact": true,
+  "rules": {"hides":[],"clashes":[]},
+  "palette": {
+    "angular": false,
+    "bodyOpacity": 1,
+    "core": "#FFC27AFF",
+    "effects": ["embers","hotCore"],
+    "end": [0.5,1],
+    "eye": "#FFB15CFF",
+    "glow": "#FF6A1FFF",
+    "inner": ["#FFD9A0FF","#FF7A2EFF"],
+    "innerOpacity": null,
+    "outer": ["#5A5A66FF","#26262EFF","#0C0C10FF"],
+    "rim": "#8A8A9999",
+    "start": [0.5,0]
+  },
+  "art": {}
+}

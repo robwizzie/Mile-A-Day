@@ -1,0 +1,29 @@
+{
+  "format": 1,
+  "id": "teal",
+  "order": 10,
+  "slot": "color",
+  "name": "Teal",
+  "family": "streakDays",
+  "unlock": {"badge":"streak_60"},
+  "unlock_copy": "Reach a 60-day streak",
+  "holidays": [],
+  "mood_prop": false,
+  "compact": true,
+  "rules": {"hides":[],"clashes":[]},
+  "palette": {
+    "angular": false,
+    "bodyOpacity": 1,
+    "core": "#CFFFFDFF",
+    "effects": [],
+    "end": [0.5,1],
+    "eye": "#06302FFF",
+    "glow": "#19C2C0FF",
+    "inner": ["#E6FFFEFF","#86EBE8FF"],
+    "innerOpacity": null,
+    "outer": ["#A6F4F2FF","#17C0BEFF","#08707CFF"],
+    "rim": null,
+    "start": [0.5,0]
+  },
+  "art": {}
+}

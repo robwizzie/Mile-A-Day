@@ -199,8 +199,8 @@ struct FlameyOutfitLayer: View {
                     if FlameyArt.isTight(reach) { ctx.scaleBy(x: FlameyArt.trailTuck, y: 1) }
                     // ...and a busy look (cape + prop) shortens it a touch.
                     ctx.scaleBy(x: FlameyArt.trailScale(for: look), y: 1)
-                    FlameyArt.drawTrail(trail, in: &ctx, a: a, u: u, reach: reach,
-                                        low: look[.back].map(FlameyArt.isCape) ?? false)
+                    let low = look[.back].map(FlameyArt.isCape) ?? false
+                    skin(trail, "behind", ["reach": reachKey, "low": low ? "1" : "0"], in: &ctx)
                 }
                 .frame(width: size * 3, height: size * 3)
                 // Streaming: drifts back from him and breathes.
@@ -210,7 +210,7 @@ struct FlameyOutfitLayer: View {
             if let back = look[.back] {
                 Canvas { ctx, canvas in
                     ctx.translateBy(x: canvas.width / 2, y: canvas.height / 2)
-                    FlameyArt.drawBack(back, in: &ctx, a: a, u: u, reach: reach, glow: look.glow == .wings)
+                    skin(back, "behind", ["reach": reachKey, "glow": look.glow == .wings ? "1" : "0"], in: &ctx)
                 }
                 .frame(width: size * 3, height: size * 3)
             }
@@ -294,18 +294,24 @@ struct FlameyOutfitLayer: View {
             Canvas { ctx, canvas in
                 ctx.translateBy(x: canvas.width / 2, y: canvas.height / 2)
                 let items = look.frontItems
-                for item in items where item.slot == .feet || (item.slot == .costume && item != .astronautHelmet) {
-                    FlameyArt.drawFront(item, in: &ctx, a: a, u: u, palette: palette, jets: jets)
+                // Drawn last (over chest, eyes and head): the astronaut helmet.
+                func last(_ item: FlameyItem) -> Bool { item.skin?.ruleString("draw") == "last" }
+                for item in items where item.slot == .feet {
+                    skin(item, "front", ["jets": jets ? "1" : "0"], place: .feet, in: &ctx)
+                }
+                for item in items where item.slot == .costume && !last(item) {
+                    skin(item, "front", in: &ctx)
                 }
                 if let crown = FlameyArt.monthCrown(of: look) {
-                    FlameyArt.drawMonthCrown(crown, in: &ctx, a: a, u: u)
+                    skin(crown, "crown", in: &ctx)
                 }
-                if let back = look[.back] { FlameyArt.drawBackFront(back, in: &ctx, a: a, u: u) }
-                for item in items where [.chest, .eyes, .head].contains(item.slot) {
-                    FlameyArt.drawFront(item, in: &ctx, a: a, u: u, palette: palette, jets: jets)
+                for item in items where [.chest, .eyes, .head].contains(item.slot) && !last(item) {
+                    skin(item, "front", in: &ctx)
+                    // The heart bopper's band sits still on his head.
+                    skin(item, "bopper-band", in: &ctx)
                 }
-                if look.wears(.astronautHelmet) {
-                    FlameyArt.drawFront(.astronautHelmet, in: &ctx, a: a, u: u, palette: palette, jets: jets)
+                for item in items where last(item) {
+                    skin(item, "front", in: &ctx)
                 }
             }
             .frame(width: size * 3, height: size * 3)
@@ -314,22 +320,16 @@ struct FlameyOutfitLayer: View {
                 heldProp(held, a: a)
             }
 
-            if look.wears(.heartBopper) {
-                // The band sits still on his head; only the springs sway.
-                let seat = a.topY + FlameyArt.bopperSeat * u
+            if let head = look[.head], let sk = head.skin, sk.layer("bopper-springs") != nil {
+                // The heart bopper's springs sway about their base.
+                let deg = (sk.motion["bopper-springs"]?["deg"] as? NSNumber)?.doubleValue ?? 6
+                let pivot = unitPoint(skinPoint(sk.pivots["bopper-springs"] ?? .zero))
                 Canvas { ctx, canvas in
                     ctx.translateBy(x: canvas.width / 2, y: canvas.height / 2)
-                    FlameyArt.drawHeartBopperBand(in: &ctx, u: u)
+                    skin(head, "bopper-springs", in: &ctx)
                 }
-                .frame(width: u * 0.6, height: u * 0.6)
-                .offset(y: seat)
-                Canvas { ctx, canvas in
-                    ctx.translateBy(x: canvas.width / 2, y: canvas.height - 0.05 * u)
-                    FlameyArt.drawHeartBopper(in: &ctx, u: u)
-                }
-                .frame(width: u * 0.7, height: u * 0.7)
-                .rotationEffect(.degrees(moving ? (phase ? 6 : -6) : 0), anchor: .bottom)
-                .offset(y: seat - u * 0.30)
+                .frame(width: size * 3, height: size * 3)
+                .rotationEffect(.degrees(moving ? (phase ? deg : -deg) : 0), anchor: pivot)
             }
 
             if let companion = look[.companion] {
@@ -347,7 +347,7 @@ struct FlameyOutfitLayer: View {
                     Canvas { ctx, canvas in
                         ctx.translateBy(x: canvas.width / 2, y: canvas.height / 2)
                         ctx.translateBy(x: 0, y: a.ground); ctx.scaleBy(x: k, y: k); ctx.translateBy(x: 0, y: -a.ground)
-                        FlameyArt.drawCompanionShadow(companion, in: &ctx, a: a, u: u, floats: floats)
+                        skin(companion, "companion-shadow", place: .ground, in: &ctx)
                     }
                     .frame(width: size * 1.6, height: size * 3)
                     .offset(x: x)
@@ -355,7 +355,7 @@ struct FlameyOutfitLayer: View {
                 Canvas { ctx, canvas in
                     ctx.translateBy(x: canvas.width / 2, y: canvas.height / 2)
                     ctx.translateBy(x: 0, y: a.ground); ctx.scaleBy(x: k, y: k); ctx.translateBy(x: 0, y: -a.ground)
-                    FlameyArt.drawCompanion(companion, in: &ctx, a: a, u: u, palette: palette, pose: companionPose)
+                    skin(companion, "companion-body", ["pose": String(describing: companionPose)], place: .ground, in: &ctx)
                 }
                 .frame(width: size * 1.6, height: size * 3)
                 // Floaters bob; walkers bounce a little.
@@ -386,15 +386,13 @@ struct FlameyOutfitLayer: View {
         ZStack {
             Canvas { ctx, canvas in
                 ctx.translateBy(x: canvas.width / 2, y: canvas.height / 2)
-                FlameyArt.applyHeldTight(item, &ctx, a: a, u: u, reach: reach)
-                FlameyArt.held(item, &ctx, a, u, layer: .body)
+                skin(item, "held-body", ["reach": reachKey], in: &ctx)
             }
             .frame(width: size * 3, height: size * 3)
             if let accentAt {
                 Canvas { ctx, canvas in
                     ctx.translateBy(x: canvas.width / 2, y: canvas.height / 2)
-                    FlameyArt.applyHeldTight(item, &ctx, a: a, u: u, reach: reach)
-                    FlameyArt.held(item, &ctx, a, u, layer: .accent)
+                    skin(item, "held-accent", ["reach": reachKey], in: &ctx)
                 }
                 .frame(width: size * 3, height: size * 3)
                 .modifier(FlameyHeldAccent(kind: moving ? motion.accent : .none, on: on, anchor: accentAt))
@@ -405,6 +403,74 @@ struct FlameyOutfitLayer: View {
         .offset(y: item == .pomPoms && on ? -0.012 * u : 0)
         // A still (widget, share card, Reduce Motion) draws the prop at rest.
         .rotationEffect(.degrees(!moving ? 0 : (on ? motion.wobble : -motion.wobble * 0.35)), anchor: grip)
+    }
+
+    // MARK: Skins
+
+    /// Where a skin layer is pinned: art on his body rises when he hovers;
+    /// shoes were recorded at their own hover; companions stand on the floor.
+    enum SkinPlace { case body, feet, ground }
+
+    private var reachKey: String { String(Double(reach)) }
+
+    /// Draws one recorded layer of `item`'s skin into a canvas whose origin is
+    /// the centre of his square. Skins are recorded in body units about the
+    /// figure at body scale 1, where the floor is +0.5; everything in the art
+    /// sits relative to the floor (`FlameyArt.anchors`), so a recorded y maps
+    /// to size/2 + (y - 0.5) u at any body scale — he shrinks toward his base.
+    private func skin(_ item: FlameyItem, _ part: String, _ conditions: [String: String] = [:],
+                      place: SkinPlace = .body, in ctx: inout GraphicsContext) {
+        if Self.legacyArt {
+            legacy(item, part, conditions, in: &ctx)
+            return
+        }
+        guard let sk = item.skin, let layer = sk.layer(part, conditions) else { return }
+        var c = ctx
+        c.translateBy(x: 0, y: size / 2 - 0.5 * u + (place == .body ? -look.hoverLift * u : 0))
+        FlameySkinArt.draw(layer, in: &c, u: u, palette: palette)
+    }
+
+    /// MATCH CHECK ONLY (app/FlameyExport/match.sh): draw with the Swift art
+    /// code the skins were recorded from, through this same composition, so
+    /// both renders differ only in where the art comes from. Never set in the
+    /// app. Goes away with FlameyArt's drawing code.
+    nonisolated(unsafe) static var legacyArt = false
+
+    private func legacy(_ item: FlameyItem, _ part: String, _ conditions: [String: String],
+                        in ctx: inout GraphicsContext) {
+        let a = anchors
+        let u = self.u
+        switch part {
+        case "behind":
+            if item.slot == .trail {
+                FlameyArt.drawTrail(item, in: &ctx, a: a, u: u, reach: reach, low: conditions["low"] == "1")
+            } else {
+                FlameyArt.drawBack(item, in: &ctx, a: a, u: u, reach: reach, glow: conditions["glow"] == "1")
+            }
+        case "front":
+            FlameyArt.drawFront(item, in: &ctx, a: a, u: u, palette: palette, jets: conditions["jets"] != "0")
+        case "crown":
+            FlameyArt.drawMonthCrown(item, in: &ctx, a: a, u: u)
+        case "bopper-band", "bopper-springs":
+            var c = ctx
+            c.translateBy(x: 0, y: a.topY + FlameyArt.bopperSeat * u)
+            if part == "bopper-band" { FlameyArt.drawHeartBopperBand(in: &c, u: u) } else { FlameyArt.drawHeartBopper(in: &c, u: u) }
+        case "held-body", "held-accent":
+            var c = ctx
+            FlameyArt.applyHeldTight(item, &c, a: a, u: u, reach: reach)
+            FlameyArt.held(item, &c, a, u, layer: part == "held-body" ? .body : .accent)
+        case "companion-shadow":
+            FlameyArt.drawCompanionShadow(item, in: &ctx, a: a, u: u, floats: Self.floats(item))
+        case "companion-body":
+            FlameyArt.drawCompanion(item, in: &ctx, a: a, u: u, palette: palette, pose: companionPose)
+        default:
+            break
+        }
+    }
+
+    /// A recorded body-unit point (a pivot) in this canvas's coordinates.
+    private func skinPoint(_ p: CGPoint, place: SkinPlace = .body) -> CGPoint {
+        CGPoint(x: p.x * u, y: size / 2 + (p.y - 0.5) * u + (place == .body ? -look.hoverLift * u : 0))
     }
 
     /// A point in the outfit canvas (origin at his square's centre) as a
@@ -643,6 +709,11 @@ extension FlameyDressedBody where Skin == EmptyView, Prop == EmptyView {
                          palette: health == .dead ? nil : look.figurePalette,
                          lift: look.bodyLift * scale, legLength: look.standLift)
     }
+}
+
+extension FlameyItem {
+    /// This item's skin (its art and rules as data), from the catalog.
+    var skin: FlameySkin? { FlameySkinCatalog.shared[rawValue] }
 }
 
 extension FlameyLook {

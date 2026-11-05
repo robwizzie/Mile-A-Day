@@ -1,0 +1,29 @@
+{
+  "format": 1,
+  "id": "candy",
+  "order": 18,
+  "slot": "color",
+  "name": "Candy",
+  "family": "streakDays",
+  "unlock": {"badge":"streak_250"},
+  "unlock_copy": "Reach a 250-day streak",
+  "holidays": [],
+  "mood_prop": false,
+  "compact": true,
+  "rules": {"hides":[],"clashes":[]},
+  "palette": {
+    "angular": false,
+    "bodyOpacity": 1,
+    "core": "#FFE6F6FF",
+    "effects": ["candy"],
+    "end": [1,1],
+    "eye": "#3A1438FF",
+    "glow": "#FF9FDCFF",
+    "inner": ["#FFFFFFFF","#FFDDF2FF"],
+    "innerOpacity": null,
+    "outer": ["#FFB8E8FF","#C9A6FFFF","#8ED8FFFF"],
+    "rim": null,
+    "start": [0,0]
+  },
+  "art": {}
+}

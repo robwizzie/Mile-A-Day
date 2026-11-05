@@ -1,0 +1,29 @@
+{
+  "format": 1,
+  "id": "wildflower",
+  "order": 33,
+  "slot": "color",
+  "name": "Wildflower",
+  "family": "monthly",
+  "unlock": {"month":5},
+  "unlock_copy": "Walk your mile every day of May",
+  "holidays": [],
+  "mood_prop": false,
+  "compact": true,
+  "rules": {"hides":[],"clashes":[]},
+  "palette": {
+    "angular": false,
+    "bodyOpacity": 1,
+    "core": "#FFF6C8FF",
+    "effects": ["flowers"],
+    "end": [0.5,1],
+    "eye": "#14301AFF",
+    "glow": "#8FE07AFF",
+    "inner": ["#FFFDE8FF","#D8F7A8FF"],
+    "innerOpacity": null,
+    "outer": ["#EEFFC4FF","#8FD86AFF","#3E9E4AFF","#1E5A2EFF"],
+    "rim": "#FFFDE899",
+    "start": [0.5,0]
+  },
+  "art": {}
+}

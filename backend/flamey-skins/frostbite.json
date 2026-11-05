@@ -1,0 +1,29 @@
+{
+  "format": 1,
+  "id": "frostbite",
+  "order": 29,
+  "slot": "color",
+  "name": "Frostbite",
+  "family": "monthly",
+  "unlock": {"month":1},
+  "unlock_copy": "Walk your mile every day of January",
+  "holidays": [],
+  "mood_prop": false,
+  "compact": true,
+  "rules": {"hides":[],"clashes":[]},
+  "palette": {
+    "angular": false,
+    "bodyOpacity": 1,
+    "core": "#F4FDFFFF",
+    "effects": ["sheen","snowflakes"],
+    "end": [0.5,1],
+    "eye": "#0E2A44FF",
+    "glow": "#8FD8FFFF",
+    "inner": ["#FFFFFFFF","#D8F3FFFF"],
+    "innerOpacity": null,
+    "outer": ["#F4FCFFFF","#A8DDF7FF","#4F9FD6FF","#1F5E9EFF"],
+    "rim": "#FFFFFFD9",
+    "start": [0.5,0]
+  },
+  "art": {}
+}

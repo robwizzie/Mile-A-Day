@@ -1,0 +1,16 @@
+{
+  "format": 1,
+  "id": "gold_bubble",
+  "order": 129,
+  "slot": "bubble",
+  "name": "Gold",
+  "family": "nudges",
+  "unlock": {"badge":"nudge_500"},
+  "unlock_copy": "Send 500 nudges",
+  "holidays": [],
+  "mood_prop": false,
+  "compact": false,
+  "rules": {"hides":[],"clashes":[]},
+  "effects": ["bubble:gold_bubble"],
+  "art": {}
+}

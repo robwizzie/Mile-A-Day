@@ -1,0 +1,29 @@
+{
+  "format": 1,
+  "id": "sweetheart",
+  "order": 30,
+  "slot": "color",
+  "name": "Sweetheart",
+  "family": "monthly",
+  "unlock": {"month":2},
+  "unlock_copy": "Walk your mile every day of February",
+  "holidays": [],
+  "mood_prop": false,
+  "compact": true,
+  "rules": {"hides":[],"clashes":[]},
+  "palette": {
+    "angular": false,
+    "bodyOpacity": 1,
+    "core": "#FFE3ECFF",
+    "effects": ["hearts"],
+    "end": [0.5,1],
+    "eye": "#3A0614FF",
+    "glow": "#FF5C8AFF",
+    "inner": ["#FFF0F5FF","#FFB3C9FF"],
+    "innerOpacity": null,
+    "outer": ["#FFC8DAFF","#FF5C8AFF","#D81B4EFF","#7A0A2AFF"],
+    "rim": "#FFE0EAB3",
+    "start": [0.5,0]
+  },
+  "art": {}
+}

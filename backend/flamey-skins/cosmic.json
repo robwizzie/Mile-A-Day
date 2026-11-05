@@ -1,0 +1,29 @@
+{
+  "format": 1,
+  "id": "cosmic",
+  "order": 22,
+  "slot": "color",
+  "name": "Cosmic",
+  "family": "streakDays",
+  "unlock": {"badge":"streak_730"},
+  "unlock_copy": "Reach a 730-day streak",
+  "holidays": [],
+  "mood_prop": false,
+  "compact": true,
+  "rules": {"hides":[],"clashes":[]},
+  "palette": {
+    "angular": false,
+    "bodyOpacity": 1,
+    "core": "#D8C8FFFF",
+    "effects": ["denseStars","halo","nebula"],
+    "end": [0.5,1],
+    "eye": "#14082EFF",
+    "glow": "#8E6BFFFF",
+    "inner": ["#FFFFFFFF","#CDB8FFFF"],
+    "innerOpacity": 1,
+    "outer": ["#3A1A80FF","#160A40FF","#05030FFF"],
+    "rim": "#D6C4FFA6",
+    "start": [0.5,0]
+  },
+  "art": {}
+}

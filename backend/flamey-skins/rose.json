@@ -1,0 +1,29 @@
+{
+  "format": 1,
+  "id": "rose",
+  "order": 9,
+  "slot": "color",
+  "name": "Rose",
+  "family": "streakDays",
+  "unlock": {"badge":"streak_50"},
+  "unlock_copy": "Reach a 50-day streak",
+  "holidays": [],
+  "mood_prop": false,
+  "compact": true,
+  "rules": {"hides":[],"clashes":[]},
+  "palette": {
+    "angular": false,
+    "bodyOpacity": 1,
+    "core": "#FFD8EAFF",
+    "effects": [],
+    "end": [0.5,1],
+    "eye": "#3D0A22FF",
+    "glow": "#FF5FA2FF",
+    "inner": ["#FFEEF6FF","#FFA3CCFF"],
+    "innerOpacity": null,
+    "outer": ["#FFC8E0FF","#FF5FA2FF","#C21A69FF"],
+    "rim": null,
+    "start": [0.5,0]
+  },
+  "art": {}
+}

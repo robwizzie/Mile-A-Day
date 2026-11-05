@@ -92,6 +92,8 @@ final class FlameyExporter {
     // MARK: - Run
 
     func run() {
+        // The reference renders are the Swift art code's own output.
+        FlameyOutfitLayer.legacyArt = true
         try? FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
         for s in surfaces { reference(nil, id: "_plain", s) }
         for item in FlameyItem.allCases {

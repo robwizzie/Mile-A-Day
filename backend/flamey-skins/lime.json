@@ -1,0 +1,29 @@
+{
+  "format": 1,
+  "id": "lime",
+  "order": 2,
+  "slot": "color",
+  "name": "Lime",
+  "family": "streakDays",
+  "unlock": {"badge":"consistency_5"},
+  "unlock_copy": "Walk 5 days in a row",
+  "holidays": [],
+  "mood_prop": false,
+  "compact": true,
+  "rules": {"hides":[],"clashes":[]},
+  "palette": {
+    "angular": false,
+    "bodyOpacity": 1,
+    "core": "#EFFFC4FF",
+    "effects": [],
+    "end": [0.5,1],
+    "eye": "#1E3300FF",
+    "glow": "#B4F03AFF",
+    "inner": ["#FBFFE6FF","#D6F77EFF"],
+    "innerOpacity": null,
+    "outer": ["#F0FFA8FF","#A8E02AFF","#4E8C06FF"],
+    "rim": null,
+    "start": [0.5,0]
+  },
+  "art": {}
+}

@@ -1,0 +1,29 @@
+{
+  "format": 1,
+  "id": "watermelon",
+  "order": 36,
+  "slot": "color",
+  "name": "Watermelon",
+  "family": "monthly",
+  "unlock": {"month":8},
+  "unlock_copy": "Walk your mile every day of August",
+  "holidays": [],
+  "mood_prop": false,
+  "compact": true,
+  "rules": {"hides":[],"clashes":[]},
+  "palette": {
+    "angular": false,
+    "bodyOpacity": 1,
+    "core": "#FFEFF2FF",
+    "effects": ["melon"],
+    "end": [0.5,1],
+    "eye": "#1A0A0CFF",
+    "glow": "#FF5C7AFF",
+    "inner": ["#FFE9EEFF","#FFA3B6FF"],
+    "innerOpacity": null,
+    "outer": ["#FFB0C0FF","#FF5674FF","#E02A4CFF"],
+    "rim": "#FFE9EE99",
+    "start": [0.5,0]
+  },
+  "art": {}
+}

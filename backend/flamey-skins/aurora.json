@@ -1,0 +1,29 @@
+{
+  "format": 1,
+  "id": "aurora",
+  "order": 14,
+  "slot": "color",
+  "name": "Aurora",
+  "family": "streakDays",
+  "unlock": {"badge":"streak_120"},
+  "unlock_copy": "Reach a 120-day streak",
+  "holidays": [],
+  "mood_prop": false,
+  "compact": true,
+  "rules": {"hides":[],"clashes":[]},
+  "palette": {
+    "angular": false,
+    "bodyOpacity": 1,
+    "core": "#D6FFEFFF",
+    "effects": [],
+    "end": [0.5,1],
+    "eye": "#10203AFF",
+    "glow": "#4FD9C0FF",
+    "inner": ["#F2FFF8FF","#A6F5D6FF"],
+    "innerOpacity": null,
+    "outer": ["#8CFFBEFF","#2FD3B5FF","#4F7BFFFF","#9B4DFFFF"],
+    "rim": null,
+    "start": [0.5,0]
+  },
+  "art": {}
+}

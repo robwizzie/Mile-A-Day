@@ -1,0 +1,16 @@
+{
+  "format": 1,
+  "id": "paparazzi",
+  "order": 124,
+  "slot": "aura",
+  "name": "Paparazzi",
+  "family": "stories",
+  "unlock": {"badge":"story_100"},
+  "unlock_copy": "Post 100 stories",
+  "holidays": [],
+  "mood_prop": false,
+  "compact": false,
+  "rules": {"hides":[],"clashes":[]},
+  "effects": ["aura:paparazzi"],
+  "art": {}
+}
