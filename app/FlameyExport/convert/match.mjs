@@ -1,8 +1,10 @@
-// MATCH CHECK (web half): composes each item's recorded layers around the
-// plain figure exactly as FlameyOutfitLayer does for a one-item look, and
-// compares the result pixel by pixel with the Mac's reference render of the
-// same item (out/ref/<surface>/<id>.png). Colour items are skipped (they
-// recolour the figure itself; the Swift match check covers them).
+// MATCH CHECK (web half): composes each item's layers around the plain figure
+// with the WEBSITE's renderer (website/lib/flamey/compose.ts + skinRender.ts,
+// the Skin Builder's own code) and compares the result pixel by pixel with the
+// Mac's reference render of the same item (out/ref/<surface>/<id>.png). It
+// reads the shipped skin files (backend/flamey-skins), so a pass means the
+// files AND the web renderer draw what the Swift code drew. Colour items are
+// skipped (they recolour the figure itself; the Swift match check covers them).
 //
 //   node match.mjs [--blur k] [--shadow k] [--only id,id] [--save]
 //
@@ -10,44 +12,61 @@
 import { chromium } from 'playwright-core';
 import fs from 'node:fs';
 import path from 'node:path';
+import { stripTypeScriptTypes } from 'node:module';
 
+const ROOT = path.resolve(import.meta.dirname, '../../..');
 const OUT = path.resolve(import.meta.dirname, '../out');
+const SKINS = path.join(ROOT, 'backend/flamey-skins');
+const LIB = path.join(ROOT, 'website/lib/flamey');
 const arg = (k, d) => { const i = process.argv.indexOf(k); return i > 0 ? process.argv[i + 1] : d; };
 const blurScale = +arg('--blur', 1), shadowScale = +arg('--shadow', 2);
 const only = arg('--only', '')?.split(',').filter(Boolean);
 const save = process.argv.includes('--save');
 const meta = JSON.parse(fs.readFileSync(path.join(OUT, 'meta.json')));
-const C = meta.constants;
 
-const surfaces = [
-  { name: 'card', reach: 0.9, compact: false },
-  { name: 'tile', reach: 0.8, compact: false },
-  { name: 'hero', reach: 0.62, compact: false },
-  { name: 'widget', reach: 0.9, compact: true },
-];
+const surfaces = ['card', 'tile', 'hero', 'widget'];
 
 const b64 = (p) => fs.existsSync(p) ? 'data:image/png;base64,' + fs.readFileSync(p).toString('base64') : null;
 const browser = await chromium.launch({
   executablePath: '/home/claude/.cache/ms-playwright/chromium_headless_shell-1234/chrome-headless-shell-linux64/chrome-headless-shell',
 });
 const page = await browser.newPage();
-await page.addScriptTag({ content: fs.readFileSync(path.join(import.meta.dirname, 'skin-render.js'), 'utf8') });
+// The website's TypeScript modules, types stripped, served from a fake origin
+// so their own `import ... from "./skinRender"` resolves.
+const ORIGIN = 'http://flamey.local';
+const emitWarning = process.emitWarning;
+process.emitWarning = (w, ...rest) => (String(w).includes('stripTypeScriptTypes') ? undefined : emitWarning.call(process, w, ...rest));
+await page.route(ORIGIN + '/**', (route) => {
+  const url = new URL(route.request().url());
+  if (url.pathname === '/') return route.fulfill({ contentType: 'text/html', body: '<!doctype html><title>match</title>' });
+  const file = path.join(LIB, path.basename(url.pathname).replace(/\.(ts|js)$/, '') + '.ts');
+  if (!fs.existsSync(file)) return route.fulfill({ status: 404, body: 'not found' });
+  route.fulfill({ contentType: 'text/javascript', body: stripTypeScriptTypes(fs.readFileSync(file, 'utf8')) });
+});
+await page.goto(ORIGIN + '/');
+const webConstants = await page.evaluate(async () => {
+  window.F = await import('/lib/flamey/compose');
+  return window.F.CONSTANTS;
+});
+for (const [k, v] of Object.entries(meta.constants)) {
+  if (JSON.stringify(webConstants[k]) !== JSON.stringify(v)) console.log(`WARNING constant ${k}: export says ${JSON.stringify(v)}, website/lib/flamey/compose.ts says ${JSON.stringify(webConstants[k])}`);
+}
 
 const results = [];
-const ids = fs.readdirSync(path.join(OUT, 'skins-raw')).map((f) => f.replace('.json', '')).sort();
+const ids = fs.readdirSync(SKINS).filter((f) => f.endsWith('.json')).map((f) => f.replace('.json', '')).sort();
 for (const id of ids) {
   if (only.length && !only.includes(id)) continue;
-  const skin = JSON.parse(fs.readFileSync(path.join(OUT, 'skins-raw', id + '.json')));
+  const skin = JSON.parse(fs.readFileSync(path.join(SKINS, id + '.json')));
   if (skin.slot === 'color' || skin.slot === 'bubble') continue;
   for (const s of surfaces) {
-    const ref = b64(path.join(OUT, 'ref', s.name, id + '.png'));
-    const plain = b64(path.join(OUT, 'ref', s.name, '_plain.png'));
+    const ref = b64(path.join(OUT, 'ref', s, id + '.png'));
+    const plain = b64(path.join(OUT, 'ref', s, '_plain.png'));
     if (!ref || !plain) continue;
-    const r = await page.evaluate(compose, { skin, s, ref, plain, C, blurScale, shadowScale, save });
-    results.push({ id, surface: s.name, ...r });
+    const r = await page.evaluate(compose, { skin, s, ref, plain, blurScale, shadowScale, save });
+    results.push({ id, surface: s, ...r });
     if (save && r.png) {
-      fs.mkdirSync(path.join(OUT, 'match', s.name), { recursive: true });
-      fs.writeFileSync(path.join(OUT, 'match', s.name, id + '.png'), Buffer.from(r.png.split(',')[1], 'base64'));
+      fs.mkdirSync(path.join(OUT, 'match', s), { recursive: true });
+      fs.writeFileSync(path.join(OUT, 'match', s, id + '.png'), Buffer.from(r.png.split(',')[1], 'base64'));
     }
   }
 }
@@ -59,78 +78,18 @@ const pass = results.filter((r) => r.pct < 1).length;
 console.log(`\n${pass}/${results.length} under 1%   median ${worst[Math.floor(worst.length / 2)]?.pct.toFixed(2)}%`);
 fs.writeFileSync(path.join(OUT, 'match.json'), JSON.stringify(results.map(({ png, ...r }) => r), null, 1));
 
-// Runs in the page.
-async function compose({ skin, s, ref, plain, C, blurScale, shadowScale, save }) {
+// Runs in the page: the website's composeLook, nothing of its own.
+async function compose({ skin, s, ref, plain, blurScale, shadowScale, save }) {
   const load = (src) => new Promise((ok, no) => { const i = new Image(); i.onload = () => ok(i); i.onerror = no; i.src = src; });
   const [refImg, plainImg] = await Promise.all([load(ref), load(plain)]);
   const W = refImg.width, H = refImg.height;
-  const U = W / 3; // px per body unit: stage = 3S, u = S at body scale 1
+  const F = window.F;
+  const surface = F.SURFACES.find((x) => x.name === s);
+  if (!F.drawsOn(skin, surface)) return { pct: 0, bad: 0, region: 0, note: 'not on compact' };
   const cv = new OffscreenCanvas(W, H);
   const ctx = cv.getContext('2d');
-  const art = skin.art || {};
-  const images = {};
-  for (const rec of Object.values(art)) for (const [k, src] of Object.entries(rec.images || {})) images[k] = await load(src);
-  const R = FlameySkinRender;
-  const opts = { blurScale, shadowScale };
-  const reach = s.reach;
-  const rk = String(reach);
-  const tight = reach < C.tight_reach;
-  const slot = skin.slot;
-  if (s.compact && !skin.compact) return { pct: 0, bad: 0, region: 0, note: 'not on compact' };
-
-  function body(fn) {
-    ctx.save();
-    ctx.translate(W / 2, H / 2);
-    ctx.scale(U, U);
-    if (s.compact) { ctx.translate(0, 0.5); ctx.scale(1 / (1 + C.leg_length), 1 / (1 + C.leg_length)); ctx.translate(0, -0.5); }
-    if (tight) {
-      // FlameyOutfitLayer's tight mask: a band as wide as his room (hard edge here).
-      const [l, r] = C.tight_mask_bounds;
-      ctx.beginPath(); ctx.rect(l, -5, r - l, 10); ctx.clip();
-    }
-    fn();
-    ctx.restore();
-  }
-
-  // Behind.
-  body(() => {
-    if (slot === 'trail') {
-      ctx.save();
-      if (tight) ctx.scale(C.trail_tuck, 1);
-      R.drawLayer(ctx, art[`behind@reach=${rk},low=0`], opts, images);
-      ctx.restore();
-    }
-    if (slot === 'back') {
-      R.drawLayer(ctx, art[`behind@reach=${rk}`] || art[`behind@reach=${rk},glow=1`], opts, images);
-    }
-  });
-  // A hovering look (rocket boots, winged sandals) lifts the whole figure.
-  const hover = slot === 'feet' && !s.compact ? (skin.hover_lift || 0) : 0;
-  ctx.drawImage(plainImg, 0, -hover * U);
-  // Front.
-  body(() => {
-    const front = slot === 'feet' ? art[`front@jets=${s.compact ? 0 : 1}`] : art.front;
-    R.drawLayer(ctx, front, opts, images);
-    R.drawLayer(ctx, art['bopper-band'], opts, images);
-    R.drawLayer(ctx, art['bopper-springs'], opts, images);
-    if (slot === 'held') {
-      R.drawLayer(ctx, art[`held-body@reach=${rk}`], opts, images);
-      R.drawLayer(ctx, art[`held-accent@reach=${rk}`], opts, images);
-    }
-    if (slot === 'companion') {
-      const floats = !!skin.floats;
-      const k = tight ? 0.60 : 1.15;
-      const x = tight ? (floats ? 0.30 : 0.26) : Math.max(0.56, Math.min(0.70, reach - 0.14));
-      const lift = tight && floats ? -0.42 : 0;
-      const g = 0.5; // ground
-      const place = (dy, rec) => {
-        ctx.save(); ctx.translate(x, dy); ctx.translate(0, g); ctx.scale(k, k); ctx.translate(0, -g);
-        R.drawLayer(ctx, rec, opts, images); ctx.restore();
-      };
-      if (!(tight && floats)) place(0, art['companion-shadow']);
-      place(lift, art['companion-body@pose=rest']);
-    }
-  });
+  const images = await F.loadSkinImages(skin);
+  F.composeLook(ctx, W, skin, surface, { plain: plainImg, images }, { blurScale, shadowScale, time: null });
 
   // Compare against the reference, over the pixels where either differs from plain.
   const get = (img) => { const c = new OffscreenCanvas(W, H); const x = c.getContext('2d'); x.drawImage(img, 0, 0); return x.getImageData(0, 0, W, H).data; };
