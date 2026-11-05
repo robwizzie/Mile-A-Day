@@ -1,0 +1,81 @@
+{
+  "format": 1,
+  "id": "speed_lines",
+  "order": 103,
+  "slot": "trail",
+  "name": "Speed Lines",
+  "family": "distanceInADay",
+  "unlock": {"badge":"daily_5"},
+  "unlock_copy": "Walk 5 miles in one day",
+  "holidays": [],
+  "mood_prop": false,
+  "compact": false,
+  "tier": 30,
+  "auto_eligible": true,
+  "rules": {"hides":[],"clashes":[]},
+  "art": {
+    "behind@reach=0.8,low=0": {
+      "ops": [
+        {"cap":"round","d":"M-.2 -.27L-.56 -.27","op":"stroke","paint":{"lin":[-0.36,-0.27,-0.56,-0.27],"stops":[[0,"#FFFFFF91"],[1,"#FFFFFF00"]]},"w":0.032},
+        {"cap":"round","d":"M-.2 -.17L-.776 -.17","op":"stroke","paint":{"lin":[-0.36,-0.17,-0.776,-0.17],"stops":[[0,"#FFFFFFCE"],[1,"#FFFFFF00"]]},"w":0.032},
+        {"cap":"round","d":"M-.2 -.07L-.96 -.07","op":"stroke","paint":{"lin":[-0.36,-0.07,-0.96,-0.07],"stops":[[0,"#FFFFFFF2"],[1,"#FFFFFF00"]]},"w":0.032},
+        {"cap":"round","d":"M-.2 .03L-.84 .03","op":"stroke","paint":{"lin":[-0.36,0.03,-0.84,0.03],"stops":[[0,"#FFFFFFDA"],[1,"#FFFFFF00"]]},"w":0.032},
+        {"cap":"round","d":"M-.2 .13L-.696 .13","op":"stroke","paint":{"lin":[-0.36,0.13,-0.696,0.13],"stops":[[0,"#FFFFFFB6"],[1,"#FFFFFF00"]]},"w":0.032},
+        {"cap":"round","d":"M-.2 .23L-.52 .23","op":"stroke","paint":{"lin":[-0.36,0.23,-0.52,0.23],"stops":[[0,"#FFFFFF85"],[1,"#FFFFFF00"]]},"w":0.032}
+      ]
+    },
+    "behind@reach=0.8,low=1": {
+      "ops": [
+        {"cap":"round","d":"M-.2 -.27L-.56 -.27","op":"stroke","paint":{"lin":[-0.36,-0.27,-0.56,-0.27],"stops":[[0,"#FFFFFF91"],[1,"#FFFFFF00"]]},"w":0.032},
+        {"cap":"round","d":"M-.2 -.17L-.776 -.17","op":"stroke","paint":{"lin":[-0.36,-0.17,-0.776,-0.17],"stops":[[0,"#FFFFFFCE"],[1,"#FFFFFF00"]]},"w":0.032},
+        {"cap":"round","d":"M-.2 -.07L-.96 -.07","op":"stroke","paint":{"lin":[-0.36,-0.07,-0.96,-0.07],"stops":[[0,"#FFFFFFF2"],[1,"#FFFFFF00"]]},"w":0.032},
+        {"cap":"round","d":"M-.2 .03L-.84 .03","op":"stroke","paint":{"lin":[-0.36,0.03,-0.84,0.03],"stops":[[0,"#FFFFFFDA"],[1,"#FFFFFF00"]]},"w":0.032},
+        {"cap":"round","d":"M-.2 .13L-.696 .13","op":"stroke","paint":{"lin":[-0.36,0.13,-0.696,0.13],"stops":[[0,"#FFFFFFB6"],[1,"#FFFFFF00"]]},"w":0.032},
+        {"cap":"round","d":"M-.2 .23L-.52 .23","op":"stroke","paint":{"lin":[-0.36,0.23,-0.52,0.23],"stops":[[0,"#FFFFFF85"],[1,"#FFFFFF00"]]},"w":0.032}
+      ]
+    },
+    "behind@reach=0.9,low=0": {
+      "ops": [
+        {"cap":"round","d":"M-.2 -.27L-.605 -.27","op":"stroke","paint":{"lin":[-0.36,-0.27,-0.605,-0.27],"stops":[[0,"#FFFFFF91"],[1,"#FFFFFF00"]]},"w":0.032},
+        {"cap":"round","d":"M-.2 -.17L-.848 -.17","op":"stroke","paint":{"lin":[-0.36,-0.17,-0.848,-0.17],"stops":[[0,"#FFFFFFCE"],[1,"#FFFFFF00"]]},"w":0.032},
+        {"cap":"round","d":"M-.2 -.07L-1.055 -.07","op":"stroke","paint":{"lin":[-0.36,-0.07,-1.055,-0.07],"stops":[[0,"#FFFFFFF2"],[1,"#FFFFFF00"]]},"w":0.032},
+        {"cap":"round","d":"M-.2 .03L-.92 .03","op":"stroke","paint":{"lin":[-0.36,0.03,-0.92,0.03],"stops":[[0,"#FFFFFFDA"],[1,"#FFFFFF00"]]},"w":0.032},
+        {"cap":"round","d":"M-.2 .13L-.758 .13","op":"stroke","paint":{"lin":[-0.36,0.13,-0.758,0.13],"stops":[[0,"#FFFFFFB6"],[1,"#FFFFFF00"]]},"w":0.032},
+        {"cap":"round","d":"M-.2 .23L-.56 .23","op":"stroke","paint":{"lin":[-0.36,0.23,-0.56,0.23],"stops":[[0,"#FFFFFF85"],[1,"#FFFFFF00"]]},"w":0.032}
+      ]
+    },
+    "behind@reach=0.9,low=1": {
+      "ops": [
+        {"cap":"round","d":"M-.2 -.27L-.605 -.27","op":"stroke","paint":{"lin":[-0.36,-0.27,-0.605,-0.27],"stops":[[0,"#FFFFFF91"],[1,"#FFFFFF00"]]},"w":0.032},
+        {"cap":"round","d":"M-.2 -.17L-.848 -.17","op":"stroke","paint":{"lin":[-0.36,-0.17,-0.848,-0.17],"stops":[[0,"#FFFFFFCE"],[1,"#FFFFFF00"]]},"w":0.032},
+        {"cap":"round","d":"M-.2 -.07L-1.055 -.07","op":"stroke","paint":{"lin":[-0.36,-0.07,-1.055,-0.07],"stops":[[0,"#FFFFFFF2"],[1,"#FFFFFF00"]]},"w":0.032},
+        {"cap":"round","d":"M-.2 .03L-.92 .03","op":"stroke","paint":{"lin":[-0.36,0.03,-0.92,0.03],"stops":[[0,"#FFFFFFDA"],[1,"#FFFFFF00"]]},"w":0.032},
+        {"cap":"round","d":"M-.2 .13L-.758 .13","op":"stroke","paint":{"lin":[-0.36,0.13,-0.758,0.13],"stops":[[0,"#FFFFFFB6"],[1,"#FFFFFF00"]]},"w":0.032},
+        {"cap":"round","d":"M-.2 .23L-.56 .23","op":"stroke","paint":{"lin":[-0.36,0.23,-0.56,0.23],"stops":[[0,"#FFFFFF85"],[1,"#FFFFFF00"]]},"w":0.032}
+      ]
+    },
+    "behind@reach=0.62,low=0": {
+      "ops": [
+        {"cap":"round","d":"M-.2 -.27L-.479 -.27","op":"stroke","paint":{"lin":[-0.36,-0.27,-0.479,-0.27],"stops":[[0,"#FFFFFF91"],[1,"#FFFFFF00"]]},"w":0.032},
+        {"cap":"round","d":"M-.2 -.17L-.6464 -.17","op":"stroke","paint":{"lin":[-0.36,-0.17,-0.6464,-0.17],"stops":[[0,"#FFFFFFCE"],[1,"#FFFFFF00"]]},"w":0.032},
+        {"cap":"round","d":"M-.2 -.07L-.789 -.07","op":"stroke","paint":{"lin":[-0.36,-0.07,-0.789,-0.07],"stops":[[0,"#FFFFFFF2"],[1,"#FFFFFF00"]]},"w":0.032},
+        {"cap":"round","d":"M-.2 .03L-.696 .03","op":"stroke","paint":{"lin":[-0.36,0.03,-0.696,0.03],"stops":[[0,"#FFFFFFDA"],[1,"#FFFFFF00"]]},"w":0.032},
+        {"cap":"round","d":"M-.2 .13L-.5844 .13","op":"stroke","paint":{"lin":[-0.36,0.13,-0.5844,0.13],"stops":[[0,"#FFFFFFB6"],[1,"#FFFFFF00"]]},"w":0.032},
+        {"cap":"round","d":"M-.2 .23L-.448 .23","op":"stroke","paint":{"lin":[-0.36,0.23,-0.448,0.23],"stops":[[0,"#FFFFFF85"],[1,"#FFFFFF00"]]},"w":0.032}
+      ]
+    },
+    "behind@reach=0.62,low=1": {
+      "ops": [
+        {"cap":"round","d":"M-.2 -.27L-.479 -.27","op":"stroke","paint":{"lin":[-0.36,-0.27,-0.479,-0.27],"stops":[[0,"#FFFFFF91"],[1,"#FFFFFF00"]]},"w":0.032},
+        {"cap":"round","d":"M-.2 -.17L-.6464 -.17","op":"stroke","paint":{"lin":[-0.36,-0.17,-0.6464,-0.17],"stops":[[0,"#FFFFFFCE"],[1,"#FFFFFF00"]]},"w":0.032},
+        {"cap":"round","d":"M-.2 -.07L-.789 -.07","op":"stroke","paint":{"lin":[-0.36,-0.07,-0.789,-0.07],"stops":[[0,"#FFFFFFF2"],[1,"#FFFFFF00"]]},"w":0.032},
+        {"cap":"round","d":"M-.2 .03L-.696 .03","op":"stroke","paint":{"lin":[-0.36,0.03,-0.696,0.03],"stops":[[0,"#FFFFFFDA"],[1,"#FFFFFF00"]]},"w":0.032},
+        {"cap":"round","d":"M-.2 .13L-.5844 .13","op":"stroke","paint":{"lin":[-0.36,0.13,-0.5844,0.13],"stops":[[0,"#FFFFFFB6"],[1,"#FFFFFF00"]]},"w":0.032},
+        {"cap":"round","d":"M-.2 .23L-.448 .23","op":"stroke","paint":{"lin":[-0.36,0.23,-0.448,0.23],"stops":[[0,"#FFFFFF85"],[1,"#FFFFFF00"]]},"w":0.032}
+      ]
+    }
+  },
+  "motion": {
+    "behind": {"kind":"drift","dx":-0.035,"dx_tight":-0.015,"alpha":0.78,"period":1.6}
+  }
+}

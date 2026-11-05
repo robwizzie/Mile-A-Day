@@ -1,0 +1,31 @@
+{
+  "format": 1,
+  "id": "tropic",
+  "order": 28,
+  "slot": "color",
+  "name": "Tropic",
+  "family": "plus",
+  "unlock": "plus",
+  "unlock_copy": "Included with Mile A Day+",
+  "holidays": [],
+  "mood_prop": false,
+  "compact": true,
+  "tier": 96,
+  "auto_eligible": false,
+  "rules": {"hides":[],"clashes":[]},
+  "palette": {
+    "angular": false,
+    "bodyOpacity": 1,
+    "core": "#E8FFF6FF",
+    "effects": ["waves"],
+    "end": [0.5,1],
+    "eye": "#08303AFF",
+    "glow": "#2FD9C0FF",
+    "inner": ["#FFFFF2FF","#B8FFE6FF"],
+    "innerOpacity": null,
+    "outer": ["#FFF27AFF","#37E0B5FF","#14A6C8FF","#FF5FA2FF"],
+    "rim": null,
+    "start": [0.5,0]
+  },
+  "art": {}
+}

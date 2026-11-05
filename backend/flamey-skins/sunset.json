@@ -1,0 +1,31 @@
+{
+  "format": 1,
+  "id": "sunset",
+  "order": 13,
+  "slot": "color",
+  "name": "Sunset",
+  "family": "streakDays",
+  "unlock": {"badge":"streak_100"},
+  "unlock_copy": "Reach a 100-day streak",
+  "holidays": [],
+  "mood_prop": false,
+  "compact": true,
+  "tier": 100,
+  "auto_eligible": true,
+  "rules": {"hides":[],"clashes":[]},
+  "palette": {
+    "angular": false,
+    "bodyOpacity": 1,
+    "core": "#FFF3B0FF",
+    "effects": [],
+    "end": [0.5,1],
+    "eye": null,
+    "glow": "#FF6A5CFF",
+    "inner": ["#FFF5D1FF","#FFB478FF"],
+    "innerOpacity": null,
+    "outer": ["#FFE07AFF","#FF7A45FF","#E8386FFF","#6E2A8CFF"],
+    "rim": null,
+    "start": [0.5,0]
+  },
+  "art": {}
+}

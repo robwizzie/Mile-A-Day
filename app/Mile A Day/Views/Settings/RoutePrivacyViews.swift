@@ -62,14 +62,9 @@ struct RoutePrivacySettingRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
-            MADSettingsRow(
-                icon: "eye.slash.circle.fill",
-                title: "Hide Start & End",
-                subtitle: meters > 0
-                    ? String(localized: "On — friends don't see where you start and finish")
-                    : String(localized: "Off — friends see your whole route"),
-                iconColor: .indigo
-            )
+            Text("Hide start & end")
+                .madFont(size: 16, weight: .medium, design: .rounded)
+                .foregroundColor(.primary)
             Picker("Hide start & end", selection: $meters) {
                 ForEach(RoutePrivacyTrim.options, id: \.self) { option in
                     Text(verbatim: RoutePrivacyLabels.short(option)).tag(option)
@@ -81,8 +76,12 @@ struct RoutePrivacySettingRow: View {
                 MADHaptics.tap()
                 Task { await save(new, previous: old) }
             }
-            Text("Friends see your route begin and end a short way from where you actually started. Your stats don't change.")
-                .madFont(size: 11, design: .rounded)
+            // One line that says the state and what it means, in place of a
+            // status subtitle plus a paragraph under the picker.
+            Text(meters > 0
+                ? String(localized: "Friends don't see where you start and finish. Your stats don't change.")
+                : String(localized: "Friends see your whole route."))
+                .madFont(size: 12, design: .rounded)
                 .foregroundColor(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             if saveFailed {

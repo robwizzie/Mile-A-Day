@@ -22,7 +22,7 @@ struct FriendWorkoutsSection: View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
             // Section Header — the same caps label every profile card wears.
             HStack(spacing: MADTheme.Spacing.sm) {
-                ProfileCardLabel(text: "RECENT WORKOUTS")
+                ProfileCardLabel(text: "Recent workouts")
                 Spacer()
                 Text("\(workouts.count)")
                     .font(.system(size: 11, weight: .bold, design: .rounded))

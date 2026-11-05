@@ -1,0 +1,31 @@
+{
+  "format": 1,
+  "id": "northern_lights",
+  "order": 19,
+  "slot": "color",
+  "name": "Northern Lights",
+  "family": "streakDays",
+  "unlock": {"badge":"streak_300"},
+  "unlock_copy": "Reach a 300-day streak",
+  "holidays": [],
+  "mood_prop": false,
+  "compact": true,
+  "tier": 300,
+  "auto_eligible": true,
+  "rules": {"hides":[],"clashes":[]},
+  "palette": {
+    "angular": false,
+    "bodyOpacity": 1,
+    "core": "#B8FFDDFF",
+    "effects": ["ribbons"],
+    "end": [0.5,1],
+    "eye": "#0A1A20FF",
+    "glow": "#38E6A0FF",
+    "inner": ["#EDFFF6FF","#8DFFC8FF"],
+    "innerOpacity": 1,
+    "outer": ["#2A3F8FFF","#121A4FFF","#070B26FF"],
+    "rim": "#8DFFC880",
+    "start": [0.5,0]
+  },
+  "art": {}
+}

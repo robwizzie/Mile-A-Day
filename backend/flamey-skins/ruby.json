@@ -1,0 +1,31 @@
+{
+  "format": 1,
+  "id": "ruby",
+  "order": 3,
+  "slot": "color",
+  "name": "Ruby",
+  "family": "streakDays",
+  "unlock": {"badge":"streak_7"},
+  "unlock_copy": "Reach a 7-day streak",
+  "holidays": [],
+  "mood_prop": false,
+  "compact": true,
+  "tier": 7,
+  "auto_eligible": true,
+  "rules": {"hides":[],"clashes":[]},
+  "palette": {
+    "angular": false,
+    "bodyOpacity": 1,
+    "core": "#FFC2D0FF",
+    "effects": [],
+    "end": [0.5,1],
+    "eye": "#3A0414FF",
+    "glow": "#FF2D55FF",
+    "inner": ["#FFD2DCFF","#FF7593FF"],
+    "innerOpacity": null,
+    "outer": ["#FF7A96FF","#E3194BFF","#8A0A2CFF"],
+    "rim": null,
+    "start": [0.5,0]
+  },
+  "art": {}
+}

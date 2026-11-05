@@ -1,0 +1,31 @@
+{
+  "format": 1,
+  "id": "sweater_weather",
+  "order": 39,
+  "slot": "color",
+  "name": "Sweater Weather",
+  "family": "monthly",
+  "unlock": {"month":11},
+  "unlock_copy": "Walk your mile every day of November",
+  "holidays": [],
+  "mood_prop": false,
+  "compact": true,
+  "tier": 97,
+  "auto_eligible": false,
+  "rules": {"hides":[],"clashes":[]},
+  "palette": {
+    "angular": false,
+    "bodyOpacity": 1,
+    "core": "#FFF4E6FF",
+    "effects": ["knit"],
+    "end": [0.5,1],
+    "eye": "#2A0A0EFF",
+    "glow": "#E0505AFF",
+    "inner": ["#FFF4E6FF","#F7CDB0FF"],
+    "innerOpacity": null,
+    "outer": ["#F08080FF","#C0384AFF","#7A1A2AFF"],
+    "rim": "#FFF4E699",
+    "start": [0.5,0]
+  },
+  "art": {}
+}

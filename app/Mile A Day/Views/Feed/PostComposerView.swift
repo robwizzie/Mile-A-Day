@@ -1448,6 +1448,18 @@ private struct StickerDisplayLayer: View {
         let scale = moving?.scale ?? sticker.scale
         let rotation = moving?.rotation ?? sticker.rotation
         let overBin = moving != nil && edit.overBin
+        // Typed up front: inline mixed-literal arithmetic in this chain timed
+        // out the whole-module type-check on Xcode 26.
+        let popScale: CGFloat = (overBin ? 0.45 : 1) * (appeared ? 1 : 0.35)
+        let popOpacity: Double = overBin ? 0.6 : (appeared ? 1 : 0)
+        let x: CGFloat = center.x * canvas.width
+        let y: CGFloat = center.y * canvas.height
+        accessible(placed(moving: moving != nil, scale: scale, rotation: rotation, overBin: overBin,
+                          popScale: popScale, popOpacity: popOpacity, x: x, y: y))
+    }
+
+    private func placed(moving: Bool, scale: CGFloat, rotation: Angle, overBin: Bool,
+                        popScale: CGFloat, popOpacity: Double, x: CGFloat, y: CGFloat) -> some View {
         PostStickerView(sticker, context: context, onBright: onBright)
             .equatable()                       // MUST stay OUTSIDE the transforms
             // Probe OUTSIDE .equatable() but UNDER the transforms, so it
@@ -1459,18 +1471,22 @@ private struct StickerDisplayLayer: View {
                 }
             )
             .onPreferenceChange(StickerNaturalSizeKey.self) { edit.naturalSizes[sticker.id] = $0 }
-            .overlay { ring(scale: scale, moving: moving != nil) }
+            .overlay { ring(scale: scale, moving: moving) }
             .scaleEffect(scale)
             .rotationEffect(rotation)
             // Over the bin it shrinks and fades, so "let go to remove" reads
             // before anyone lets go; on arrival it pops in. Their own scale,
             // so neither ever reaches a commit.
-            .scaleEffect((overBin ? 0.45 : 1) * (appeared ? 1 : 0.35))
-            .opacity(overBin ? 0.6 : (appeared ? 1 : 0))
+            .scaleEffect(popScale)
+            .opacity(popOpacity)
             .animation(.spring(response: 0.25, dampingFraction: 0.8), value: overBin)
-            .position(x: center.x * canvas.width, y: center.y * canvas.height)
+            .position(x: x, y: y)
             .frame(width: canvas.width, height: canvas.height)
             .allowsHitTesting(false)
+    }
+
+    private func accessible<V: View>(_ content: V) -> some View {
+        content
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(sticker.kind.accessibilityName)
             .accessibilityHint("Actions move, resize, restyle or remove it.")

@@ -1,0 +1,31 @@
+{
+  "format": 1,
+  "id": "april_showers",
+  "order": 32,
+  "slot": "color",
+  "name": "April Showers",
+  "family": "monthly",
+  "unlock": {"month":4},
+  "unlock_copy": "Walk your mile every day of April",
+  "holidays": [],
+  "mood_prop": false,
+  "compact": true,
+  "tier": 97,
+  "auto_eligible": false,
+  "rules": {"hides":[],"clashes":[]},
+  "palette": {
+    "angular": false,
+    "bodyOpacity": 1,
+    "core": "#F0F8FFFF",
+    "effects": ["rainbow","raindrops"],
+    "end": [0.5,1],
+    "eye": "#101E3AFF",
+    "glow": "#7FB2FFFF",
+    "inner": ["#FFFFFFFF","#CFE6FFFF"],
+    "innerOpacity": null,
+    "outer": ["#E2F0FFFF","#8FB8E8FF","#5A7FC0FF","#2C3F7AFF"],
+    "rim": "#FFFFFFB3",
+    "start": [0.5,0]
+  },
+  "art": {}
+}

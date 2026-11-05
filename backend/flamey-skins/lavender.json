@@ -1,0 +1,31 @@
+{
+  "format": 1,
+  "id": "lavender",
+  "order": 4,
+  "slot": "color",
+  "name": "Lavender",
+  "family": "streakDays",
+  "unlock": {"badge":"streak_10"},
+  "unlock_copy": "Reach a 10-day streak",
+  "holidays": [],
+  "mood_prop": false,
+  "compact": true,
+  "tier": 10,
+  "auto_eligible": true,
+  "rules": {"hides":[],"clashes":[]},
+  "palette": {
+    "angular": false,
+    "bodyOpacity": 1,
+    "core": "#F4ECFFFF",
+    "effects": [],
+    "end": [0.5,1],
+    "eye": "#2A1A48FF",
+    "glow": "#C7AEF8FF",
+    "inner": ["#FFFFFFFF","#E6DAFFFF"],
+    "innerOpacity": null,
+    "outer": ["#F6EEFFFF","#CDB6F4FF","#9477CFFF"],
+    "rim": "#FFFFFF99",
+    "start": [0.5,0]
+  },
+  "art": {}
+}

@@ -1,0 +1,18 @@
+{
+  "format": 1,
+  "id": "classic_bubble",
+  "order": 125,
+  "slot": "bubble",
+  "name": "Classic",
+  "family": "starter",
+  "unlock": "always",
+  "unlock_copy": "Always his",
+  "holidays": [],
+  "mood_prop": false,
+  "compact": false,
+  "tier": 0,
+  "auto_eligible": true,
+  "rules": {"hides":[],"clashes":[]},
+  "effects": ["bubble:classic_bubble"],
+  "art": {}
+}

@@ -1,0 +1,39 @@
+{
+  "format": 1,
+  "id": "twinkle_lights",
+  "order": 40,
+  "slot": "color",
+  "name": "Twinkle Lights",
+  "family": "monthly",
+  "unlock": {"month":12},
+  "unlock_copy": "Walk your mile every day of December",
+  "holidays": [],
+  "mood_prop": false,
+  "compact": true,
+  "tier": 97,
+  "auto_eligible": false,
+  "rules": {"hides":[],"clashes":[],"crown_unless":["head","costume"],"crown_rise":0.13},
+  "palette": {
+    "angular": false,
+    "bodyOpacity": 1,
+    "core": "#FFF6C8FF",
+    "effects": ["halo","stringLights"],
+    "end": [0.5,1],
+    "eye": "#041A0EFF",
+    "glow": "#5FE08AFF",
+    "inner": ["#F4FFF4FF","#BFF0C8FF"],
+    "innerOpacity": null,
+    "outer": ["#9BE8AEFF","#2E9E5AFF","#0E5A34FF","#05301CFF"],
+    "rim": "#FFE58A8C",
+    "start": [0.5,0]
+  },
+  "art": {
+    "crown": {
+      "ops": [
+        {"d":"M.09 -.66C.09 -.6103 .0497 -.57 0 -.57C-.0497 -.57 -.09 -.6103 -.09 -.66C-.09 -.7097 -.0497 -.75 0 -.75C.0497 -.75 .09 -.7097 .09 -.66Z","fx":[{"blur":0.04}],"op":"fill","paint":"#FFE27AB3"},
+        {"d":"M0 -.745L.0225 -.6909L.0808 -.6863L.0364 -.6482L.05 -.5912L0 -.6217L-.05 -.5912L-.0364 -.6482L-.0808 -.6863L-.0225 -.6909Z","op":"fill","paint":{"lin":[0,-0.745,0,-0.575],"stops":[[0,"#FFF6B8FF"],[1,"#FFC83AFF"]]}},
+        {"d":"M0 -.745L.0225 -.6909L.0808 -.6863L.0364 -.6482L.05 -.5912L0 -.6217L-.05 -.5912L-.0364 -.6482L-.0808 -.6863L-.0225 -.6909Z","op":"stroke","paint":"#B8860BFF","w":0.008}
+      ]
+    }
+  }
+}

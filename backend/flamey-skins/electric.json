@@ -1,0 +1,31 @@
+{
+  "format": 1,
+  "id": "electric",
+  "order": 25,
+  "slot": "color",
+  "name": "Electric",
+  "family": "plus",
+  "unlock": "plus",
+  "unlock_copy": "Included with Mile A Day+",
+  "holidays": [],
+  "mood_prop": false,
+  "compact": true,
+  "tier": 96,
+  "auto_eligible": false,
+  "rules": {"hides":[],"clashes":[]},
+  "palette": {
+    "angular": false,
+    "bodyOpacity": 1,
+    "core": "#D8F6FFFF",
+    "effects": ["halo","sheen"],
+    "end": [0.5,1],
+    "eye": "#0B0838FF",
+    "glow": "#4F8BFFFF",
+    "inner": ["#F4FDFFFF","#9FE8FFFF"],
+    "innerOpacity": null,
+    "outer": ["#9BF6FFFF","#3A8BFFFF","#5B2BFFFF","#1A0B6EFF"],
+    "rim": "#B8F0FFB3",
+    "start": [0.5,0]
+  },
+  "art": {}
+}

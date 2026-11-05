@@ -183,7 +183,9 @@ struct UserProfileDetailView: View {
                 await refreshProfileData()
             }
         }
-        .navigationTitle(user.username ?? "Profile")
+        // Empty: the identity block right under the banner already says
+        // "@username" in big type; a nav title repeated it.
+        .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .toolbarColorScheme(.dark, for: .navigationBar)
         .toolbar {
@@ -218,7 +220,7 @@ struct UserProfileDetailView: View {
         }
         .overlay(alignment: .top) {
             if let feedback = nudgeFeedback {
-                profileNudgeBanner(feedback)
+                NudgeToast(feedback: feedback)
                     .padding(.horizontal, MADTheme.Spacing.md)
                     .padding(.top, 6)
                     .transition(.move(edge: .top).combined(with: .opacity))
@@ -529,9 +531,7 @@ struct UserProfileDetailView: View {
         ProfileStatTiles(
             streak: userStats?.streak ?? 0,
             totalMiles: userStats?.totalMiles ?? 0,
-            friendCount: friendCount,
-            streakDoneToday: userStats?.hasCompletedGoalToday ?? false,
-            streakSavedToday: friendSavedToday
+            friendCount: friendCount
         ) {
             UserFriendsListView(
                 userId: user.user_id,
@@ -600,7 +600,7 @@ struct UserProfileDetailView: View {
     /// everything below them.
     private var recentWorkoutsPreview: some View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
-            ProfileCardLabel(text: "RECENT WORKOUTS")
+            ProfileCardLabel(text: "Recent workouts")
             VStack(spacing: MADTheme.Spacing.sm) {
                 ForEach(friendWorkouts.prefix(workoutPreviewCount)) { workout in
                     Button {
@@ -688,6 +688,7 @@ struct UserProfileDetailView: View {
     private var statsTabContent: some View {
         VStack(spacing: MADTheme.Spacing.md) {
             FriendStatsView(user: user, stats: userStats, last7DayMiles: last7DayMiles)
+            // Same placement as your own profile: Stats, under Performance.
             HallOfStreaksSection(userId: user.user_id, isSelf: isCurrentUser())
         }
     }
@@ -1028,67 +1029,25 @@ struct UserProfileDetailView: View {
         }
     }
 
-    /// Same visual treatment as the floating toast in FriendsListView so the
-    /// nudge confirmation reads as a consistent system event across surfaces.
-    private func profileNudgeBanner(_ feedback: NudgeFeedback) -> some View {
-        let accent: Color = feedback.isError ? .red : .green
-        return HStack(spacing: MADTheme.Spacing.sm) {
-            // Constrain stripe height — `Rectangle()` is greedy and grows
-            // to fill the .overlay's full parent height (the entire screen)
-            // otherwise. Locking to 28pt matches the icon next to it.
-            Rectangle()
-                .fill(accent)
-                .frame(width: 4, height: 28)
-                .cornerRadius(2)
-
-            Image(systemName: feedback.icon)
-                .font(.system(size: 16, weight: .bold))
-                .foregroundColor(accent)
-                .frame(width: 28, height: 28)
-                .background(Circle().fill(accent.opacity(0.18)))
-
-            Text(feedback.message)
-                .font(.system(size: 13, weight: .semibold, design: .rounded))
-                .foregroundColor(.white.opacity(0.95))
-                .lineLimit(2)
-
-            Spacer(minLength: 4)
-        }
-        .padding(.leading, 6)
-        .padding(.trailing, MADTheme.Spacing.md)
-        .padding(.vertical, MADTheme.Spacing.sm)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .fixedSize(horizontal: false, vertical: true)
-        .background(
-            RoundedRectangle(cornerRadius: 14)
-                .fill(.ultraThinMaterial)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14)
-                        .strokeBorder(accent.opacity(0.35), lineWidth: 1)
-                )
-                .shadow(color: .black.opacity(0.4), radius: 12, y: 6)
-        )
-    }
-
     // MARK: - Private Account View
+    /// Flat, like every other profile card: the lock glyph bare, no glass.
     private var privateAccountView: some View {
-        VStack(spacing: MADTheme.Spacing.md) {
+        VStack(spacing: 6) {
             Image(systemName: "lock.fill")
-                .font(.system(size: 40))
-                .foregroundColor(.secondary)
-
-            Text("Private Account")
-                .font(MADTheme.Typography.title3)
-                .foregroundColor(MADTheme.Colors.primaryText)
-
-            Text("This user has set their account to private. Only their username and profile picture are visible.")
-                .font(MADTheme.Typography.body)
-                .foregroundColor(MADTheme.Colors.secondaryText)
+                .font(.system(size: 22, weight: .semibold))
+                .foregroundColor(.white.opacity(0.45))
+                .accessibilityHidden(true)
+            Text("Private account")
+                .font(.system(size: 16, weight: .bold, design: .rounded))
+                .foregroundColor(.white)
+            Text("Only their username and profile photo are visible.")
+                .font(.system(size: 13, weight: .medium, design: .rounded))
+                .foregroundColor(.white.opacity(0.6))
                 .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity)
-        .padding(MADTheme.Spacing.xl)
-        .madLiquidGlass()
+        .padding(DashboardCardSurface.padding)
+        .profileCard()
     }
 
     // MARK: - Helper Methods
@@ -1644,57 +1603,38 @@ struct FriendTodayChallengeRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 14) {
-                ZStack {
-                    Circle()
-                        .fill(
-                            LinearGradient(
-                                colors: iconGradient,
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                        .frame(width: 44, height: 44)
-                    Image(systemName: iconName)
-                        .font(.system(size: 18, weight: .bold))
-                        .foregroundColor(.white)
-                }
+            // Flat: the challenge's own colour is on its glyph, not a 44pt
+            // gradient disc; the card is the one rimless profile surface.
+            HStack(spacing: 12) {
+                Image(systemName: iconName)
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundColor(iconGradient.first ?? .white)
+                    .frame(width: 24)
+                    .accessibilityHidden(true)
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("TODAY'S CHALLENGE")
-                        .font(.system(size: 10, weight: .heavy, design: .rounded))
-                        .tracking(1.0)
-                        .foregroundColor(.white.opacity(0.5))
+                    Text("Today's challenge")
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .foregroundColor(.white.opacity(0.55))
                     Text(displayTitle ?? "Today's challenge")
                         .font(.system(size: 15, weight: .bold, design: .rounded))
                         .foregroundColor(.white)
                         .lineLimit(1)
                 }
 
-                Spacer()
+                Spacer(minLength: 4)
 
-                // Status pill on the right — clear "Completed" / "In progress"
-                // signal that doesn't compete with the challenge name.
+                // Status on the right, as words in colour.
                 HStack(spacing: 4) {
-                    Image(systemName: today.completed ? "checkmark.circle.fill" : "hourglass")
+                    Image(systemName: today.completed ? "checkmark" : "hourglass")
                         .font(.system(size: 11, weight: .bold))
+                        .accessibilityHidden(true)
                     Text(today.completed ? "Done" : "Not yet")
-                        .font(.system(size: 11, weight: .heavy, design: .rounded))
+                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                        .lineLimit(1)
+                        .fixedSize()
                 }
                 .foregroundColor(today.completed ? .green : .white.opacity(0.55))
-                .padding(.horizontal, 9)
-                .padding(.vertical, 5)
-                .background(
-                    Capsule()
-                        .fill(today.completed ? Color.green.opacity(0.12) : Color.white.opacity(0.06))
-                        .overlay(
-                            Capsule()
-                                .strokeBorder(
-                                    today.completed ? Color.green.opacity(0.3) : Color.white.opacity(0.12),
-                                    lineWidth: 1
-                                )
-                        )
-                )
             }
 
             if today.challengeKey == "head_to_head", let opponent = today.opponent {
@@ -1706,15 +1646,8 @@ struct FriendTodayChallengeRow: View {
                 )
             }
         }
-        .padding(14)
-        .background(
-            RoundedRectangle(cornerRadius: 14)
-                .fill(.white.opacity(0.06))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14)
-                        .stroke(.white.opacity(0.1), lineWidth: 1)
-                )
-        )
+        .padding(DashboardCardSurface.padding)
+        .profileCard()
     }
 
     private var iconName: String {
@@ -1924,13 +1857,10 @@ struct Last7DaysChart: View {
     var body: some View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
             HStack {
-                Text("LAST 7 DAYS")
-                    .font(.system(size: 11, weight: .heavy, design: .rounded))
-                    .tracking(1.2)
-                    .foregroundColor(.white.opacity(0.5))
+                ProfileCardLabel(text: "Last 7 days")
                 Spacer()
                 Text(String(format: "%.1f mi total", weekTotal))
-                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
                     .foregroundColor(.white.opacity(0.55))
             }
 
@@ -1950,14 +1880,7 @@ struct Last7DaysChart: View {
             }
         }
         .padding(MADTheme.Spacing.md)
-        .background(
-            RoundedRectangle(cornerRadius: 14)
-                .fill(Color.white.opacity(0.04))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14)
-                        .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
-                )
-        )
+        .profileCard()
         .animation(.spring(response: 0.32, dampingFraction: 0.85), value: selectedDay)
     }
 

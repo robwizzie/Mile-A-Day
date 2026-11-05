@@ -1,0 +1,17 @@
+{
+  "format": 1,
+  "id": "classic",
+  "order": 0,
+  "slot": "color",
+  "name": "Classic",
+  "family": "starter",
+  "unlock": "always",
+  "unlock_copy": "Always his",
+  "holidays": [],
+  "mood_prop": false,
+  "compact": true,
+  "tier": 0,
+  "auto_eligible": true,
+  "rules": {"hides":[],"clashes":[]},
+  "art": {}
+}

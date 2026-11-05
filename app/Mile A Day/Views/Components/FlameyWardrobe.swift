@@ -289,234 +289,204 @@ enum FlameyFamily: String, CaseIterable, Hashable {
 
 /// Everything he can wear. Raw values are the backend's catalog ids — STABLE,
 /// stored in `users.flamey_look` and sent by shipped builds; never rename one.
-/// The last three are MOOD dressing (automatic, never in the Closet, never on
-/// the wire).
-enum FlameyItem: String, CaseIterable, Codable, Hashable {
-    // color
-    case classic, ember, lime, ruby, lavender, sunflower, mint, sapphire, violet, rose, teal, arctic, midnight,
-         sunset, aurora, ocean, lavaLamp = "lava_lamp", galaxy, candy, northernLights = "northern_lights",
-         gold, prism, cosmic, eternal, phantom
-    // color — Mile A Day+ (owned while Plus; the server's owned list decides)
-    case electric, roseGold = "rose_gold", obsidian, tropic
-    // color — Monthly Flames (a perfect calendar month; the server decides)
-    case frostbite, sweetheart, luckyClover = "lucky_clover", aprilShowers = "april_showers", wildflower,
-         sunburst, firecracker, watermelon, fallingLeaves = "falling_leaves", jackOLantern = "jack_o_lantern",
-         sweaterWeather = "sweater_weather", twinkleLights = "twinkle_lights"
-    // head
-    case sweatband, ballCap = "ball_cap", visor, beanie, bucketHat = "bucket_hat", safariHat = "safari_hat",
-         cowboyHat = "cowboy_hat", aviatorCap = "aviator_cap", headlampHelmet = "headlamp_helmet", crown,
-         laurelWreath = "laurel_wreath", vikingHelmet = "viking_helmet", directorsBeret = "directors_beret",
-         santaHat = "santa_hat", heartBopper = "heart_bopper", leprechaunHat = "leprechaun_hat",
-         bunnyEars = "bunny_ears", starHat = "star_hat", countdownHat = "countdown_hat"
-    // eyes
-    case starStickers = "star_stickers", roundSpecs = "round_specs", classicShades = "classic_shades",
-         aviators, heartGlasses = "heart_glasses", cyberVisor = "cyber_visor", starGlasses = "star_glasses"
-    // chest
-    case bandana, bowTie = "bow_tie", finisherMedal = "finisher_medal", starBadge = "star_badge",
-         championSash = "champion_sash", goldChain = "gold_chain", trophyPendant = "trophy_pendant",
-         polaroid, holidayScarf = "holiday_scarf"
-    // back
-    case redCape = "red_cape", blueCape = "blue_cape", royalCape = "royal_cape", championCape = "champion_cape",
-         victoryBanner = "victory_banner", goldenWings = "golden_wings", turkeyFeathers = "turkey_feathers"
-    // feet
-    case canvasSneakers = "canvas_sneakers", trainers, racingFlats = "racing_flats", neonSoles = "neon_soles",
-         trackSpikes = "track_spikes", rocketBoots = "rocket_boots", lightningKicks = "lightning_kicks",
-         wingedSandals = "winged_sandals"
-    // costume
-    case ghostSheet = "ghost_sheet", astronautHelmet = "astronaut_helmet", pumpkinSuit = "pumpkin_suit",
-         skeletonSuit = "skeleton_suit"
-    // held
-    case checkeredFlag = "checkered_flag", stopwatch, pomPoms = "pom_poms", foamFinger = "foam_finger",
-         megaphone, confettiCannon = "confetti_cannon"
-    // trail
-    case emberSparks = "ember_sparks", dustPuffs = "dust_puffs", speedLines = "speed_lines", cometTail = "comet_tail",
-         smokeRings = "smoke_rings", starTrail = "star_trail", rainbowStreak = "rainbow_streak",
-         lightningTrail = "lightning_trail", fireworks, phoenixFeathers = "phoenix_feathers",
-         auroraRibbon = "aurora_ribbon", meteorShower = "meteor_shower"
-    // companion
-    case spark, firefly, flameyJr = "flamey_jr", sparkTrio = "spark_trio", lantern, phoenixChick = "phoenix_chick",
-         cometPup = "comet_pup", friendlyGhost = "friendly_ghost"
-    // aura
-    case spectralGlow = "spectral_glow", flicker, spotlight, paparazzi
-    // bubble
-    case classicBubble = "classic_bubble", comic, neon, pixel, goldBubble = "gold_bubble"
-    // mood dressing — automatic, never listed, never sent
-    case moodShades = "mood_shades", partyHat = "party_hat", nightcap
+///
+/// An item is its SKIN (FlameySkin.swift, `backend/flamey-skins/<id>.json`):
+/// slot, unlock, rules and art all come from the skin catalog, so a skin added
+/// on the server after this build is an item here too. The named constants
+/// below are the items the app's own logic refers to (mood dressing, holiday
+/// outfits, the starter colour); `init(rawValue:)` accepts any id the catalog
+/// has and nothing else, so an unknown id is dropped exactly as before.
+struct FlameyItem: RawRepresentable, Hashable, Codable {
+    let rawValue: String
+
+    /// An id the catalog has (and this renderer can draw); nil otherwise.
+    init?(rawValue: String) {
+        guard let skin = FlameySkinCatalog.shared[rawValue], FlameySlot(rawValue: skin.slot) != nil else { return nil }
+        self.rawValue = rawValue
+    }
+
+    /// The items this build names in code. Always in the bundled catalog.
+    private init(known: String) { rawValue = known }
+
+    init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        guard let item = FlameyItem(rawValue: raw) else {
+            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath,
+                                                    debugDescription: "Unknown Flamey item \(raw)"))
+        }
+        self = item
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        try c.encode(rawValue)
+    }
+
+    static let classic = FlameyItem(known: "classic")
+    static let ember = FlameyItem(known: "ember")
+    static let lime = FlameyItem(known: "lime")
+    static let ruby = FlameyItem(known: "ruby")
+    static let lavender = FlameyItem(known: "lavender")
+    static let sunflower = FlameyItem(known: "sunflower")
+    static let mint = FlameyItem(known: "mint")
+    static let sapphire = FlameyItem(known: "sapphire")
+    static let violet = FlameyItem(known: "violet")
+    static let rose = FlameyItem(known: "rose")
+    static let teal = FlameyItem(known: "teal")
+    static let arctic = FlameyItem(known: "arctic")
+    static let midnight = FlameyItem(known: "midnight")
+    static let sunset = FlameyItem(known: "sunset")
+    static let aurora = FlameyItem(known: "aurora")
+    static let ocean = FlameyItem(known: "ocean")
+    static let lavaLamp = FlameyItem(known: "lava_lamp")
+    static let galaxy = FlameyItem(known: "galaxy")
+    static let candy = FlameyItem(known: "candy")
+    static let northernLights = FlameyItem(known: "northern_lights")
+    static let gold = FlameyItem(known: "gold")
+    static let prism = FlameyItem(known: "prism")
+    static let cosmic = FlameyItem(known: "cosmic")
+    static let eternal = FlameyItem(known: "eternal")
+    static let phantom = FlameyItem(known: "phantom")
+    static let electric = FlameyItem(known: "electric")
+    static let roseGold = FlameyItem(known: "rose_gold")
+    static let obsidian = FlameyItem(known: "obsidian")
+    static let tropic = FlameyItem(known: "tropic")
+    static let frostbite = FlameyItem(known: "frostbite")
+    static let sweetheart = FlameyItem(known: "sweetheart")
+    static let luckyClover = FlameyItem(known: "lucky_clover")
+    static let aprilShowers = FlameyItem(known: "april_showers")
+    static let wildflower = FlameyItem(known: "wildflower")
+    static let sunburst = FlameyItem(known: "sunburst")
+    static let firecracker = FlameyItem(known: "firecracker")
+    static let watermelon = FlameyItem(known: "watermelon")
+    static let fallingLeaves = FlameyItem(known: "falling_leaves")
+    static let jackOLantern = FlameyItem(known: "jack_o_lantern")
+    static let sweaterWeather = FlameyItem(known: "sweater_weather")
+    static let twinkleLights = FlameyItem(known: "twinkle_lights")
+    static let sweatband = FlameyItem(known: "sweatband")
+    static let ballCap = FlameyItem(known: "ball_cap")
+    static let visor = FlameyItem(known: "visor")
+    static let beanie = FlameyItem(known: "beanie")
+    static let bucketHat = FlameyItem(known: "bucket_hat")
+    static let safariHat = FlameyItem(known: "safari_hat")
+    static let cowboyHat = FlameyItem(known: "cowboy_hat")
+    static let aviatorCap = FlameyItem(known: "aviator_cap")
+    static let headlampHelmet = FlameyItem(known: "headlamp_helmet")
+    static let crown = FlameyItem(known: "crown")
+    static let laurelWreath = FlameyItem(known: "laurel_wreath")
+    static let vikingHelmet = FlameyItem(known: "viking_helmet")
+    static let directorsBeret = FlameyItem(known: "directors_beret")
+    static let santaHat = FlameyItem(known: "santa_hat")
+    static let heartBopper = FlameyItem(known: "heart_bopper")
+    static let leprechaunHat = FlameyItem(known: "leprechaun_hat")
+    static let bunnyEars = FlameyItem(known: "bunny_ears")
+    static let starHat = FlameyItem(known: "star_hat")
+    static let countdownHat = FlameyItem(known: "countdown_hat")
+    static let starStickers = FlameyItem(known: "star_stickers")
+    static let roundSpecs = FlameyItem(known: "round_specs")
+    static let classicShades = FlameyItem(known: "classic_shades")
+    static let aviators = FlameyItem(known: "aviators")
+    static let heartGlasses = FlameyItem(known: "heart_glasses")
+    static let cyberVisor = FlameyItem(known: "cyber_visor")
+    static let starGlasses = FlameyItem(known: "star_glasses")
+    static let bandana = FlameyItem(known: "bandana")
+    static let bowTie = FlameyItem(known: "bow_tie")
+    static let finisherMedal = FlameyItem(known: "finisher_medal")
+    static let starBadge = FlameyItem(known: "star_badge")
+    static let championSash = FlameyItem(known: "champion_sash")
+    static let goldChain = FlameyItem(known: "gold_chain")
+    static let trophyPendant = FlameyItem(known: "trophy_pendant")
+    static let polaroid = FlameyItem(known: "polaroid")
+    static let holidayScarf = FlameyItem(known: "holiday_scarf")
+    static let redCape = FlameyItem(known: "red_cape")
+    static let blueCape = FlameyItem(known: "blue_cape")
+    static let royalCape = FlameyItem(known: "royal_cape")
+    static let championCape = FlameyItem(known: "champion_cape")
+    static let victoryBanner = FlameyItem(known: "victory_banner")
+    static let goldenWings = FlameyItem(known: "golden_wings")
+    static let turkeyFeathers = FlameyItem(known: "turkey_feathers")
+    static let canvasSneakers = FlameyItem(known: "canvas_sneakers")
+    static let trainers = FlameyItem(known: "trainers")
+    static let racingFlats = FlameyItem(known: "racing_flats")
+    static let neonSoles = FlameyItem(known: "neon_soles")
+    static let trackSpikes = FlameyItem(known: "track_spikes")
+    static let rocketBoots = FlameyItem(known: "rocket_boots")
+    static let lightningKicks = FlameyItem(known: "lightning_kicks")
+    static let wingedSandals = FlameyItem(known: "winged_sandals")
+    static let ghostSheet = FlameyItem(known: "ghost_sheet")
+    static let astronautHelmet = FlameyItem(known: "astronaut_helmet")
+    static let pumpkinSuit = FlameyItem(known: "pumpkin_suit")
+    static let skeletonSuit = FlameyItem(known: "skeleton_suit")
+    static let checkeredFlag = FlameyItem(known: "checkered_flag")
+    static let stopwatch = FlameyItem(known: "stopwatch")
+    static let pomPoms = FlameyItem(known: "pom_poms")
+    static let foamFinger = FlameyItem(known: "foam_finger")
+    static let megaphone = FlameyItem(known: "megaphone")
+    static let confettiCannon = FlameyItem(known: "confetti_cannon")
+    static let emberSparks = FlameyItem(known: "ember_sparks")
+    static let dustPuffs = FlameyItem(known: "dust_puffs")
+    static let speedLines = FlameyItem(known: "speed_lines")
+    static let cometTail = FlameyItem(known: "comet_tail")
+    static let smokeRings = FlameyItem(known: "smoke_rings")
+    static let starTrail = FlameyItem(known: "star_trail")
+    static let rainbowStreak = FlameyItem(known: "rainbow_streak")
+    static let lightningTrail = FlameyItem(known: "lightning_trail")
+    static let fireworks = FlameyItem(known: "fireworks")
+    static let phoenixFeathers = FlameyItem(known: "phoenix_feathers")
+    static let auroraRibbon = FlameyItem(known: "aurora_ribbon")
+    static let meteorShower = FlameyItem(known: "meteor_shower")
+    static let spark = FlameyItem(known: "spark")
+    static let firefly = FlameyItem(known: "firefly")
+    static let flameyJr = FlameyItem(known: "flamey_jr")
+    static let sparkTrio = FlameyItem(known: "spark_trio")
+    static let lantern = FlameyItem(known: "lantern")
+    static let phoenixChick = FlameyItem(known: "phoenix_chick")
+    static let cometPup = FlameyItem(known: "comet_pup")
+    static let friendlyGhost = FlameyItem(known: "friendly_ghost")
+    static let spectralGlow = FlameyItem(known: "spectral_glow")
+    static let flicker = FlameyItem(known: "flicker")
+    static let spotlight = FlameyItem(known: "spotlight")
+    static let paparazzi = FlameyItem(known: "paparazzi")
+    static let classicBubble = FlameyItem(known: "classic_bubble")
+    static let comic = FlameyItem(known: "comic")
+    static let neon = FlameyItem(known: "neon")
+    static let pixel = FlameyItem(known: "pixel")
+    static let goldBubble = FlameyItem(known: "gold_bubble")
+    static let moodShades = FlameyItem(known: "mood_shades")
+    static let partyHat = FlameyItem(known: "party_hat")
+    static let nightcap = FlameyItem(known: "nightcap")
+
+    /// Every item the catalog has, in Closet order (mood dressing included).
+    static var allCases: [FlameyItem] {
+        FlameySkinCatalog.shared.all.compactMap { FlameySlot(rawValue: $0.slot) == nil ? nil : FlameyItem(known: $0.id) }
+    }
 
     /// Every Closet item, in catalog order (mood dressing excluded).
     static var closet: [FlameyItem] { allCases.filter { !$0.isMoodProp } }
 
-    var isMoodProp: Bool { self == .moodShades || self == .partyHat || self == .nightcap }
+    /// This item's skin: its art, rules and copy as data.
+    var skin: FlameySkin? { FlameySkinCatalog.shared[rawValue] }
 
-    var slot: FlameySlot {
-        switch self {
-        case .classic, .ember, .lime, .ruby, .lavender, .sunflower, .mint, .sapphire, .violet, .rose, .teal,
-             .arctic, .midnight, .sunset, .aurora, .ocean, .lavaLamp, .galaxy, .candy, .northernLights,
-             .gold, .prism, .cosmic, .eternal, .phantom, .electric, .roseGold, .obsidian, .tropic,
-             .frostbite, .sweetheart, .luckyClover, .aprilShowers, .wildflower, .sunburst, .firecracker,
-             .watermelon, .fallingLeaves, .jackOLantern, .sweaterWeather, .twinkleLights:
-            return .color
-        case .sweatband, .ballCap, .visor, .beanie, .bucketHat, .safariHat, .cowboyHat, .aviatorCap,
-             .headlampHelmet, .crown, .laurelWreath, .vikingHelmet, .directorsBeret, .santaHat, .heartBopper,
-             .leprechaunHat, .bunnyEars, .starHat, .countdownHat, .partyHat, .nightcap:
-            return .head
-        case .starStickers, .roundSpecs, .classicShades, .aviators, .heartGlasses, .cyberVisor, .starGlasses,
-             .moodShades:
-            return .eyes
-        case .bandana, .bowTie, .finisherMedal, .starBadge, .championSash, .goldChain, .trophyPendant,
-             .polaroid, .holidayScarf:
-            return .chest
-        case .redCape, .blueCape, .royalCape, .championCape, .victoryBanner, .goldenWings, .turkeyFeathers:
-            return .back
-        case .canvasSneakers, .trainers, .racingFlats, .neonSoles, .trackSpikes, .rocketBoots,
-             .lightningKicks, .wingedSandals:
-            return .feet
-        case .ghostSheet, .astronautHelmet, .pumpkinSuit, .skeletonSuit:
-            return .costume
-        case .checkeredFlag, .stopwatch, .pomPoms, .foamFinger, .megaphone, .confettiCannon:
-            return .held
-        case .emberSparks, .dustPuffs, .speedLines, .cometTail, .smokeRings, .starTrail, .rainbowStreak,
-             .lightningTrail, .fireworks, .phoenixFeathers, .auroraRibbon, .meteorShower:
-            return .trail
-        case .spark, .firefly, .flameyJr, .sparkTrio, .lantern, .phoenixChick, .cometPup, .friendlyGhost:
-            return .companion
-        case .spectralGlow, .flicker, .spotlight, .paparazzi:
-            return .aura
-        case .classicBubble, .comic, .neon, .pixel, .goldBubble:
-            return .bubble
-        }
-    }
+    var isMoodProp: Bool { skin?.moodProp ?? false }
 
-    /// How it becomes his. Mirrors the backend catalog row for row.
+    var slot: FlameySlot { skin.flatMap { FlameySlot(rawValue: $0.slot) } ?? .color }
+
+    /// How it becomes his. Mirrors the backend catalog row for row (its CI
+    /// check holds the skin files to it).
     var unlock: FlameyUnlock {
-        switch self {
-        case .classic, .classicBubble, .moodShades, .partyHat, .nightcap: return .always
-        case .ember: return .badge("consistency_3")
-        case .lime: return .badge("consistency_5")
-        case .ruby: return .badge("streak_7")
-        case .lavender: return .badge("streak_10")
-        case .sunflower: return .badge("streak_14")
-        case .mint: return .badge("streak_21")
-        case .sapphire: return .badge("streak_30")
-        case .violet: return .badge("streak_45")
-        case .rose: return .badge("streak_50")
-        case .teal: return .badge("streak_60")
-        case .arctic: return .badge("streak_75")
-        case .midnight: return .badge("streak_90")
-        case .sunset: return .badge("streak_100")
-        case .aurora: return .badge("streak_120")
-        case .ocean: return .badge("streak_150")
-        case .lavaLamp: return .badge("streak_180")
-        case .galaxy: return .badge("streak_200")
-        case .candy: return .badge("streak_250")
-        case .northernLights: return .badge("streak_300")
-        case .gold: return .badge("streak_365")
-        case .prism: return .badge("streak_500")
-        case .cosmic: return .badge("streak_730")
-        case .eternal: return .badge("streak_1000")
-        case .phantom: return .badge("ghost_beat_50")
-        case .electric, .roseGold, .obsidian, .tropic: return .plus
-        case .frostbite: return .month(1)
-        case .sweetheart: return .month(2)
-        case .luckyClover: return .month(3)
-        case .aprilShowers: return .month(4)
-        case .wildflower: return .month(5)
-        case .sunburst: return .month(6)
-        case .firecracker: return .month(7)
-        case .watermelon: return .month(8)
-        case .fallingLeaves: return .month(9)
-        case .jackOLantern: return .month(10)
-        case .sweaterWeather: return .month(11)
-        case .twinkleLights: return .month(12)
-        case .sweatband: return .badge("special_first_mile")
-        case .ballCap: return .badge("miles_25")
-        case .visor: return .badge("miles_50")
-        case .beanie: return .badge("miles_100")
-        case .bucketHat: return .badge("miles_150")
-        case .safariHat: return .badge("miles_200")
-        case .cowboyHat: return .badge("miles_250")
-        case .aviatorCap: return .badge("miles_500")
-        case .headlampHelmet: return .badge("miles_750")
-        case .crown: return .badge("miles_1000")
-        case .laurelWreath: return .badge("miles_1500")
-        case .vikingHelmet: return .badge("miles_2000")
-        case .directorsBeret: return .badge("story_5")
-        case .santaHat: return .badge(HolidayKey.christmas.badgeId)
-        case .heartBopper: return .badge(HolidayKey.valentinesDay.badgeId)
-        case .leprechaunHat: return .badge(HolidayKey.stPatricksDay.badgeId)
-        case .bunnyEars: return .badge(HolidayKey.easter.badgeId)
-        case .starHat: return .badge(HolidayKey.independenceDay.badgeId)
-        case .countdownHat: return .badge(HolidayKey.newYearsEve.badgeId)
-        case .starStickers: return .badge("challenge_1")
-        case .roundSpecs: return .badge("challenge_5")
-        case .classicShades: return .badge("challenge_10")
-        case .aviators: return .badge("challenge_25")
-        case .heartGlasses: return .badge("challenge_50")
-        case .cyberVisor: return .badge("challenge_100")
-        case .starGlasses: return .badge(HolidayKey.newYearsDay.badgeId)
-        case .bandana: return .badge("special_first_week")
-        case .bowTie: return .badge("weekly_1")
-        case .finisherMedal: return .badge("weekly_5")
-        case .starBadge: return .badge("weekly_10")
-        case .championSash: return .badge("weekly_25")
-        case .goldChain: return .badge("weekly_streak_4")
-        case .trophyPendant: return .badge("weekly_streak_12")
-        case .polaroid: return .badge("story_1")
-        case .holidayScarf: return .badge(HolidayKey.christmasEve.badgeId)
-        case .redCape: return .badge("comp_entered_1")
-        case .blueCape: return .badge("comp_entered_10")
-        case .royalCape: return .badge("comp_entered_50")
-        case .championCape: return .badge("comp_won_1")
-        case .victoryBanner: return .badge("comp_won_5")
-        case .goldenWings: return .badge("comp_won_25")
-        case .turkeyFeathers: return .badge(HolidayKey.thanksgiving.badgeId)
-        case .canvasSneakers: return .badge("pace_12min")
-        case .trainers: return .badge("pace_11min")
-        case .racingFlats: return .badge("pace_10min")
-        case .neonSoles: return .badge("pace_9min")
-        case .trackSpikes: return .badge("pace_8min")
-        case .rocketBoots: return .badge("pace_7min")
-        case .lightningKicks: return .badge("pace_6min")
-        case .wingedSandals: return .badge("pace_5min")
-        case .ghostSheet: return .badge("ghost_beat_10")
-        case .astronautHelmet: return .badge("miles_2500")
-        case .pumpkinSuit: return .badge(HolidayKey.halloween.badgeId)
-        case .skeletonSuit: return .plus
-        case .checkeredFlag: return .badge("comp_started_1")
-        case .stopwatch: return .badge("comp_started_10")
-        case .pomPoms: return .badge("hype_1")
-        case .foamFinger: return .badge("hype_25")
-        case .megaphone: return .badge("hype_100")
-        case .confettiCannon: return .badge("hype_500")
-        case .emberSparks: return .badge("daily_2")
-        case .dustPuffs: return .badge("daily_3")
-        case .speedLines: return .badge("daily_5")
-        case .cometTail: return .badge("daily_10k")
-        case .smokeRings: return .badge("daily_8")
-        case .starTrail: return .badge("daily_10")
-        case .rainbowStreak: return .badge("daily_half")
-        case .lightningTrail: return .badge("daily_15")
-        case .fireworks: return .badge("daily_20")
-        case .phoenixFeathers: return .badge("daily_marathon")
-        case .auroraRibbon: return .badge("daily_50k")
-        case .meteorShower: return .badge("daily_ultra")
-        case .spark: return .badge("buddy_done_1")
-        case .firefly: return .badge("buddy_done_10")
-        case .flameyJr: return .badge("buddy_done_50")
-        case .sparkTrio: return .badge("buddy_crew_3")
-        case .lantern: return .badge("buddy_crew_10")
-        case .phoenixChick: return .badge("buddy_won_1")
-        case .cometPup: return .badge("buddy_won_10")
-        case .friendlyGhost: return .badge("ghost_beat_1")
-        case .spectralGlow: return .badge("ghost_margin_15")
-        case .flicker: return .badge("ghost_margin_45")
-        case .spotlight: return .badge("story_25")
-        case .paparazzi: return .badge("story_100")
-        case .comic: return .badge("nudge_1")
-        case .neon: return .badge("nudge_25")
-        case .pixel: return .badge("nudge_100")
-        case .goldBubble: return .badge("nudge_500")
+        guard let u = skin?.unlock else { return .always }
+        if let s = u as? String {
+            switch s {
+            case "plus": return .plus
+            default: return .always
+            }
         }
+        if let d = u as? [String: Any] {
+            if let b = d["badge"] as? String { return .badge(b) }
+            if let m = (d["month"] as? NSNumber)?.intValue { return .month(m) }
+            if let p = d["purchase"] as? String { return .purchase(productId: p) }
+        }
+        return .always
     }
 
     var badgeId: String? {
@@ -532,10 +502,9 @@ enum FlameyItem: String, CaseIterable, Codable, Hashable {
 
     /// The twelve Monthly Flames, January first. Mirrors the backend's
     /// `MONTHLY_FLAMES` (monthlyFlames.ts).
-    static let monthlyFlames: [FlameyItem] = [
-        .frostbite, .sweetheart, .luckyClover, .aprilShowers, .wildflower, .sunburst,
-        .firecracker, .watermelon, .fallingLeaves, .jackOLantern, .sweaterWeather, .twinkleLights,
-    ]
+    static var monthlyFlames: [FlameyItem] {
+        (1...12).compactMap { m in allCases.first { $0.month == m } }
+    }
 
     static func monthlyFlame(for month: Int) -> FlameyItem? {
         monthlyFlames.first { $0.month == month }
@@ -549,349 +518,40 @@ enum FlameyItem: String, CaseIterable, Codable, Hashable {
     }
 
     /// The holiday this item is the outfit for — worn automatically on the
-    /// day, owned or not. The scarf covers both Christmas Eve and Day.
-    var holidays: [HolidayKey] {
-        switch self {
-        case .countdownHat: return [.newYearsEve]
-        case .starGlasses: return [.newYearsDay]
-        case .heartBopper: return [.valentinesDay]
-        case .leprechaunHat: return [.stPatricksDay]
-        case .bunnyEars: return [.easter]
-        case .starHat: return [.independenceDay]
-        case .pumpkinSuit: return [.halloween]
-        case .turkeyFeathers: return [.thanksgiving]
-        case .holidayScarf: return [.christmasEve, .christmas]
-        case .santaHat: return [.christmas]
-        default: return []
-        }
-    }
+    /// day, owned or not.
+    var holidays: [HolidayKey] { (skin?.holidays ?? []).compactMap(HolidayKey.init(rawValue:)) }
 
     var isHolidayOutfit: Bool { !holidays.isEmpty }
 
-    /// Picked by the Closet's "Best look" action when owned. Holiday outfits
-    /// are the calendar's to put on, costumes hide everything else, and
-    /// Phantom is a spooky special rather than a rung on the streak ladder —
-    /// all three only ever go on because you (or the day) chose them.
+    /// Picked by the Closet's "Best look" action when owned (the skin says;
+    /// holiday outfits, costumes, Plus and Monthly items never are).
     var autoEligible: Bool {
-        if isMoodProp || isHolidayOutfit { return false }
-        switch slot {
-        case .costume: return false
-        default: return self != .phantom && unlock != .plus && month == nil
-        }
+        if let v = skin?.autoEligible { return v }
+        if isMoodProp || isHolidayOutfit || slot == .costume || unlock == .plus || month != nil { return false }
+        return true
     }
 
-    /// Order WITHIN a slot ("Best look" takes the highest owned). It is the
-    /// difficulty of the medal behind it, so across families in one slot
-    /// (a beret from five stories vs a beanie from 100 miles) the harder one
-    /// wins.
-    var tier: Int {
-        switch self {
-        // color — the streak ladder
-        case .classic: return 0
-        case .ember: return 3
-        case .lime: return 5
-        case .ruby: return 7
-        case .lavender: return 10
-        case .sunflower: return 14
-        case .mint: return 21
-        case .sapphire: return 30
-        case .violet: return 45
-        case .rose: return 50
-        case .teal: return 60
-        case .arctic: return 75
-        case .midnight: return 90
-        case .sunset: return 100
-        case .aurora: return 120
-        case .ocean: return 150
-        case .lavaLamp: return 180
-        case .galaxy: return 200
-        case .candy: return 250
-        case .northernLights: return 300
-        case .gold: return 365
-        case .prism: return 500
-        case .cosmic: return 730
-        case .eternal: return 1000
-        case .phantom: return 95
-        case .electric, .roseGold, .obsidian, .tropic: return 96
-        case .frostbite, .sweetheart, .luckyClover, .aprilShowers, .wildflower, .sunburst, .firecracker,
-             .watermelon, .fallingLeaves, .jackOLantern, .sweaterWeather, .twinkleLights: return 97
-        // head
-        case .sweatband: return 1
-        case .ballCap: return 10
-        case .visor: return 20
-        case .directorsBeret: return 25
-        case .beanie: return 30
-        case .bucketHat: return 40
-        case .safariHat: return 50
-        case .cowboyHat: return 60
-        case .aviatorCap: return 70
-        case .headlampHelmet: return 80
-        case .crown: return 90
-        case .laurelWreath: return 100
-        case .vikingHelmet: return 110
-        case .santaHat, .heartBopper, .leprechaunHat, .bunnyEars, .starHat, .countdownHat: return 5
-        case .partyHat, .nightcap: return 0
-        // eyes
-        case .starStickers: return 10
-        case .roundSpecs: return 20
-        case .classicShades: return 30
-        case .aviators: return 40
-        case .heartGlasses: return 50
-        case .cyberVisor: return 60
-        case .starGlasses: return 5
-        case .moodShades: return 0
-        // chest
-        case .bandana: return 5
-        case .bowTie: return 10
-        case .polaroid: return 12
-        case .finisherMedal: return 20
-        case .starBadge: return 30
-        case .championSash: return 40
-        case .goldChain: return 50
-        case .trophyPendant: return 60
-        case .holidayScarf: return 3
-        // back
-        case .redCape: return 10
-        case .blueCape: return 20
-        case .royalCape: return 30
-        case .championCape: return 40
-        case .victoryBanner: return 50
-        case .goldenWings: return 60
-        case .turkeyFeathers: return 3
-        // feet — a FASTER mile is a higher rung
-        case .canvasSneakers: return 10
-        case .trainers: return 20
-        case .racingFlats: return 30
-        case .neonSoles: return 40
-        case .trackSpikes: return 50
-        case .rocketBoots: return 60
-        case .lightningKicks: return 70
-        case .wingedSandals: return 80
-        // costume
-        case .ghostSheet: return 10
-        case .astronautHelmet: return 20
-        case .pumpkinSuit: return 5
-        case .skeletonSuit: return 15
-        // held
-        case .pomPoms: return 10
-        case .checkeredFlag: return 12
-        case .foamFinger: return 20
-        case .stopwatch: return 25
-        case .megaphone: return 40
-        case .confettiCannon: return 50
-        // trail
-        case .emberSparks: return 10
-        case .dustPuffs: return 20
-        case .speedLines: return 30
-        case .cometTail: return 40
-        case .smokeRings: return 50
-        case .starTrail: return 60
-        case .rainbowStreak: return 70
-        case .lightningTrail: return 80
-        case .fireworks: return 90
-        case .phoenixFeathers: return 100
-        case .auroraRibbon: return 110
-        case .meteorShower: return 120
-        // companion
-        case .spark: return 10
-        case .friendlyGhost: return 15
-        case .firefly: return 20
-        case .sparkTrio: return 25
-        case .phoenixChick: return 30
-        case .lantern: return 45
-        case .flameyJr: return 50
-        case .cometPup: return 60
-        // aura
-        case .spectralGlow: return 10
-        case .spotlight: return 15
-        case .flicker: return 20
-        case .paparazzi: return 30
-        // bubble
-        case .classicBubble: return 0
-        case .comic: return 10
-        case .neon: return 20
-        case .pixel: return 30
-        case .goldBubble: return 40
-        }
-    }
+    /// Order WITHIN a slot ("Best look" takes the highest owned): the
+    /// difficulty of the medal behind it.
+    var tier: Int { skin?.tier ?? 0 }
 
-    /// Slots this item covers up. A costume is worn INSTEAD of what it hides
-    /// — the resolver takes those slots off, so the Closet can say so and a
-    /// hat never pokes through a sheet. Checked with a resolve × render
-    /// matrix, not by eye.
-    var hides: Set<FlameySlot> {
-        switch self {
-        // Head to toe: its own eye holes, nothing above, round or under it.
-        case .ghostSheet: return [.head, .eyes, .chest, .feet, .back, .held]
-        // A fishbowl: no hat fits inside, and the collar sits on his chest.
-        case .astronautHelmet: return [.head, .chest]
-        // Sat in a jack-o'-lantern: no hat fits its lid, it swallows his
-        // feet, his middle and the arm a held item needs.
-        case .pumpkinSuit: return [.head, .chest, .feet, .held]
-        // A hooded bone onesie: the bone bow is its hat, glasses can't sit
-        // on a skull, nothing goes over the ribs, the leg bones are his feet.
-        case .skeletonSuit: return [.head, .eyes, .chest, .feet]
-        default: return []
-        }
-    }
+    /// Slots this item covers up. A costume is worn INSTEAD of what it hides.
+    var hides: Set<FlameySlot> { Set((skin?.ruleStrings("hides") ?? []).compactMap(FlameySlot.init(rawValue:))) }
 
-    /// Holiday-specific clashes that aren't a whole slot: the star glasses'
-    /// top points reach the brow line, so the sweatband comes off rather
-    /// than poking through them.
+    /// Clashes that aren't a whole slot (the star glasses and the sweatband).
     func clashes(with other: FlameyItem) -> Bool {
-        (self == .starGlasses && other == .sweatband) || (self == .sweatband && other == .starGlasses)
+        (skin?.ruleStrings("clashes").contains(other.rawValue) ?? false)
+            || (other.skin?.ruleStrings("clashes").contains(rawValue) ?? false)
     }
 
     /// Lifts him off the ground (a fraction of his body unit) on a full
-    /// surface: the rocket jets and the winged hover. Suppressed on compact
-    /// surfaces, where he stands on the ground like everyone else.
-    var hoverLift: CGFloat {
-        switch self {
-        case .rocketBoots: return 0.13
-        case .wingedSandals: return 0.08
-        default: return 0
-        }
-    }
+    /// surface: the rocket jets and the winged hover.
+    var hoverLift: CGFloat { CGFloat(skin?.rule("hover_lift") ?? 0) }
 
-    var displayName: String {
-        switch self {
-        case .classic: return "Classic"
-        case .ember: return "Ember"
-        case .lime: return "Lime"
-        case .ruby: return "Ruby"
-        case .lavender: return "Lavender"
-        case .sunflower: return "Sunflower"
-        case .mint: return "Mint"
-        case .sapphire: return "Sapphire"
-        case .violet: return "Violet"
-        case .rose: return "Rose"
-        case .teal: return "Teal"
-        case .arctic: return "Arctic"
-        case .midnight: return "Midnight"
-        case .sunset: return "Sunset"
-        case .aurora: return "Aurora"
-        case .ocean: return "Ocean"
-        case .lavaLamp: return "Lava Lamp"
-        case .galaxy: return "Galaxy"
-        case .candy: return "Candy"
-        case .northernLights: return "Northern Lights"
-        case .gold: return "Gold"
-        case .prism: return "Prism"
-        case .cosmic: return "Cosmic"
-        case .eternal: return "Eternal"
-        case .phantom: return "Phantom"
-        case .electric: return "Electric"
-        case .roseGold: return "Rose Gold"
-        case .obsidian: return "Obsidian"
-        case .tropic: return "Tropic"
-        case .frostbite: return "Frostbite"
-        case .sweetheart: return "Sweetheart"
-        case .luckyClover: return "Lucky Clover"
-        case .aprilShowers: return "April Showers"
-        case .wildflower: return "Wildflower"
-        case .sunburst: return "Sunburst"
-        case .firecracker: return "Firecracker"
-        case .watermelon: return "Watermelon"
-        case .fallingLeaves: return "Falling Leaves"
-        case .jackOLantern: return "Jack-o'-Lantern"
-        case .sweaterWeather: return "Sweater Weather"
-        case .twinkleLights: return "Twinkle Lights"
-        case .sweatband: return "Sweatband"
-        case .ballCap: return "Ball Cap"
-        case .visor: return "Visor"
-        case .beanie: return "Beanie"
-        case .bucketHat: return "Bucket Hat"
-        case .safariHat: return "Safari Hat"
-        case .cowboyHat: return "Cowboy Hat"
-        case .aviatorCap: return "Aviator Cap"
-        case .headlampHelmet: return "Headlamp Helmet"
-        case .crown: return "Crown"
-        case .laurelWreath: return "Laurel Wreath"
-        case .vikingHelmet: return "Viking Helmet"
-        case .directorsBeret: return "Director's Beret"
-        case .santaHat: return "Santa Hat"
-        case .heartBopper: return "Heart Bopper"
-        case .leprechaunHat: return "Lucky Hat"
-        case .bunnyEars: return "Bunny Ears"
-        case .starHat: return "Star Hat"
-        case .countdownHat: return "Countdown Hat"
-        case .starStickers: return "Star Stickers"
-        case .roundSpecs: return "Round Specs"
-        case .classicShades: return "Classic Shades"
-        case .aviators: return "Aviators"
-        case .heartGlasses: return "Heart Glasses"
-        case .cyberVisor: return "Cyber Visor"
-        case .starGlasses: return "Star Glasses"
-        case .bandana: return "Bandana"
-        case .bowTie: return "Bow Tie"
-        case .finisherMedal: return "Finisher Medal"
-        case .starBadge: return "Star Badge"
-        case .championSash: return "Champion Sash"
-        case .goldChain: return "Gold Chain"
-        case .trophyPendant: return "Trophy Pendant"
-        case .polaroid: return "Polaroid"
-        case .holidayScarf: return "Cozy Scarf"
-        case .redCape: return "Red Cape"
-        case .blueCape: return "Blue Cape"
-        case .royalCape: return "Royal Cape"
-        case .championCape: return "Champion Cape"
-        case .victoryBanner: return "Victory Banner"
-        case .goldenWings: return "Golden Wings"
-        case .turkeyFeathers: return "Tail Feathers"
-        case .canvasSneakers: return "Canvas Sneakers"
-        case .trainers: return "Trainers"
-        case .racingFlats: return "Racing Flats"
-        case .neonSoles: return "Neon Soles"
-        case .trackSpikes: return "Track Spikes"
-        case .rocketBoots: return "Rocket Boots"
-        case .lightningKicks: return "Lightning Kicks"
-        case .wingedSandals: return "Winged Sandals"
-        case .ghostSheet: return "Ghost Sheet"
-        case .astronautHelmet: return "Astronaut Helmet"
-        case .pumpkinSuit: return "Pumpkin Suit"
-        case .skeletonSuit: return "Skeleton Suit"
-        case .checkeredFlag: return "Checkered Flag"
-        case .stopwatch: return "Stopwatch"
-        case .pomPoms: return "Pom-Poms"
-        case .foamFinger: return "Foam Finger"
-        case .megaphone: return "Megaphone"
-        case .confettiCannon: return "Confetti Cannon"
-        case .emberSparks: return "Ember Sparks"
-        case .dustPuffs: return "Dust Puffs"
-        case .speedLines: return "Speed Lines"
-        case .cometTail: return "Comet Tail"
-        case .smokeRings: return "Smoke Rings"
-        case .starTrail: return "Star Trail"
-        case .rainbowStreak: return "Rainbow Streak"
-        case .lightningTrail: return "Lightning Trail"
-        case .fireworks: return "Fireworks"
-        case .phoenixFeathers: return "Phoenix Feathers"
-        case .auroraRibbon: return "Aurora Ribbon"
-        case .meteorShower: return "Meteor Shower"
-        case .spark: return "Spark"
-        case .firefly: return "Ember Dragon"
-        case .flameyJr: return "Flamey Jr."
-        case .sparkTrio: return "Spark Trio"
-        case .lantern: return "Lantern"
-        case .phoenixChick: return "Blaze Fox"
-        case .cometPup: return "Comet Pup"
-        case .friendlyGhost: return "Friendly Ghost"
-        case .spectralGlow: return "Spectral Glow"
-        case .flicker: return "Flicker"
-        case .spotlight: return "Spotlight"
-        case .paparazzi: return "Paparazzi"
-        case .classicBubble: return "Classic"
-        case .comic: return "Comic"
-        case .neon: return "Neon"
-        case .pixel: return "Pixel"
-        case .goldBubble: return "Gold"
-        case .moodShades: return "Shades"
-        case .partyHat: return "Party Hat"
-        case .nightcap: return "Nightcap"
-        }
-    }
+    var displayName: String { skin?.name ?? rawValue }
 
     var family: FlameyFamily {
+        if let f = skin.flatMap({ FlameyFamily(rawValue: $0.family) }) { return f }
         if isMoodProp { return .mood }
         if isHolidayOutfit { return .holidays }
         if unlock == .plus { return .plus }
@@ -914,8 +574,10 @@ enum FlameyItem: String, CaseIterable, Codable, Hashable {
         return .firsts
     }
 
-    /// "Run a sub-7 mile" — the how-to-unlock line, written from the medal.
+    /// "Run a sub-7 mile" — the how-to-unlock line (the skin's, else written
+    /// from the medal).
     var unlockCopy: String {
+        if let copy = skin?.unlockCopy, !copy.isEmpty { return copy }
         if isMoodProp { return "Worn with his mood" }
         switch unlock {
         case .always: return "Always his"
@@ -1273,7 +935,7 @@ struct FlameyLook: Equatable, Hashable, Codable {
     private static func glow(for look: FlameyLook) -> FlameyGlow {
         let colorHalo = FlameyPalette.palette(for: look.color)?.hasHalo ?? false
         if let aura = look[.aura] { return .aura(aura) }
-        if look.wears(.goldenWings) { return .wings }
+        if look.items.contains(where: { $0.skin?.ruleString("glow") == "wings" }) { return .wings }
         if colorHalo { return .colorHalo }
         return .none
     }

@@ -1,0 +1,31 @@
+{
+  "format": 1,
+  "id": "phantom",
+  "order": 24,
+  "slot": "color",
+  "name": "Phantom",
+  "family": "ghosts",
+  "unlock": {"badge":"ghost_beat_50"},
+  "unlock_copy": "Beat 50 ghosts",
+  "holidays": [],
+  "mood_prop": false,
+  "compact": true,
+  "tier": 95,
+  "auto_eligible": false,
+  "rules": {"hides":[],"clashes":[]},
+  "palette": {
+    "angular": false,
+    "bodyOpacity": 0.74,
+    "core": "#E8FFF8FF",
+    "effects": [],
+    "end": [0.5,1],
+    "eye": "#10283AFF",
+    "glow": "#9FFFE0FF",
+    "inner": ["#FFFFFFFF","#E0FBF4FF"],
+    "innerOpacity": null,
+    "outer": ["#F2FFFBFF","#B8F0E6FF","#6FA8C8FF"],
+    "rim": "#FFFFFFCC",
+    "start": [0.5,0]
+  },
+  "art": {}
+}

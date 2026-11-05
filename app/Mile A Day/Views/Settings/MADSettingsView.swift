@@ -15,12 +15,20 @@ import SwiftUI
 /// modal attached to the view that PUSHED this one can't present while this
 /// one is on top, which is how Sign Out came to look like a no-op until you
 /// hit Back. Whoever owns the button renders the feedback.
+///
+/// Built from `SettingsChrome`: sentence-case headers, rows with a small
+/// tinted glyph, one flat surface per group. Each setting has one row in the
+/// whole Settings tree (see docs/conventions/ios.md § Settings).
 struct MADSettingsView: View {
     @ObservedObject var userManager: UserManager
     @ObservedObject var healthManager: HealthKitManager
     @ObservedObject var friendService: FriendService
     @ObservedObject private var injuryPause = InjuryPauseState.shared
     @ObservedObject private var plusStore = PlusStore.shared
+    /// The Health row says what's wrong before you tap it, so it watches the
+    /// monitor itself (the Dashboard carries the banner; this page doesn't
+    /// repeat it above the row).
+    @ObservedObject private var healthAccess = HealthAccessMonitor.shared
     @Environment(\.appStateManager) var appStateManager
     @Environment(\.dismiss) private var dismiss
 
@@ -35,9 +43,6 @@ struct MADSettingsView: View {
     @State private var activeSheet: SettingsSheet?
     @State private var showWhatsNew = false
     @State private var showGoalSheet = false
-    /// Pushed from two places — the banner at the top and the row in the
-    /// Health section — so it's one destination flag rather than two links.
-    @State private var healthAccessLinkActive = false
 
     @State private var showingLogoutConfirmation = false
     @State private var showingDeleteAccountConfirmation = false
@@ -46,13 +51,19 @@ struct MADSettingsView: View {
     /// Recalibrate's live state. The service owns it, so leaving this page
     /// and coming back mid-run still shows it running.
     @ObservedObject private var syncService = WorkoutSyncService.shared
-    @State private var recalibrateResultMessage: String?
+    /// What a repair tool found, shown in one alert for both tools.
+    @State private var repairResult: RepairResult?
     @State private var isBackfillingRoutes = false
     @State private var routeBackfillProgress: String?
     /// Troubleshooting opens IN PLACE rather than as a pushed page: its two
     /// actions report through this page's alert, and an alert on a view under
     /// a pushed page can't present.
     @State private var troubleshootingExpanded = false
+
+    struct RepairResult {
+        let title: String
+        let message: String
+    }
 
     /// The modals this page presents, so a single `.sheet(item:)` drives all of
     /// them. Two `.sheet`s on the same node compete and one silently never
@@ -65,13 +76,10 @@ struct MADSettingsView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: MADTheme.Spacing.lg) {
-                // The one thing on this page that can be BROKEN rather than
-                // merely unset, so it leads.
-                HealthAccessBanner {
-                    healthAccessLinkActive = true
-                }
                 plusSection
-                yourDaySection
+                goalSection
+                workoutsSection
+                challengesSection
                 notificationsAndPrivacySection
                 healthAndDataSection
                 // No FRIENDS section: its one row pushed the Friends tab's own
@@ -96,9 +104,7 @@ struct MADSettingsView: View {
         .background(MADTheme.Colors.appBackgroundGradient)
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.large)
-        .navigationDestination(isPresented: $healthAccessLinkActive) {
-            HealthAccessSettingsView()
-        }
+        .task { healthAccess.refresh() }
         .sheet(item: $activeSheet) { sheet in
             switch sheet {
             case .importHistory:
@@ -151,86 +157,84 @@ struct MADSettingsView: View {
             Text(deleteAccountErrorMessage ?? "")
         }
         .alert(
-            "Streak Recalibrated",
+            repairResult?.title ?? "",
             isPresented: Binding(
-                get: { recalibrateResultMessage != nil },
-                set: { if !$0 { recalibrateResultMessage = nil } }
+                get: { repairResult != nil },
+                set: { if !$0 { repairResult = nil } }
             )
         ) {
-            Button("OK") { recalibrateResultMessage = nil }
+            Button("OK") { repairResult = nil }
         } message: {
-            Text(recalibrateResultMessage ?? "")
+            Text(repairResult?.message ?? "")
         }
     }
 
-    // MARK: - Your day
+    // MARK: - Mile A Day+
 
-    private var yourDaySection: some View {
-        section("YOUR DAY", icon: "sun.max.fill", iconColor: .yellow) {
-            Button { showGoalSheet = true } label: {
-                MADSettingsRow(
-                    icon: "target",
-                    title: "Daily Goal",
-                    subtitle: "\(userManager.currentUser.goalMiles.distanceFormatted1) per day",
-                    iconColor: .green
+    /// No header: one highlighted row says it. Flamey's Closet rides here
+    /// because his looks are what Plus mostly adds to.
+    private var plusSection: some View {
+        SettingsSection {
+            NavigationLink(destination: PlusSettingsView()) {
+                SettingsRow(
+                    icon: plusStore.isPlus ? "checkmark.seal.fill" : "sparkles",
+                    title: "Mile A Day+",
+                    subtitle: plusSubtitle,
+                    tint: .orange,
+                    titleColor: .orange
                 )
             }
             .buttonStyle(.plain)
 
-            // One style for now, so nothing to pick (`DashboardStylePreference.offered`).
-            if DashboardStylePreference.offersChoice {
-                divider
-
-                VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
-                    MADSettingsRow(
-                        icon: "paintbrush.pointed.fill",
-                        title: "Dashboard Style",
-                        subtitle: selectedStyle.subtitle,
-                        iconColor: .orange
-                    )
-                    Picker("Dashboard Style", selection: $dashboardStyleRaw) {
-                        ForEach(DashboardStylePreference.offered) { style in
-                            Text(style.title).tag(style.rawValue)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .onChange(of: dashboardStyleRaw) { _, newValue in
-                        DashboardStylePreference.current = DashboardStyle(rawValue: newValue) ?? DashboardStylePreference.defaultStyle
-                        DashboardStylePreference.markChosen()
-                        MADHaptics.tap()
-                    }
-                }
-                .padding(.bottom, MADTheme.Spacing.xs)
-            }
-
             // Flamey lives on the Fun dashboard only, so his Closet does too.
             if selectedStyle == .fun {
-                divider
-
+                SettingsDivider()
                 Button {
                     MADHaptics.tap()
                     FlameyClosetLink.shared.open()
                 } label: {
-                    MADSettingsRow(
+                    SettingsRow(
                         icon: "hanger",
                         title: "\(FlameyNameRules.possessive(FlameyFacts.displayName)) Closet",
-                        subtitle: "Dress \(FlameyFacts.displayName) in what you've earned",
-                        iconColor: .orange
+                        tint: .orange
                     )
                 }
                 .buttonStyle(.plain)
             }
+        }
+    }
 
-            divider
+    private var plusSubtitle: String {
+        guard let status = plusStore.status, status.is_plus else {
+            return HistoryWindow.isCapped ? "Your full workout history, faster streak tokens" : "Faster streak tokens, Flamey looks, gifting"
+        }
+        if status.isFoundingRunner && status.source == "founding" { return "Founding Runner — free for life" }
+        return "Active — manage, gift or restore"
+    }
 
-            VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
-                MADSettingsRow(
+    // MARK: - Goal & units
+
+    private var goalSection: some View {
+        SettingsSection("Goal & units") {
+            Button { showGoalSheet = true } label: {
+                SettingsRow(
+                    icon: "target",
+                    title: "Daily goal",
+                    subtitle: "\(userManager.currentUser.goalMiles.distanceFormatted1) per day",
+                    tint: .green
+                )
+            }
+            .buttonStyle(.plain)
+
+            SettingsDivider()
+
+            VStack(alignment: .leading, spacing: MADTheme.Spacing.xs) {
+                SettingsRow(
                     icon: "ruler",
                     title: "Units",
-                    subtitle: DistanceUnits.isChosen
-                        ? "Shown in \(DistanceUnits.current.plural)"
-                        : "Following your device (\(DisplayDistanceUnit.systemDefault.plural))",
-                    iconColor: .teal
+                    subtitle: DistanceUnits.isChosen ? nil : "Following your device",
+                    tint: .teal,
+                    accessory: .none
                 )
                 Picker("Units", selection: $distanceUnitRaw) {
                     ForEach(DisplayDistanceUnit.allCases) { unit in
@@ -245,177 +249,188 @@ struct MADSettingsView: View {
                     MADHaptics.tap()
                 }
             }
-            .padding(.bottom, MADTheme.Spacing.xs)
+            .padding(.bottom, MADTheme.Spacing.sm)
 
-            divider
+            // One style for now, so nothing to pick (`DashboardStylePreference.offered`).
+            if DashboardStylePreference.offersChoice {
+                SettingsDivider()
 
-            NavigationLink(destination: DailyChallengeSettingsView(friendService: friendService)) {
-                MADSettingsRow(
-                    icon: "flag.2.crossed.fill",
-                    title: "Daily Challenges",
-                    subtitle: "Head-to-Head matchup preferences",
-                    iconColor: .purple
-                )
-            }
-
-            divider
-
-            NavigationLink(destination: RecoveryModeView()) {
-                MADSettingsRow(
-                    icon: "cross.case.fill",
-                    title: "Recovery Mode",
-                    subtitle: injuryPause.isPaused
-                        ? "Streak paused for injury"
-                        : "Pause your streak while injured",
-                    iconColor: MADTheme.Colors.warning
-                )
-            }
-
-            divider
-
-            NavigationLink(destination: ShoesListView()) {
-                MADSettingsRow(
-                    icon: ShoeSymbol.filled,
-                    title: "Shoes",
-                    subtitle: "Mileage on each pair — only you see it",
-                    iconColor: .orange
-                )
-            }
-
-            divider
-
-            // The coach speaks on every workout, so its switch belongs on the
-            // page everyone opens — not only inside the Ghost Race sheet,
-            // which is where it used to live and which you never see on an
-            // ordinary walk.
-            VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
-                // Deliberately NOT a MADSettingsRow: that row ends in a
-                // disclosure chevron, and a chevron beside a switch promises a
-                // page that isn't there. Same metrics, different ending.
-                HStack(spacing: MADTheme.Spacing.md) {
-                    ZStack {
-                        Circle()
-                            .fill(MADTheme.Colors.walkBlue.opacity(0.15))
-                            .frame(width: 36, height: 36)
-                        Image(systemName: coachEnabled ? "speaker.wave.2.fill" : "speaker.slash.fill")
-                            .madFont(size: 15, weight: .medium, maxScale: 1.3)
-                            .foregroundColor(MADTheme.Colors.walkBlue)
+                VStack(alignment: .leading, spacing: MADTheme.Spacing.xs) {
+                    SettingsRow(
+                        icon: "paintbrush.pointed.fill",
+                        title: "Dashboard style",
+                        subtitle: selectedStyle.subtitle,
+                        tint: .orange,
+                        accessory: .none
+                    )
+                    Picker("Dashboard style", selection: $dashboardStyleRaw) {
+                        ForEach(DashboardStylePreference.offered) { style in
+                            Text(style.title).tag(style.rawValue)
+                        }
                     }
-
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Voice Coach")
-                            .madFont(size: 17, weight: .medium, design: .rounded)
-                            .foregroundColor(.primary)
-                        Text(coachEnabled ? "Calls out splits and your goal" : "Off — lines still show on screen")
-                        .madFont(size: 12, weight: .regular, design: .rounded)
-                        .foregroundColor(.secondary)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.85)
+                    .pickerStyle(.segmented)
+                    .onChange(of: dashboardStyleRaw) { _, newValue in
+                        DashboardStylePreference.current = DashboardStyle(rawValue: newValue) ?? DashboardStylePreference.defaultStyle
+                        DashboardStylePreference.markChosen()
+                        MADHaptics.tap()
                     }
-
-                    Spacer()
-
-                    Toggle("", isOn: $coachEnabled)
-                        .labelsHidden()
-                        .toggleStyle(SwitchToggleStyle(tint: MADTheme.Colors.madRed))
                 }
-                .padding(.vertical, MADTheme.Spacing.xs)
+                .padding(.bottom, MADTheme.Spacing.sm)
+            }
+        }
+    }
+
+    // MARK: - Workouts
+
+    private var workoutsSection: some View {
+        SettingsSection("Workouts") {
+            // The coach speaks on every workout, so its switch belongs on the
+            // page everyone opens — not only inside the Ghost Race sheet.
+            VStack(alignment: .leading, spacing: 0) {
+                SettingsToggleRow(
+                    icon: coachEnabled ? "speaker.wave.2.fill" : "speaker.slash.fill",
+                    title: "Voice coach",
+                    subtitle: coachEnabled ? "Calls out splits and your goal" : "Off. Lines still show on screen",
+                    tint: MADTheme.Colors.walkBlue,
+                    isOn: $coachEnabled
+                )
                 .onChange(of: coachEnabled) { _, on in
                     MADHaptics.tap()
                     if !on { GhostCoach.shared.silenceCurrentLine() }
                 }
 
-                // An OFFER, not a defect notice. The coach picks a modern
-                // preinstalled voice now, so it sounds fine out of the box;
-                // enhanced voices are a ~100MB download only the user can
-                // start, and the copy must not imply the feature is waiting
-                // on it.
+                // An OFFER, not a defect notice: the coach already picks a
+                // modern preinstalled voice; enhanced ones are a download
+                // only the user can start. One short line.
                 if coachEnabled, GhostCoach.usingBasicVoice {
-                    Text("Richer voices: iOS Settings → Accessibility → Spoken Content → Voices.")
+                    Text("Richer voices: iOS Settings › Accessibility › Spoken Content")
                         .madFont(size: 11, design: .rounded)
                         .foregroundColor(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                        .padding(.leading, 36)
+                        .padding(.bottom, 6)
                 }
             }
-            .padding(.bottom, MADTheme.Spacing.xs)
+
+            SettingsDivider()
+
+            NavigationLink(destination: ShoesListView()) {
+                SettingsRow(
+                    icon: ShoeSymbol.filled,
+                    title: "Shoes",
+                    subtitle: "Mileage on each pair. Only you see it",
+                    tint: .orange
+                )
+            }
+            .buttonStyle(.plain)
+
+            SettingsDivider()
+
+            NavigationLink(destination: RecoveryModeView()) {
+                SettingsRow(
+                    icon: "cross.case.fill",
+                    title: "Recovery Mode",
+                    subtitle: injuryPause.isPaused
+                        ? "On. Your streak is paused"
+                        : "Pause your streak while injured",
+                    tint: MADTheme.Colors.warning
+                )
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    // MARK: - Challenges
+
+    private var challengesSection: some View {
+        SettingsSection("Challenges") {
+            NavigationLink(destination: DailyChallengeSettingsView(friendService: friendService)) {
+                SettingsRow(
+                    icon: "flag.2.crossed.fill",
+                    title: "Daily challenges",
+                    subtitle: "Who you're matched with head to head",
+                    tint: .purple
+                )
+            }
+            .buttonStyle(.plain)
         }
     }
 
     // MARK: - Notifications & privacy
 
-    /// Two rows where there were four. Stealth Mode, Privacy Settings and the
-    /// "who sees your workouts" half of the notification page all answer one
-    /// question, so they sit behind ONE Privacy page; each of its rows opens
-    /// the screen that already owns (and saves) that setting.
+    /// Two rows, two jobs: Notifications is alerts only, Privacy holds every
+    /// "who sees what" control. No setting appears on both.
     private var notificationsAndPrivacySection: some View {
-        section("NOTIFICATIONS & PRIVACY", icon: "bell.badge.fill", iconColor: MADTheme.Colors.madRed) {
-            // The page still holds the feed/sharing toggles too (they save
-            // together); Privacy links to the same page for those.
+        SettingsSection("Notifications & privacy") {
             NavigationLink(destination: NotificationSettingsView()) {
-                MADSettingsRow(
+                SettingsRow(
                     icon: "bell.fill",
                     title: "Notifications",
-                    subtitle: "Alerts, quiet hours and feed sharing",
-                    iconColor: MADTheme.Colors.madRed
+                    subtitle: "Alerts, reminders and quiet hours",
+                    tint: MADTheme.Colors.madRed
                 )
             }
+            .buttonStyle(.plain)
 
-            divider
+            SettingsDivider()
 
             NavigationLink(destination: PrivacyHubView(friendService: friendService)) {
-                MADSettingsRow(
+                SettingsRow(
                     icon: "lock.shield.fill",
                     title: "Privacy",
                     subtitle: StealthModeStore.shared.isOn
-                        ? "Stealth Mode on · who sees your walks"
+                        ? "Stealth Mode on"
                         : "Who sees your walks, routes and profile",
-                    iconColor: .purple
+                    tint: .purple
                 )
             }
+            .buttonStyle(.plain)
         }
     }
 
     // MARK: - Health & data
 
     private var healthAndDataSection: some View {
-        section("HEALTH & DATA", icon: "heart.fill", iconColor: .red) {
-            Button { healthAccessLinkActive = true } label: {
-                MADSettingsRow(
-                    icon: "heart.fill",
-                    title: "Health Access",
+        SettingsSection("Health & data") {
+            NavigationLink(destination: HealthAccessSettingsView()) {
+                SettingsRow(
+                    icon: healthAccess.state.needsAttention ? "heart.slash.fill" : "heart.fill",
+                    title: "Health access",
                     subtitle: healthAccessSubtitle,
-                    iconColor: .red
+                    tint: healthAccessTint
                 )
             }
             .buttonStyle(.plain)
 
-            divider
+            SettingsDivider()
 
             NavigationLink(destination: FitnessConnectionsView(userManager: userManager)) {
-                MADSettingsRow(
-                    icon: "link.circle.fill",
-                    title: "Connected Apps",
+                SettingsRow(
+                    icon: "link",
+                    title: "Connected apps",
                     subtitle: "Strava, Garmin, WHOOP, Oura and more",
-                    iconColor: .teal
+                    tint: .teal
                 )
             }
+            .buttonStyle(.plain)
 
-            divider
+            SettingsDivider()
 
             // A sheet, not a NavigationLink: ImportHistoryView owns its own
             // NavigationStack and Cancel/Done button, which a pushed
             // destination would nest inside this one.
             Button { activeSheet = .importHistory } label: {
-                MADSettingsRow(
+                SettingsRow(
                     icon: "clock.arrow.circlepath",
-                    title: "Import Past Workouts",
-                    subtitle: "Bring in history from a Strava or Garmin export",
-                    iconColor: .indigo
+                    title: "Import past workouts",
+                    subtitle: "From a Strava or Garmin export",
+                    tint: .indigo
                 )
             }
             .buttonStyle(.plain)
 
-            divider
+            SettingsDivider()
 
             // Repair tools, not settings: most people never need them, so
             // they fold away instead of sitting between real choices.
@@ -425,64 +440,57 @@ struct MADSettingsView: View {
                     troubleshootingExpanded.toggle()
                 }
             } label: {
-                HStack(spacing: MADTheme.Spacing.md) {
-                    ZStack {
-                        Circle()
-                            .fill(Color.gray.opacity(0.15))
-                            .frame(width: 36, height: 36)
-                        Image(systemName: "wrench.adjustable.fill")
-                            .madFont(size: 15, weight: .medium, maxScale: 1.3)
-                            .foregroundColor(.gray)
-                    }
-                    .accessibilityHidden(true)
+                HStack(spacing: 12) {
+                    SettingsGlyph(icon: "wrench.adjustable.fill")
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Troubleshooting")
-                            .madFont(size: 17, weight: .medium, design: .rounded)
+                            .madFont(size: 16, weight: .medium, design: .rounded)
                             .foregroundColor(.primary)
-                        Text("Fix a low streak or missing maps")
-                            .madFont(size: 12, weight: .regular, design: .rounded)
+                        Text("Streak too low or maps missing")
+                            .madFont(size: 12, design: .rounded)
                             .foregroundColor(.secondary)
                     }
                     Spacer()
                     Image(systemName: "chevron.down")
-                        .madFont(size: 13, weight: .semibold, maxScale: 1.3)
-                        .foregroundColor(.secondary)
+                        .madFont(size: 12, weight: .semibold, maxScale: 1.5)
+                        .foregroundColor(.secondary.opacity(0.7))
                         .rotationEffect(.degrees(troubleshootingExpanded ? 180 : 0))
                         .accessibilityHidden(true)
                 }
-                .padding(.vertical, MADTheme.Spacing.xs)
+                .padding(.vertical, 8)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityHint(troubleshootingExpanded ? "Hides the repair tools" : "Shows the repair tools")
 
             if troubleshootingExpanded {
-                divider
+                SettingsDivider()
 
                 Button { Task { await recalibrateStreak() } } label: {
-                    MADSettingsRow(
+                    SettingsRow(
                         icon: "arrow.triangle.2.circlepath",
-                        title: "Recalibrate Streak",
+                        title: "Fix my streak",
                         subtitle: recalibrateSubtitle,
-                        iconColor: .green
+                        tint: .green,
+                        accessory: .none
                     )
                 }
                 .buttonStyle(.plain)
                 .disabled(syncService.isRecalibrating)
 
-                divider
+                SettingsDivider()
 
                 // The automatic sweep heals ~75 workouts a session, two years
                 // back, only after a quiet sync — so an old post's map (and its
                 // Flyover) could take weeks of launches to appear. This runs the
                 // same pipeline to the end, now, and says what it found.
                 Button { Task { await backfillRoutes() } } label: {
-                    MADSettingsRow(
+                    SettingsRow(
                         icon: "map.fill",
-                        title: "Add Maps to Past Workouts",
-                        subtitle: routeBackfillProgress
-                            ?? "Send routes from Apple Health so older posts get a map and Flyover",
-                        iconColor: .teal
+                        title: "Add maps to old walks",
+                        subtitle: routeBackfillProgress ?? "For older posts missing their map",
+                        tint: .teal,
+                        accessory: .none
                     )
                 }
                 .buttonStyle(.plain)
@@ -491,19 +499,39 @@ struct MADSettingsView: View {
         }
     }
 
-    /// The Recalibrate row's subtitle, counting along while it runs (the
+    /// The streak repair row's subtitle, counting along while it runs (the
     /// banner at the bottom says the same thing everywhere else).
     private var recalibrateSubtitle: String {
         guard let progress = syncService.recalibration, progress.isRunning else {
-            return "Fix a streak that looks too low"
+            return "For a streak that looks too low"
         }
         switch progress.stage {
         case .uploading where progress.total > 0:
-            return "Re-checked \(progress.checked) of \(progress.total) workouts…"
+            return "Checked \(progress.checked) of \(progress.total) walks…"
         case .recomputing:
             return "Recounting your streak…"
         default:
-            return "Re-syncing your workouts…"
+            return "Syncing your walks…"
+        }
+    }
+
+    /// The row says what's wrong before you tap it, so a broken permission is
+    /// visible from the settings list itself and not one screen deeper.
+    private var healthAccessSubtitle: String {
+        switch healthAccess.state {
+        case .someWritesDenied: return "Some access is off. Tap to fix"
+        case .needsRequest: return "Some access hasn't been granted yet"
+        case .unavailable: return "Not available on this device"
+        case .granted: return "What Mile A Day reads from Apple Health"
+        }
+    }
+
+    private var healthAccessTint: Color {
+        switch healthAccess.state {
+        case .someWritesDenied: return MADTheme.Colors.madRed
+        case .needsRequest: return .orange
+        case .unavailable: return .secondary
+        case .granted: return .red
         }
     }
 
@@ -515,44 +543,11 @@ struct MADSettingsView: View {
         return "\(name) · \(String(localized: "change in iOS Settings"))"
     }
 
-    /// The row says what's wrong before you tap it, so a broken permission is
-    /// visible from the settings list itself and not one screen deeper.
-    private var healthAccessSubtitle: String {
-        switch HealthAccessMonitor.shared.state {
-        case .someWritesDenied: return "Some access is turned off — tap to fix"
-        case .needsRequest: return "Some access hasn't been granted yet"
-        case .unavailable: return "Not available on this device"
-        case .granted: return "What Mile A Day reads from Apple Health"
-        }
-    }
-
-    // MARK: - Mile A Day+
-
-    private var plusSection: some View {
-        section("MILE A DAY+", icon: "sparkles", iconColor: .orange) {
-            NavigationLink(destination: PlusSettingsView()) {
-                MADSettingsRow(
-                    icon: plusStore.isPlus ? "checkmark.seal.fill" : "sparkles",
-                    title: "Mile A Day+",
-                    subtitle: plusSubtitle,
-                    iconColor: .orange
-                )
-            }
-        }
-    }
-
-    private var plusSubtitle: String {
-        guard let status = plusStore.status, status.is_plus else {
-            return HistoryWindow.isCapped ? "Your full workout history, faster streak tokens" : "Faster streak tokens, Flamey looks, gifting"
-        }
-        if status.isFoundingRunner && status.source == "founding" { return "Founding Runner — free for life" }
-        return "Active — manage, gift or restore"
-    }
-
     // MARK: - Help
 
     private var helpSection: some View {
-        section("HELP", icon: "questionmark.circle.fill", iconColor: .orange) {
+        SettingsSection("Help") {
+            // The tour's one door (Help & Support used to have a second).
             Button {
                 // Pop back to the tab first, then start the tour overlay on
                 // MainTabView after a beat so the navigation stack settles.
@@ -564,41 +559,42 @@ struct MADSettingsView: View {
                     )
                 }
             } label: {
-                MADSettingsRow(
-                    icon: "map.fill",
-                    title: "App Tour",
-                    subtitle: "Take a guided walkthrough of the app",
-                    iconColor: MADTheme.Colors.madRed
+                SettingsRow(
+                    icon: "map",
+                    title: "Take the tour",
+                    subtitle: "Streaks, syncing, competitions and medals",
+                    tint: MADTheme.Colors.madRed,
+                    accessory: .none
                 )
             }
             .buttonStyle(.plain)
 
-            divider
+            SettingsDivider()
 
             NavigationLink(destination: HelpAndSupportView()) {
-                MADSettingsRow(
-                    icon: "questionmark.circle.fill",
-                    title: "Help & Support",
-                    subtitle: "FAQ and contact",
-                    iconColor: .orange
+                SettingsRow(
+                    icon: "questionmark.circle",
+                    title: "Help & support",
+                    subtitle: "FAQ, contact, privacy and terms",
+                    tint: .orange
                 )
             }
+            .buttonStyle(.plain)
 
-            divider
+            SettingsDivider()
 
             // What's New and Language are reference, not settings — they
             // sit at the bottom of Help rather than in a group of their own.
             Button { showWhatsNew = true } label: {
-                MADSettingsRow(
+                SettingsRow(
                     icon: "sparkles",
-                    title: "What's New",
-                    subtitle: "See what changed in the latest update",
-                    iconColor: .orange
+                    title: "What's new",
+                    tint: .orange
                 )
             }
             .buttonStyle(.plain)
 
-            divider
+            SettingsDivider()
 
             // The app follows the device language; iOS lets a user pick a
             // different one PER APP once the app ships more than one
@@ -609,11 +605,12 @@ struct MADSettingsView: View {
                     UIApplication.shared.open(url)
                 }
             } label: {
-                MADSettingsRow(
+                SettingsRow(
                     icon: "globe",
                     title: "Language",
                     subtitle: languageSubtitle,
-                    iconColor: .blue
+                    tint: .blue,
+                    accessory: .external
                 )
             }
             .buttonStyle(.plain)
@@ -623,27 +620,29 @@ struct MADSettingsView: View {
     // MARK: - Account
 
     private var accountSection: some View {
-        section("ACCOUNT", icon: "person.crop.circle", iconColor: .gray) {
+        SettingsSection("Account") {
             Button { showingLogoutConfirmation = true } label: {
-                MADSettingsRow(
-                    icon: "arrow.right.square.fill",
+                SettingsRow(
+                    icon: "rectangle.portrait.and.arrow.right",
                     title: "Sign Out",
-                    subtitle: "Sign out and return to login",
-                    iconColor: MADTheme.Colors.madRed
+                    tint: .secondary,
+                    accessory: .none
                 )
             }
             .buttonStyle(.plain)
 
-            divider
+            SettingsDivider()
 
             Button { showingDeleteAccountConfirmation = true } label: {
-                MADSettingsRow(
-                    icon: "trash.fill",
+                SettingsRow(
+                    icon: "trash",
                     title: "Delete Account",
                     subtitle: isDeletingAccount
                         ? "Deleting your account…"
-                        : "Permanently remove your account and data",
-                    iconColor: .red
+                        : "Removes your account and data for good",
+                    tint: .red,
+                    titleColor: .red,
+                    accessory: .none
                 )
             }
             .buttonStyle(.plain)
@@ -653,44 +652,11 @@ struct MADSettingsView: View {
 
     // MARK: - Chrome
 
-    /// A labelled card. The old pages were one long undivided list, which is
-    /// fine at eight rows and unreadable at twenty — and twenty is what one
-    /// page's worth of settings actually is once both gears lead here.
-    private func section<Content: View>(
-        _ title: String,
-        icon: String,
-        iconColor: Color,
-        @ViewBuilder content: () -> Content
-    ) -> some View {
-        VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
-            HStack(spacing: MADTheme.Spacing.sm) {
-                Image(systemName: icon)
-                    .madFont(size: 12, weight: .semibold)
-                    .foregroundColor(iconColor)
-                Text(LocalizedStringKey(title))
-                    .madFont(size: 11, weight: .heavy, design: .rounded)
-                    .tracking(1.2)
-                    .foregroundColor(.secondary)
-                Spacer()
-            }
-            .padding(.horizontal, MADTheme.Spacing.xs)
-
-            VStack(spacing: 0) { content() }
-                .padding(MADTheme.Spacing.md)
-                .madLiquidGlass()
-        }
-    }
-
-    private var divider: some View {
-        Divider()
-            .overlay(Color.white.opacity(0.06))
-            .padding(.vertical, MADTheme.Spacing.xs)
-    }
-
     private var selectedStyle: DashboardStyle {
         DashboardStyle(rawValue: dashboardStyleRaw) ?? DashboardStylePreference.defaultStyle
     }
 
+    /// The app version's one place in Settings.
     private var versionFooter: some View {
         Text(versionString)
             .madFont(size: 11, weight: .medium, design: .rounded)
@@ -718,11 +684,11 @@ struct MADSettingsView: View {
         }
     }
 
-    /// Re-push the phone's local workouts to the server and recompute the
-    /// streak. Recovers a streak that reads too low because a manual/backdated
-    /// workout never reached the backend. Local HealthKit is the source of
-    /// truth, so this only ever fills server gaps — it can't shorten a
-    /// legitimately broken streak.
+    /// "Fix my streak": re-push the phone's local workouts to the server and
+    /// recompute the streak. Recovers a streak that reads too low because a
+    /// manual/backdated workout never reached the backend. Local HealthKit is
+    /// the source of truth, so this only ever fills server gaps — it can't
+    /// shorten a legitimately broken streak.
     private func recalibrateStreak() async {
         guard !syncService.isRecalibrating else { return }
 
@@ -734,29 +700,28 @@ struct MADSettingsView: View {
             await RecalibrateMedals.refresh(userManager: userManager, newBadgeIds: outcome.newBadgeIds)
 
             let dayWord = outcome.streak == 1 ? "day" : "days"
-            let workoutWord = outcome.workoutsPushed == 1 ? "workout" : "workouts"
-            var message =
-                "Your streak is now \(outcome.streak) \(dayWord). We re-checked \(outcome.workoutsPushed) recent \(workoutWord) and made sure they're all saved to your account."
+            var message = "Your streak is \(outcome.streak) \(dayWord), and your recent walks are all saved."
             if let medals = RecalibrateMedals.sentence(for: outcome.newBadgeIds) {
                 message += " " + medals
             }
-            recalibrateResultMessage = message
+            repairResult = RepairResult(title: "Streak checked", message: message)
         } catch SyncError.alreadyRunning {
             return
         } catch {
-            recalibrateResultMessage =
-                "We couldn't finish recalibrating right now. Please check your connection and try again."
+            repairResult = RepairResult(
+                title: "Couldn't fix your streak",
+                message: "Check your connection and try again."
+            )
         }
     }
 
-    /// Every past workout with a route in HealthKit but no map on the server,
-    /// pushed to the end — see `WorkoutSyncService.backfillAllRoutes`. The
-    /// result lands in the same alert Recalibrate uses; both are "we went
-    /// through your history and here is what changed".
+    /// "Add maps to old walks": every past workout with a route in HealthKit
+    /// but no map on the server, pushed to the end — see
+    /// `WorkoutSyncService.backfillAllRoutes`.
     private func backfillRoutes() async {
         guard !isBackfillingRoutes else { return }
         isBackfillingRoutes = true
-        routeBackfillProgress = "Checking your workouts…"
+        routeBackfillProgress = "Checking your walks…"
         defer {
             isBackfillingRoutes = false
             routeBackfillProgress = nil
@@ -764,32 +729,35 @@ struct MADSettingsView: View {
 
         let summary = await WorkoutSyncService.shared.backfillAllRoutes { progress in
             if progress.pushed > 0 {
-                routeBackfillProgress = "Sent \(progress.pushed) so far…"
+                routeBackfillProgress = "Added \(progress.pushed) so far…"
             } else if progress.total > 0 {
                 routeBackfillProgress = "Checked \(progress.probed) of \(progress.total)…"
             }
         }
 
+        let title = "Add maps to old walks"
         if summary.busy {
-            recalibrateResultMessage =
-                "A sync is already running. Give it a moment and try again."
+            repairResult = RepairResult(title: title, message: "A sync is running. Try again in a moment.")
             return
         }
-        let pushedWord = summary.pushed == 1 ? "workout" : "workouts"
-        var lines: [String] = []
-        if summary.pushed > 0 {
-            lines.append("Added maps to \(summary.pushed) past \(pushedWord). Their posts will show the route and Flyover from now on.")
-        } else {
-            lines.append("Every workout that has a route in Apple Health already has its map.")
-        }
-        if summary.noRoute > 0 {
-            let word = summary.noRoute == 1 ? "workout has" : "workouts have"
-            lines.append("\(summary.noRoute) \(word) no GPS route in Apple Health — treadmill, no Watch, or route sharing was off when it was recorded — so there's nothing to send for those.")
-        }
+        let walks = summary.pushed == 1 ? "1 old walk" : "\(summary.pushed) old walks"
         if summary.failed {
-            lines.append("We couldn't finish — check your connection and run this again; it picks up where it stopped.")
+            repairResult = RepairResult(
+                title: title,
+                message: summary.pushed > 0
+                    ? "Added maps to \(walks), then lost connection. Run it again to finish."
+                    : "Couldn't finish. Check your connection and run it again."
+            )
+            return
         }
-        recalibrateResultMessage = lines.joined(separator: " ")
+        var message = summary.pushed > 0
+            ? "Added maps to \(walks)."
+            : "Every walk with a route in Apple Health already has its map."
+        if summary.noRoute > 0 {
+            let others = summary.noRoute == 1 ? "1 walk has" : "\(summary.noRoute) walks have"
+            message += " \(others) no route in Apple Health, so there's no map to add."
+        }
+        repairResult = RepairResult(title: title, message: message)
     }
 
     // MARK: - Development
@@ -805,51 +773,32 @@ struct MADSettingsView: View {
     }
 
     private var developmentSection: some View {
-        VStack(spacing: MADTheme.Spacing.md) {
-            HStack(spacing: MADTheme.Spacing.sm) {
-                Image(systemName: "wrench.and.screwdriver")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(MADTheme.Colors.redGradient)
-                Text("Development")
-                    .font(MADTheme.Typography.headline)
-                    .foregroundColor(.primary)
-                Spacer()
-            }
-
-            VStack(spacing: 0) {
-                NavigationLink(destination: DeveloperSettingsView()) {
-                    MADSettingsRow(
-                        icon: "hammer.fill",
-                        title: "Developer Settings",
-                        subtitle: "Debug tools and sync management",
-                        iconColor: MADTheme.Colors.madRed
-                    )
-                }
-
-                divider
-
-                Button {
-                    appStateManager.resetAppState()
-                } label: {
-                    MADSettingsRow(
-                        icon: "arrow.counterclockwise.circle.fill",
-                        title: "Reset Onboarding",
-                        subtitle: "Return to initial setup flow",
-                        iconColor: .orange
-                    )
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .padding(MADTheme.Spacing.md)
-        .background(
-            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                .fill(MADTheme.Colors.madRed.opacity(0.05))
-                .overlay(
-                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                        .stroke(MADTheme.Colors.madRed.opacity(0.15), lineWidth: 0.5)
+        SettingsSection("Development") {
+            NavigationLink(destination: DeveloperSettingsView()) {
+                SettingsRow(
+                    icon: "hammer.fill",
+                    title: "Developer settings",
+                    subtitle: "Debug tools and sync management",
+                    tint: MADTheme.Colors.madRed
                 )
-        )
+            }
+            .buttonStyle(.plain)
+
+            SettingsDivider()
+
+            Button {
+                appStateManager.resetAppState()
+            } label: {
+                SettingsRow(
+                    icon: "arrow.counterclockwise",
+                    title: "Reset onboarding",
+                    subtitle: "Return to initial setup flow",
+                    tint: .orange,
+                    accessory: .none
+                )
+            }
+            .buttonStyle(.plain)
+        }
     }
     #endif
 }

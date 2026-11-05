@@ -1,0 +1,31 @@
+{
+  "format": 1,
+  "id": "falling_leaves",
+  "order": 37,
+  "slot": "color",
+  "name": "Falling Leaves",
+  "family": "monthly",
+  "unlock": {"month":9},
+  "unlock_copy": "Walk your mile every day of September",
+  "holidays": [],
+  "mood_prop": false,
+  "compact": true,
+  "tier": 97,
+  "auto_eligible": false,
+  "rules": {"hides":[],"clashes":[]},
+  "palette": {
+    "angular": false,
+    "bodyOpacity": 1,
+    "core": "#FFE9B8FF",
+    "effects": ["leaves"],
+    "end": [0.5,1],
+    "eye": "#2A0E04FF",
+    "glow": "#FF8A2AFF",
+    "inner": ["#FFF2D8FF","#FFC27AFF"],
+    "innerOpacity": null,
+    "outer": ["#FFD884FF","#F0902AFF","#C24A14FF","#6E1E0AFF"],
+    "rim": "#FFE0A899",
+    "start": [0.5,0]
+  },
+  "art": {}
+}

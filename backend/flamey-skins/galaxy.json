@@ -1,0 +1,31 @@
+{
+  "format": 1,
+  "id": "galaxy",
+  "order": 17,
+  "slot": "color",
+  "name": "Galaxy",
+  "family": "streakDays",
+  "unlock": {"badge":"streak_200"},
+  "unlock_copy": "Reach a 200-day streak",
+  "holidays": [],
+  "mood_prop": false,
+  "compact": true,
+  "tier": 200,
+  "auto_eligible": true,
+  "rules": {"hides":[],"clashes":[]},
+  "palette": {
+    "angular": false,
+    "bodyOpacity": 1,
+    "core": "#E0D2FFFF",
+    "effects": ["stars"],
+    "end": [0.5,1],
+    "eye": "#1A0A40FF",
+    "glow": "#7E5BFFFF",
+    "inner": ["#F6EEFFFF","#BFA3FFFF"],
+    "innerOpacity": null,
+    "outer": ["#9C7BFFFF","#4B22B8FF","#1A0A4AFF"],
+    "rim": "#C9B6FF80",
+    "start": [0.5,0]
+  },
+  "art": {}
+}

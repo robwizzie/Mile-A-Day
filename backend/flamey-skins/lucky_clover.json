@@ -1,0 +1,31 @@
+{
+  "format": 1,
+  "id": "lucky_clover",
+  "order": 31,
+  "slot": "color",
+  "name": "Lucky Clover",
+  "family": "monthly",
+  "unlock": {"month":3},
+  "unlock_copy": "Walk your mile every day of March",
+  "holidays": [],
+  "mood_prop": false,
+  "compact": true,
+  "tier": 97,
+  "auto_eligible": false,
+  "rules": {"hides":[],"clashes":[]},
+  "palette": {
+    "angular": false,
+    "bodyOpacity": 1,
+    "core": "#FFF3B0FF",
+    "effects": ["clovers"],
+    "end": [0.5,1],
+    "eye": "#082A12FF",
+    "glow": "#3FD07AFF",
+    "inner": ["#F4FFE8FF","#B8F0A0FF"],
+    "innerOpacity": null,
+    "outer": ["#D2F8A8FF","#4CC35AFF","#168A3AFF","#0B4A22FF"],
+    "rim": "#FFE58A99",
+    "start": [0.5,0]
+  },
+  "art": {}
+}

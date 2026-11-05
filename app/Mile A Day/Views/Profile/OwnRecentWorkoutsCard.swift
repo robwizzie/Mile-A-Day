@@ -28,7 +28,7 @@ struct OwnRecentWorkoutsCard: View {
     private var header: some View {
         Button(action: onOpenHistory) {
             HStack {
-                ProfileCardLabel(text: "WORKOUTS")
+                ProfileCardLabel(text: "Workouts")
                 Spacer()
                 HStack(spacing: 3) {
                     Text("See all")
