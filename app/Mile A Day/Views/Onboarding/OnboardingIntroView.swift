@@ -664,7 +664,11 @@ private struct IntroFeedArt: View {
             // The front one is the feed's real post card, scaled down
             // (`PostCardView` .stacked: header, 4:5 photo, clap + comment +
             // share, streak pill, caption).
-            IntroFeedPost(photo: photos.first, height: height, maxWidth: min(artWidth * 0.58, 240))
+            IntroFeedPost(photo: photos.first, height: height,
+                          // Whole card (it's ~1.72× as tall as wide) so the
+                          // clap row, streak and caption show; only a very
+                          // short hero (SE) falls back to a peek.
+                          maxWidth: max(min(artWidth * 0.58, 240, height / 1.72), min(150, artWidth * 0.5)))
                 .introPop(0)
                 .introBob(4, period: 3.6)
         }
@@ -1131,17 +1135,19 @@ struct ShowcasePhoto: Decodable, Identifiable, Equatable {
         case post_id, media_url, caption, distance, streak, username, profile_image_url
     }
 
-    /// rob's real posts from the default showcase allowlist, bundled. The
-    /// first caption is trimmed: its tail is an aside about a bug.
+    /// rob's real posts from the default showcase allowlist, bundled:
+    /// scenery and group walks rather than selfies, so the feed step shows
+    /// what anyone's walks look like (a beach buddy walk with the front &
+    /// back inset, a photo op with stickers, a sunset).
     static let bundled: [ShowcasePhoto] = [
-        ShowcasePhoto(post_id: "fbc7ab58-46c2-47ec-aead-93ef5ee916ab", media_url: "",
-                      caption: "Fastest mile since the injury 😮‍💨", distance: 1.02, streak: 535,
+        ShowcasePhoto(post_id: "07e8f0b6-7dd5-4bb7-ac64-7fd3f71c35a2", media_url: "",
+                      caption: "Buddy walks on the beachhhhh", distance: 1.18, streak: 511,
                       username: "rob", profile_image_url: nil, bundledImage: "onboarding-post-1"),
-        ShowcasePhoto(post_id: "ce1bc4df-cc72-472a-ab7c-9ad0ec720c7b", media_url: "",
-                      caption: "Bangggggggg", distance: 1.01, streak: 533,
+        ShowcasePhoto(post_id: "81c1895c-3f0d-47ce-9872-321f4e50f4ab", media_url: "",
+                      caption: "It was the perfect photo op 📸", distance: 3.14, streak: 520,
                       username: "rob", profile_image_url: nil, bundledImage: "onboarding-post-2"),
-        ShowcasePhoto(post_id: "7669ff18-5270-4b93-b65a-be7dd689e005", media_url: "",
-                      caption: "Peachyyyyyyyyyy 🍑", distance: 1.91, streak: 522,
+        ShowcasePhoto(post_id: "69626d63-32e6-4abd-8210-14d0d9017735", media_url: "",
+                      caption: "Sunsets are too nice here 🌅", distance: 1.28, streak: 485,
                       username: "rob", profile_image_url: nil, bundledImage: "onboarding-post-3")
     ]
 }

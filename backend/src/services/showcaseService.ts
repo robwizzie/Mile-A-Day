@@ -17,27 +17,11 @@ const db = PostgresService.getInstance();
  * sample cards).
  */
 export const DEFAULT_SHOWCASE_POST_IDS = [
-  "fbc7ab58-46c2-47ec-aead-93ef5ee916ab",
-  "ce1bc4df-cc72-472a-ab7c-9ad0ec720c7b",
-  "71b38ace-d81d-4d4f-b1a4-2820f6732512",
-  "2c2fcbce-c140-4ea2-b925-11d303ba2540",
-  "2752cbda-16af-40b9-8468-dcca5cd5c09a",
-  "7669ff18-5270-4b93-b65a-be7dd689e005",
-  // Scenery and group walks, being reviewed for the app's bundled photos.
-  // Clients only use the first three entries, so these change nothing on
-  // screen.
-  "69626d63-32e6-4abd-8210-14d0d9017735",
-  "dda862e2-be8a-401b-8997-ab8ed6dfadec",
+  // Scenery and group walks (also bundled in the app as onboarding-post-1..3,
+  // same order): beach buddy walk, photo op with stickers, sunset.
   "07e8f0b6-7dd5-4bb7-ac64-7fd3f71c35a2",
-  "94a23f08-81b8-417d-8993-b6da4ce01e0b",
-  "ef2e5160-d0f6-4dfd-9131-949d98a4b53f",
-  "4bd8d0e4-5531-4a6c-b071-69f31338eb7c",
-  "ec50c477-6a52-4bbc-9620-fb84c1d7c84d",
-  "0b9cde98-56fd-4c5a-a44b-e25ac11372a0",
   "81c1895c-3f0d-47ce-9872-321f4e50f4ab",
-  "04305ad4-2536-44bf-96d2-1b6fde894ae2",
-  "a7390e39-f930-44cb-b329-68a3efdd969e",
-  "078adb25-cd7e-4524-bc50-d252cc6a8607",
+  "69626d63-32e6-4abd-8210-14d0d9017735",
 ];
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
