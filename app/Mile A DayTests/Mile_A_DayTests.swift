@@ -79,7 +79,49 @@ struct TreadmillDataTests {
 
     @Test func ownershipAcceptsGoFromAStoppedBelt() {
         var check = TreadmillOwnershipCheck()
+        #expect(!check.observe(speedKmh: 0))    // baseline: belt stopped
+        #expect(check.observe(speedKmh: 0.8))   // GO
+    }
+
+    /// The second half of a split "More Data" pair carries no speed. It must
+    /// neither set the baseline nor read as a change.
+    @Test func ownershipIgnoresReadingsWithoutSpeed() {
+        var check = TreadmillOwnershipCheck()
         #expect(!check.observe(speedKmh: nil))
-        #expect(check.observe(speedKmh: 0.8))
+        #expect(!check.observe(speedKmh: 4.82)) // first real speed = baseline
+        #expect(!check.observe(speedKmh: nil))
+        #expect(!check.observe(speedKmh: 4.82))
+    }
+
+    /// Flags 0x0001: "More Data" set, so no speed field; nothing else.
+    @Test func moreDataPacketHasNoSpeed() throws {
+        let sample = try #require(FTMSTreadmillSample.parse(Self.bytes("0100")))
+        #expect(sample.speedKmh == nil)
+        #expect(sample.totalDistanceMeters == nil)
+    }
+
+    /// A machine that never sends Total Distance: speed × time.
+    @Test func odometerIntegratesSpeedWhenNoTotal() {
+        let t0 = Date()
+        var odometer = TreadmillOdometer()
+        odometer.ingest(totalMeters: nil, speedKmh: 3.6, at: t0)          // 1 m/s
+        odometer.ingest(totalMeters: nil, speedKmh: 3.6, at: t0.addingTimeInterval(1))
+        let after = odometer.ingest(totalMeters: nil, speedKmh: 7.2, at: t0.addingTimeInterval(2))
+        #expect(abs(after - 2) < 0.0001)                                  // 1 m + 1 m
+        // A 30 s silence is lost data, not belt distance: nothing credited.
+        let gap = odometer.ingest(totalMeters: nil, speedKmh: 7.2, at: t0.addingTimeInterval(32))
+        #expect(abs(gap - 2) < 0.0001)
+        let resumed = odometer.ingest(totalMeters: nil, speedKmh: 7.2, at: t0.addingTimeInterval(33))
+        #expect(abs(resumed - 4) < 0.0001)                                // 2 m/s for 1 s
+    }
+
+    /// Once a machine sends totals, its speed-only half-packets add nothing.
+    @Test func odometerPrefersTotalsOverSpeed() {
+        let t0 = Date()
+        var odometer = TreadmillOdometer()
+        odometer.ingest(totalMeters: 100, speedKmh: 3.6, at: t0)
+        odometer.ingest(totalMeters: nil, speedKmh: 3.6, at: t0.addingTimeInterval(0.5))
+        let after = odometer.ingest(totalMeters: 101, speedKmh: nil, at: t0.addingTimeInterval(1))
+        #expect(after == 1)
     }
 }
