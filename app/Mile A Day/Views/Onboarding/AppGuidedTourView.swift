@@ -1,13 +1,17 @@
 import SwiftUI
 
-/// Live guided tour over the real app: each step switches the tab underneath
-/// and explains it on one card pinned above the tab bar.
+/// Live guided tour over the real app. Each step switches to its tab, dims
+/// the app and cuts a spotlight around the real element it's explaining
+/// (`.tourAnchor(_:)` reports where that element is), with one short card on
+/// the other half of the screen. The spotlight glides between elements.
 ///
-/// Built to stay smooth: no material blur (a blur re-samples the live tabs
-/// behind it every frame), no full-screen dark scrim hiding the very screen
-/// being explained (just a fade behind the card), and the card never leaves.
-/// A step change switches the tab FIRST and cross-fades only the card's text
-/// on the next run loop, so the tab's rebuild doesn't land mid-animation.
+/// Smoothness rules (the first two versions felt laggy):
+/// - No material blur: it re-samples the live tabs behind it every frame.
+/// - A tap answers at once (the card's text fades out), the tab switches
+///   while nothing is animating, and the spotlight + new text arrive only
+///   once the new screen has reported its element (or after a short cap).
+///   A tab's first build is main-thread work; doing it mid-animation is what
+///   made Next feel sticky.
 struct AppGuidedTourView: View {
     /// Stamped when the tour ends (Done or Skip) — the dashboard's
     /// getting-started checklist reads it.
@@ -15,8 +19,11 @@ struct AppGuidedTourView: View {
 
     let onComplete: () -> Void
 
+    @ObservedObject private var anchors = TourAnchors.shared
     @State private var step = 0
+    @State private var textVisible = false
     @State private var shown = false
+    @State private var busy = false
 
     private let steps = GuidedTourStep.all
     private var isLast: Bool { step >= steps.count - 1 }
@@ -25,129 +32,169 @@ struct AppGuidedTourView: View {
     private static let surface = Color(red: 0.09, green: 0.06, blue: 0.075)
 
     var body: some View {
-        ZStack(alignment: .bottom) {
-            // Taps on the app are absorbed, but the app stays visible: only
-            // the area behind the card is shaded.
-            Color.black.opacity(0.001)
-                .ignoresSafeArea()
-                .onTapGesture { }
-            LinearGradient(colors: [.clear, .black.opacity(0.7)], startPoint: .top, endPoint: .bottom)
-                .frame(height: 420)
-                .frame(maxWidth: .infinity)
-                .allowsHitTesting(false)
-                .ignoresSafeArea()
+        GeometryReader { geo in
+            let origin = geo.frame(in: .global).origin
+            let hole = spotlight(in: geo.size, origin: origin)
+            let cardOnTop = hole.map { $0.midY > geo.size.height * 0.55 } ?? false
 
-            card
-                .padding(.horizontal, 16)
-                .padding(.bottom, 96) // clear the tab bar
-                .offset(y: shown ? 0 : 40)
-                .opacity(shown ? 1 : 0)
-        }
-        .onAppear {
-            switchToTab(steps[0].tabIndex)
-            DispatchQueue.main.async {
-                withAnimation(.spring(response: 0.45, dampingFraction: 0.86)) { shown = true }
+            ZStack {
+                // Dim everything except the spotlight; absorbs taps on the app.
+                SpotlightShape(hole: hole ?? CGRect(x: geo.size.width / 2, y: geo.size.height / 2, width: 0, height: 0),
+                               radius: 18)
+                    .fill(Color.black.opacity(0.62), style: FillStyle(eoFill: true))
+                    .contentShape(Rectangle())
+                    .onTapGesture { }
+
+                if let hole {
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .stroke(current.accent.opacity(0.9), lineWidth: 2)
+                        .frame(width: hole.width, height: hole.height)
+                        .position(x: hole.midX, y: hole.midY)
+                        .allowsHitTesting(false)
+                }
+
+                VStack {
+                    if !cardOnTop { Spacer(minLength: 0) }
+                    card
+                        .padding(.horizontal, 16)
+                        .padding(.top, cardOnTop ? geo.safeAreaInsets.top + 12 : 0)
+                        .padding(.bottom, cardOnTop ? 0 : 96) // clear the tab bar
+                    if cardOnTop { Spacer(minLength: 0) }
+                }
             }
+            .opacity(shown ? 1 : 0)
         }
+        .ignoresSafeArea()
+        .animation(.spring(response: 0.5, dampingFraction: 0.86), value: step)
+        .animation(.spring(response: 0.5, dampingFraction: 0.86), value: anchors.version)
+        .onAppear(perform: start)
+        .onDisappear { anchors.isRecording = false }
+    }
+
+    /// The current step's element, in this view's coordinates, padded.
+    private func spotlight(in size: CGSize, origin: CGPoint) -> CGRect? {
+        guard let id = current.anchor, let frame = anchors.frames[id], frame.width > 0 else { return nil }
+        let local = frame.offsetBy(dx: -origin.x, dy: -origin.y).insetBy(dx: -8, dy: -8)
+        // Keep it on screen (a tall element is clipped to the visible part).
+        return local.intersection(CGRect(origin: .zero, size: size).insetBy(dx: 4, dy: 4))
     }
 
     // MARK: - Card
 
     private var card: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Label(current.tabName, systemImage: current.icon)
                     .madFont(size: 13, weight: .bold, design: .rounded, maxScale: 1.3)
                     .foregroundColor(current.accent)
+                Text("· \(step + 1) of \(steps.count)")
+                    .madFont(size: 13, weight: .semibold, design: .rounded, maxScale: 1.3)
+                    .foregroundColor(.white.opacity(0.45))
                 Spacer()
                 Button("Skip", action: finish)
                     .madFont(size: 14, weight: .semibold, design: .rounded, maxScale: 1.3)
                     .foregroundColor(.white.opacity(0.55))
             }
 
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 6) {
                 Text(current.title)
-                    .madFont(size: 22, weight: .heavy, design: .rounded, maxScale: 1.3)
+                    .madFont(size: 21, weight: .heavy, design: .rounded, maxScale: 1.3)
                     .foregroundColor(.white)
                 Text(current.body)
                     .madFont(size: 15, weight: .medium, design: .rounded, maxScale: 1.3)
-                    .foregroundColor(.white.opacity(0.7))
+                    .foregroundColor(.white.opacity(0.75))
                     .fixedSize(horizontal: false, vertical: true)
-                VStack(alignment: .leading, spacing: 6) {
-                    ForEach(current.tips, id: \.self) { tip in
-                        HStack(alignment: .firstTextBaseline, spacing: 8) {
-                            Circle()
-                                .fill(current.accent)
-                                .frame(width: 5, height: 5)
-                                .alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 }
-                            Text(tip)
-                                .madFont(size: 14, weight: .medium, design: .rounded, maxScale: 1.3)
-                                .foregroundColor(.white.opacity(0.85))
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
+            }
+            .opacity(textVisible ? 1 : 0)
+
+            HStack(spacing: 12) {
+                if step > 0 {
+                    Button("Back") { go(to: step - 1) }
+                        .madFont(size: 15, weight: .semibold, design: .rounded, maxScale: 1.3)
+                        .foregroundColor(.white.opacity(0.7))
+                }
+                HStack(spacing: 5) {
+                    ForEach(steps.indices, id: \.self) { i in
+                        Capsule()
+                            .fill(i == step ? current.accent : Color.white.opacity(0.2))
+                            .frame(width: i == step ? 16 : 5, height: 5)
                     }
                 }
-                .padding(.top, 4)
-            }
-            .id(step)
-            .transition(.opacity)
+                .frame(maxWidth: .infinity)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Step \(step + 1) of \(steps.count)")
 
-            controls
+                Button {
+                    if isLast { finish() } else { go(to: step + 1) }
+                } label: {
+                    Text(isLast ? "Done" : "Next")
+                        .madFont(size: 15, weight: .bold, design: .rounded, maxScale: 1.3)
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 22)
+                        .padding(.vertical, 11)
+                        .background(Capsule().fill(MADTheme.Colors.madRed))
+                }
+            }
         }
         .padding(18)
         .background(RoundedRectangle(cornerRadius: 22, style: .continuous).fill(Self.surface))
         .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(.white.opacity(0.06), lineWidth: 1))
+        .disabled(busy)
     }
 
-    private var controls: some View {
-        HStack(spacing: 12) {
-            if step > 0 {
-                Button("Back") { go(to: step - 1) }
-                    .madFont(size: 15, weight: .semibold, design: .rounded, maxScale: 1.3)
-                    .foregroundColor(.white.opacity(0.7))
-            }
+    // MARK: - Flow
 
-            HStack(spacing: 6) {
-                ForEach(steps.indices, id: \.self) { i in
-                    Capsule()
-                        .fill(i == step ? current.accent : Color.white.opacity(0.2))
-                        .frame(width: i == step ? 18 : 6, height: 6)
-                }
-            }
-            .frame(maxWidth: .infinity)
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel("Step \(step + 1) of \(steps.count)")
-
-            Button {
-                if isLast { finish() } else { go(to: step + 1) }
-            } label: {
-                Text(isLast ? "Done" : "Next")
-                    .madFont(size: 15, weight: .bold, design: .rounded, maxScale: 1.3)
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 22)
-                    .padding(.vertical, 11)
-                    .background(Capsule().fill(MADTheme.Colors.madRed))
-            }
+    private func start() {
+        anchors.isRecording = true
+        switchToTab(steps[0].tabIndex)
+        settle(on: 0) {
+            withAnimation(.easeOut(duration: 0.25)) { shown = true }
         }
     }
 
-    // MARK: - Navigation
-
-    /// Tab first, then (next run loop, after the tab has rebuilt) a short
-    /// cross-fade of the card's text. The card itself never moves.
+    /// Tap → text fades at once (instant feedback) → tab switches while
+    /// nothing animates → when the new screen has reported its element (or
+    /// after a short cap) the spotlight glides there and the text fades in.
     private func go(to newStep: Int) {
+        guard !busy else { return }
+        busy = true
         MADHaptics.tap()
-        switchToTab(steps[newStep].tabIndex)
-        DispatchQueue.main.async {
-            withAnimation(.easeInOut(duration: 0.22)) { step = newStep }
+        withAnimation(.easeOut(duration: 0.12)) { textVisible = false }
+        let changesTab = steps[newStep].tabIndex != current.tabIndex
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.13) {
+            if changesTab { switchToTab(steps[newStep].tabIndex) }
+            settle(on: newStep) { busy = false }
         }
+    }
+
+    /// Wait (up to 0.6s) for the step's element to report, then show it.
+    private func settle(on newStep: Int, then done: @escaping () -> Void) {
+        let target = steps[newStep].anchor
+        let deadline = Date().addingTimeInterval(0.6)
+        func check() {
+            let ready = target == nil || (anchors.frames[target!]?.width ?? 0) > 0
+            if ready || Date() >= deadline {
+                // One more run loop so the tab's first layout has landed.
+                DispatchQueue.main.async {
+                    step = newStep
+                    withAnimation(.easeOut(duration: 0.2).delay(0.05)) { textVisible = true }
+                    done()
+                }
+            } else {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { check() }
+            }
+        }
+        check()
     }
 
     private func finish() {
         switchToTab(0)
         UserDefaults.standard.set(true, forKey: Self.seenKey)
         withAnimation(.easeOut(duration: 0.2)) { shown = false }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { onComplete() }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            anchors.isRecording = false
+            onComplete()
+        }
     }
 
     private func switchToTab(_ tab: Int) {
@@ -159,79 +206,123 @@ struct AppGuidedTourView: View {
     }
 }
 
+// MARK: - Spotlight
+
+/// The dim layer with a rounded hole; the hole animates between elements.
+private struct SpotlightShape: Shape {
+    var hole: CGRect
+    var radius: CGFloat
+
+    var animatableData: AnimatablePair<AnimatablePair<CGFloat, CGFloat>, AnimatablePair<CGFloat, CGFloat>> {
+        get { AnimatablePair(AnimatablePair(hole.minX, hole.minY), AnimatablePair(hole.width, hole.height)) }
+        set {
+            hole = CGRect(x: newValue.first.first, y: newValue.first.second,
+                          width: newValue.second.first, height: newValue.second.second)
+        }
+    }
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path(rect)
+        if hole.width > 0, hole.height > 0 {
+            path.addRoundedRect(in: hole, cornerSize: CGSize(width: radius, height: radius), style: .continuous)
+        }
+        return path
+    }
+}
+
+// MARK: - Anchors
+
+/// Where the tour's target elements are on screen, in global coordinates.
+/// Recorded only while a tour is running, so normal scrolling pays nothing.
+@MainActor
+final class TourAnchors: ObservableObject {
+    static let shared = TourAnchors()
+
+    /// Frames by id. Not @Published itself: `version` bumps (debounced by
+    /// value) so the tour redraws without every reporter observing.
+    private(set) var frames: [String: CGRect] = [:]
+    @Published private(set) var version = 0
+    /// Reporters already on screen re-report when a tour starts.
+    @Published var isRecording = false
+
+    func report(_ id: String, frame: CGRect) {
+        guard isRecording, frames[id] != frame else { return }
+        frames[id] = frame
+        version &+= 1
+    }
+}
+
+private struct TourAnchorReporter: View {
+    let id: String
+    @ObservedObject private var anchors = TourAnchors.shared
+
+    var body: some View {
+        GeometryReader { geo in
+            let frame = geo.frame(in: .global)
+            Color.clear
+                .onAppear { anchors.report(id, frame: frame) }
+                .onChange(of: frame) { _, newFrame in anchors.report(id, frame: newFrame) }
+                .onChange(of: anchors.isRecording) { _, recording in
+                    if recording { anchors.report(id, frame: frame) }
+                }
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+}
+
+extension View {
+    /// Marks this view as a stop on the guided tour (`GuidedTourStep.anchor`).
+    func tourAnchor(_ id: String) -> some View {
+        background(TourAnchorReporter(id: id))
+    }
+}
+
 // MARK: - Tour Step Data
 
 private struct GuidedTourStep {
     let tabName: String
     let icon: String
     let tabIndex: Int
+    /// The `.tourAnchor` id to spotlight; nil = no spotlight (card only).
+    let anchor: String?
     let title: String
     let body: String
-    let tips: [String]
     let accent: Color
 
     static let all: [GuidedTourStep] = [
-        GuidedTourStep(
-            tabName: "Dashboard",
-            icon: "house.fill",
-            tabIndex: 0,
-            title: "Your day at a glance",
-            body: "Your streak, today's mile and Flamey, all in one place.",
-            tips: [
-                "Tap Start to track a walk or run",
-                "Walks from Apple Health count on their own",
-                "Scroll down for challenges and medals"
-            ],
-            accent: MADTheme.Colors.madRed
-        ),
-        GuidedTourStep(
-            tabName: "Compete",
-            icon: "trophy.fill",
-            tabIndex: 1,
-            title: "Race your friends",
-            body: "Head-to-head or group competitions over days or weeks.",
-            tips: [
-                "Tap + to start a competition",
-                "Invite friends to race with you"
-            ],
-            accent: .orange
-        ),
-        GuidedTourStep(
-            tabName: "Feed",
-            icon: "square.stack.fill",
-            tabIndex: 2,
-            title: "See everyone's walks",
-            body: "Photos, stories and who's out walking right now.",
-            tips: [
-                "Post a photo once your mile is done",
-                "Tap the clap to hype a friend's walk"
-            ],
-            accent: MADTheme.Colors.walkBlue
-        ),
-        GuidedTourStep(
-            tabName: "Friends",
-            icon: "person.2.fill",
-            tabIndex: 3,
-            title: "Keep each other going",
-            body: "See who's done today and nudge anyone running out of time.",
-            tips: [
-                "Tap Add friends to find people",
-                "Walk together live with a friend"
-            ],
-            accent: .cyan
-        ),
-        GuidedTourStep(
-            tabName: "Profile",
-            icon: "person.fill",
-            tabIndex: 4,
-            title: "Your streak, your story",
-            body: "Your stats, medals and posts, all in one place.",
-            tips: [
-                "The gear opens Settings",
-                "Share your profile with friends"
-            ],
-            accent: .purple
-        )
+        GuidedTourStep(tabName: "Home", icon: "house.fill", tabIndex: 0, anchor: "home.hero",
+                       title: "This is Flamey",
+                       body: "He's your streak. Do a mile every day to keep him lit. He shrinks as the day goes if you haven't.",
+                       accent: .orange),
+        GuidedTourStep(tabName: "Home", icon: "house.fill", tabIndex: 0, anchor: "home.start",
+                       title: "Track your mile",
+                       body: "Tap Start to track a walk or run. Walks from Apple Health or your Watch count on their own too.",
+                       accent: MADTheme.Colors.madRed),
+        GuidedTourStep(tabName: "Home", icon: "house.fill", tabIndex: 0, anchor: "home.header",
+                       title: "Alerts and settings",
+                       body: "The bell has your notifications. The gear opens Settings.",
+                       accent: MADTheme.Colors.madRed),
+        GuidedTourStep(tabName: "Compete", icon: "trophy.fill", tabIndex: 1, anchor: "compete.header",
+                       title: "Race your friends",
+                       body: "Tap + to start a competition over days or weeks.",
+                       accent: .orange),
+        GuidedTourStep(tabName: "Feed", icon: "square.stack.fill", tabIndex: 2, anchor: "feed.board",
+                       title: "Who's done today",
+                       body: "Everyone's day at a glance. Tap a friend to watch their story, hype them, or nudge them.",
+                       accent: MADTheme.Colors.walkBlue),
+        GuidedTourStep(tabName: "Feed", icon: "square.stack.fill", tabIndex: 2, anchor: nil,
+                       title: "Show off your walk",
+                       body: "Post a photo after your mile. Tap the clap on a friend's post to hype it.",
+                       accent: MADTheme.Colors.walkBlue),
+        GuidedTourStep(tabName: "Friends", icon: "person.2.fill", tabIndex: 3, anchor: "friends.header",
+                       title: "Bring your friends",
+                       body: "Tap Add friends to find people. Streaks are better together.",
+                       accent: .cyan),
+        GuidedTourStep(tabName: "Profile", icon: "person.fill", tabIndex: 4, anchor: "profile.hero",
+                       title: "Your profile",
+                       body: "Your streak, miles and medals. The gear up here opens Settings any time.",
+                       accent: .purple)
     ]
 }
 
