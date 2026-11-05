@@ -248,17 +248,26 @@ private struct SpotlightShape: Shape {
 // MARK: - Anchors
 
 /// Where the tour's target elements are on screen, in global coordinates.
-/// Recorded only while a tour is running, so normal scrolling pays nothing.
+/// Recorded only while a tour is running, so normal use pays nothing.
 @MainActor
 final class TourAnchors: ObservableObject {
     static let shared = TourAnchors()
 
-    /// Frames by id. Not @Published itself: `version` bumps (debounced by
-    /// value) so the tour redraws without every reporter observing.
+    /// Frames by id; `version` bumps so the tour redraws. Reporters don't
+    /// observe this object (only `TourRecording`), so a report never
+    /// re-renders the reporters themselves.
     private(set) var frames: [String: CGRect] = [:]
     @Published private(set) var version = 0
-    /// Reporters already on screen re-report when a tour starts.
-    @Published var isRecording = false
+
+    /// Turning it on mounts the reporters, which then report their frames.
+    var isRecording: Bool {
+        get { TourRecording.shared.isOn }
+        set {
+            // A fresh tour never spotlights where something USED to be.
+            if newValue && !TourRecording.shared.isOn { frames = [:] }
+            TourRecording.shared.isOn = newValue
+        }
+    }
 
     func report(_ id: String, frame: CGRect) {
         guard isRecording, frames[id] != frame else { return }
@@ -267,19 +276,33 @@ final class TourAnchors: ObservableObject {
     }
 }
 
+/// Whether a tour is running: the only thing reporters observe.
+@MainActor
+final class TourRecording: ObservableObject {
+    static let shared = TourRecording()
+    @Published var isOn = false
+}
+
+/// Reports its host's frame only while a tour runs. Outside a tour it's a
+/// bare `Color.clear`: no geometry tracking at all. (A GeometryReader +
+/// `onChange(of: CGRect)` behind animated views like Flamey's hero fired
+/// several times a frame all the time: "onChange(of: CGRect) action tried
+/// to update multiple times per frame".) `onGeometryChange` reports the
+/// initial frame and coalesces changes.
 private struct TourAnchorReporter: View {
     let id: String
-    @ObservedObject private var anchors = TourAnchors.shared
+    @ObservedObject private var recording = TourRecording.shared
 
     var body: some View {
-        GeometryReader { geo in
-            let frame = geo.frame(in: .global)
-            Color.clear
-                .onAppear { anchors.report(id, frame: frame) }
-                .onChange(of: frame) { _, newFrame in anchors.report(id, frame: newFrame) }
-                .onChange(of: anchors.isRecording) { _, recording in
-                    if recording { anchors.report(id, frame: frame) }
-                }
+        Group {
+            if recording.isOn {
+                Color.clear
+                    .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame in
+                        TourAnchors.shared.report(id, frame: frame)
+                    }
+            } else {
+                Color.clear
+            }
         }
         .allowsHitTesting(false)
         .accessibilityHidden(true)
