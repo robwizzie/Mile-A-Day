@@ -53,6 +53,10 @@ COPY --from=builder /app/src/db/drizzle ./src/db/drizzle
 # The desk box firmware desk owners download from the remote (Admin -> Desks).
 COPY --from=builder /app/desk-firmware ./desk-firmware
 
+# Flamey skin files served by GET /flamey/skins and merged into the closet
+# catalog (services/flameySkins.ts reads /app/flamey-skins at boot).
+COPY --from=builder /app/flamey-skins ./flamey-skins
+
 COPY docker-entrypoint.sh ./docker-entrypoint.sh
 RUN chmod +x docker-entrypoint.sh
 

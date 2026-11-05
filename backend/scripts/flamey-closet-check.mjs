@@ -34,6 +34,7 @@ import { generateAccessToken } from "../dist/services/tokenService.js";
 import { revokeUnearnedBadges, seedExtraBadges } from "../dist/services/badgeService.js";
 import {
   FLAMEY_CATALOG,
+  FLAMEY_ROW_ITEMS,
   FLAMEY_SLOTS,
   flameyBadgeIds,
 } from "../dist/services/flameyCatalog.js";
@@ -140,7 +141,9 @@ try {
     (await db.query(`SELECT badge_id FROM badges WHERE badge_id = ANY($1)`, [needed])).map((r) => r.badge_id),
   );
   check("every unlocking badge id exists", needed.filter((id) => !present.has(id)), []);
-  check("130 items", FLAMEY_CATALOG.size, 130);
+  // 130 built-in (ROWS) items; skin files beyond ROWS (flamey-skins/) add more.
+  check("130 ROWS items", FLAMEY_ROW_ITEMS.size, 130);
+  check("catalog ⊇ ROWS", [...FLAMEY_ROW_ITEMS.keys()].filter((id) => !FLAMEY_CATALOG.has(id)), []);
   check(
     "every slot has items",
     FLAMEY_SLOTS.filter((s) => ![...FLAMEY_CATALOG.values()].some((i) => i.slot === s)),

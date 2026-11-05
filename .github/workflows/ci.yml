@@ -304,6 +304,13 @@ jobs:
       # id exists. A look that silently reverts is reported by nobody.
       - name: Flamey closet check
         run: node scripts/flamey-closet-check.mjs
+      # Flamey skin files (backend/flamey-skins/*.json, docs/flamey-skins.md):
+      # schema, drawing ops (paths, paints, clips, images), unique ids/orders,
+      # seeded badge unlocks, size caps, and parity with flameyCatalog.ts ROWS
+      # (same slot + unlock for every built-in item). Pure file checks, no DB.
+      # A bad skin is skipped at boot and silently vanishes from phones.
+      - name: Flamey skins check
+        run: node scripts/flamey-skins-check.mjs
       # Flamey's name (moderated UGC shown to friends: grapheme length, emoji,
       # control chars, blocklist incl. leetspeak), saved outfits (replace
       # semantics, stable ids, max 5, looks validated at write and re-validated
