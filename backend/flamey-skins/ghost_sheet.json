@@ -10,7 +10,13 @@
   "holidays": [],
   "mood_prop": false,
   "compact": true,
-  "rules": {"hides":["back","chest","eyes","feet","head","held"],"clashes":[],"head_rise":0.14},
+  "rules": {
+    "hides": ["back","chest","eyes","feet","head","held"],
+    "clashes": [],
+    "head_rise": 0.14,
+    "shows_face": false,
+    "shows_arms": false
+  },
   "art": {
     "front": {
       "clips": [

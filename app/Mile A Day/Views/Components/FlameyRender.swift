@@ -452,6 +452,7 @@ struct FlameyOutfitLayer: View {
         case "crown":
             FlameyArt.drawMonthCrown(item, in: &ctx, a: a, u: u)
         case "bopper-band", "bopper-springs":
+            guard item == .heartBopper else { return }
             var c = ctx
             c.translateBy(x: 0, y: a.topY + FlameyArt.bopperSeat * u)
             if part == "bopper-band" { FlameyArt.drawHeartBopperBand(in: &c, u: u) } else { FlameyArt.drawHeartBopper(in: &c, u: u) }

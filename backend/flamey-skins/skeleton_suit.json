@@ -10,7 +10,24 @@
   "holidays": [],
   "mood_prop": false,
   "compact": true,
-  "rules": {"hides":["chest","eyes","feet","head"],"clashes":[]},
+  "rules": {
+    "hides": ["chest","eyes","feet","head"],
+    "clashes": [],
+    "figure_palette": {
+      "angular": false,
+      "bodyOpacity": 1,
+      "core": "#FFF3B0FF",
+      "effects": [],
+      "end": [0.5,1],
+      "eye": "#2B2734FF",
+      "glow": "#BEFFC8FF",
+      "inner": ["#2A2734FF","#1A1822FF"],
+      "innerOpacity": null,
+      "outer": ["#3A3646FF","#2A2734FF","#1A1822FF"],
+      "rim": "#C8BEFF59",
+      "start": [0.5,0]
+    }
+  },
   "art": {
     "front": {
       "clips": [

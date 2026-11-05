@@ -24,6 +24,11 @@
       "tile_framing": [1.1,-0.45,-0.27],
       "up": true,
       "wobble": 7
+    },
+    "arm_hold": {
+      "0.8": {"left":[-0.34583,-0.38356],"left_hand":false,"right":null,"right_hand":true},
+      "0.9": {"left":[-0.34583,-0.38356],"left_hand":false,"right":null,"right_hand":true},
+      "0.62": {"left":[-0.33125,-0.37091],"left_hand":false,"right":null,"right_hand":true}
     }
   },
   "art": {
