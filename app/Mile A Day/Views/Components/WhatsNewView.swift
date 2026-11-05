@@ -64,6 +64,12 @@ enum WhatsNewCatalog {
                     tint: .teal
                 ),
                 WhatsNewFeature(
+                    icon: "sparkles",
+                    title: "A fresh new look",
+                    blurb: "A new launch screen, cleaner Friends, Profile and Settings tabs, and a guided tour that walks you through the app. Find it any time in Settings › Help.",
+                    tint: .orange
+                ),
+                WhatsNewFeature(
                     icon: "face.smiling.inverse",
                     title: "Stickers on your photos",
                     blurb: "Add Flamey, your route, your stats, text or emoji to a post, then pinch, twist and place them anywhere.",
