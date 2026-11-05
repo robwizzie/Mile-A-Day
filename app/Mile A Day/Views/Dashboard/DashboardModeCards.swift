@@ -223,6 +223,7 @@ struct FunDashboardBody: View {
             // The stat frame grows with its text (statFrameHeight), but the
             // column beside Flamey is ~155pt wide, so it caps here.
             .madTypeCap(.madFixedChromeCap)
+            .tourAnchor("home.hero")
 
             // NOT wrapped in a stack: FunStartCard's parts (the share card,
             // the buddy pill) and the Plus card each hide on their own, and an
@@ -2345,6 +2346,7 @@ private struct FunStartCard: View {
                 // on the done line was easy to miss and read oddly.
                 DashboardStartMileButton(hasActiveWorkout: hasActiveWorkout, prominent: true,
                                          goalDone: true, showWorkoutView: $showWorkoutView)
+                    .tourAnchor("home.start")
                 // Then the post-it prompt. See `DoneTodayCard`.
                 DoneTodayCard(
                     healthManager: healthManager,
@@ -2353,6 +2355,7 @@ private struct FunStartCard: View {
             } else {
                 VStack(spacing: 6) {
                     DashboardStartMileButton(hasActiveWorkout: hasActiveWorkout, prominent: true, showWorkoutView: $showWorkoutView)
+                        .tourAnchor("home.start")
                     // Before the mile is where logging one done elsewhere
                     // matters; after it, the done card owns this space.
                     LogPastWorkoutLink(action: onLogPastWorkout)

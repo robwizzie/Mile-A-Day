@@ -75,8 +75,11 @@ struct AppGuidedTourView: View {
     private func spotlight(in size: CGSize, origin: CGPoint) -> CGRect? {
         guard let id = current.anchor, let frame = anchors.frames[id], frame.width > 0 else { return nil }
         let local = frame.offsetBy(dx: -origin.x, dy: -origin.y).insetBy(dx: -8, dy: -8)
-        // Keep it on screen (a tall element is clipped to the visible part).
-        return local.intersection(CGRect(origin: .zero, size: size).insetBy(dx: 4, dy: 4))
+        // Keep it on screen (a tall element is clipped to the visible part);
+        // scrolled off, or only a sliver showing, means no spotlight.
+        let visible = local.intersection(CGRect(origin: .zero, size: size).insetBy(dx: 4, dy: 4))
+        guard !visible.isNull, visible.height >= 32, visible.width >= 32 else { return nil }
+        return visible
     }
 
     // MARK: - Card
@@ -291,15 +294,15 @@ private struct GuidedTourStep {
     let accent: Color
 
     static let all: [GuidedTourStep] = [
-        GuidedTourStep(tabName: "Home", icon: "house.fill", tabIndex: 0, anchor: "home.hero",
+        GuidedTourStep(tabName: "Dashboard", icon: "house.fill", tabIndex: 0, anchor: "home.hero",
                        title: "This is Flamey",
                        body: "He's your streak. Do a mile every day to keep him lit. He shrinks as the day goes if you haven't.",
                        accent: .orange),
-        GuidedTourStep(tabName: "Home", icon: "house.fill", tabIndex: 0, anchor: "home.start",
+        GuidedTourStep(tabName: "Dashboard", icon: "house.fill", tabIndex: 0, anchor: "home.start",
                        title: "Track your mile",
                        body: "Tap Start to track a walk or run. Walks from Apple Health or your Watch count on their own too.",
                        accent: MADTheme.Colors.madRed),
-        GuidedTourStep(tabName: "Home", icon: "house.fill", tabIndex: 0, anchor: "home.header",
+        GuidedTourStep(tabName: "Dashboard", icon: "house.fill", tabIndex: 0, anchor: "home.header",
                        title: "Alerts and settings",
                        body: "The bell has your notifications. The gear opens Settings.",
                        accent: MADTheme.Colors.madRed),

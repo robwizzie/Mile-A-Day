@@ -780,6 +780,8 @@ struct ProfileView: View {
                 }
             }
         }
+        // Own profile only (ProfileHero is also a friend's profile).
+        .tourAnchor("profile.hero")
         .onAppear {
             loadProfileImage()
         }

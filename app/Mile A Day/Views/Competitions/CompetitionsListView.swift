@@ -53,6 +53,7 @@ struct CompetitionsListView: View {
     var body: some View {
         VStack(spacing: 0) {
             MADTabHeader(title: "Compete", actions: headerActions)
+                .tourAnchor("compete.header")
 
             MADPillPicker(
                 selection: $selectedSegment,

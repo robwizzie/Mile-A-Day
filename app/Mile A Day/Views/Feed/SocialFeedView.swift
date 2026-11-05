@@ -457,6 +457,7 @@ struct SocialFeedView: View {
                                                   imageURL: friend.profileImageUrl)
                             }
                         )
+                        .tourAnchor("feed.board")
                     }
                     // Its own node: the feed's other nodes already carry
                     // presentations, and two on one node drop one.
