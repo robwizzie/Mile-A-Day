@@ -215,7 +215,7 @@ struct OnboardingIntroView: View {
 // MARK: - Steps
 
 struct IntroStep {
-    enum Art { case welcome, flamey, feed, friends, rewards }
+    enum Art { case welcome, flamey, tracking, feed, friends, rewards }
 
     let art: Art
     let headline: String
@@ -233,6 +233,10 @@ struct IntroStep {
                   headline: "Meet Flamey",
                   body: "He's your streak. He burns down as the day goes and blazes once your mile is in.",
                   colors: [Color(red: 1.0, green: 0.58, blue: 0.24), Color(red: 0.85, green: 0.25, blue: 0.27)]),
+        IntroStep(art: .tracking,
+                  headline: "Tracking is one tap",
+                  body: "Start a walk on your phone or Apple Watch, or just go: Health walks count on their own. Widgets keep your streak in sight.",
+                  colors: [Color(red: 0.96, green: 0.42, blue: 0.34), Color(red: 0.52, green: 0.14, blue: 0.36)]),
         IntroStep(art: .feed,
                   headline: "Show off your walk",
                   body: "Snap a photo after your mile. Friends see it in their feed and hype you up.",
@@ -319,6 +323,7 @@ private struct IntroStepPage: View {
         switch step.art {
         case .welcome: IntroWelcomeArt(height: artHeight)
         case .flamey: IntroFlameyArt(height: artHeight)
+        case .tracking: IntroTrackingArt(height: artHeight)
         case .feed: IntroFeedArt(height: artHeight, photos: photos)
         case .friends: IntroFriendsArt(height: artHeight)
         case .rewards: IntroRewardsArt(height: artHeight)
@@ -488,7 +493,152 @@ private struct IntroFlameyArt: View {
     }
 }
 
-// MARK: - Step 3: feed photos
+// MARK: - Step 3: tracking, Apple Watch, widgets
+
+/// The three places a mile gets counted, side by side: the Watch app on the
+/// left, the phone tracker in the middle (its ring counting up), a home
+/// screen widget with Flamey on the right.
+private struct IntroTrackingArt: View {
+    let height: CGFloat
+    @Environment(\.introArtWidth) private var artWidth
+
+    var body: some View {
+        // Phone card is the hero; watch and widget tuck in beside it.
+        let phoneH = min(height - 44, 220)
+        let phoneW = phoneH * 0.56
+        let side = min(phoneW * 0.78, (artWidth - phoneW - 40) / 2 + 18)
+        ZStack {
+            IntroPhoneTracker(width: phoneW, height: phoneH)
+                .introPop(0)
+            IntroWatch(size: side)
+                .rotationEffect(.degrees(-8))
+                .offset(x: -(phoneW / 2 + side * 0.32), y: phoneH * 0.18)
+                .introPop(0.15)
+                .introBob(4, period: 3.2)
+            IntroWidget(size: side)
+                .rotationEffect(.degrees(7))
+                .offset(x: phoneW / 2 + side * 0.32, y: -phoneH * 0.16)
+                .introPop(0.25)
+                .introBob(4, period: 3.6, phase: 0.4)
+            IntroChip(text: "❤️ Counts from Apple Health")
+                .introPop(0.4)
+                .offset(y: phoneH / 2 + 14)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+/// Today's mile ring counting up: a pure function of the clock (paused off
+/// page / Reduce Motion via `IntroBob`'s rules), looping every few seconds.
+private struct IntroMileRing: View {
+    let size: CGFloat
+    var lineWidth: CGFloat = 8
+    var showsLabel = true
+    @Environment(\.introActive) private var active
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: reduceMotion || !active)) { context in
+            let cycle = 4.0
+            let t = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: cycle)
+            // Climb to the full mile over 3s, hold, repeat.
+            let p = reduceMotion ? 0.62 : min(1, t / 3.0)
+            ZStack {
+                Circle().stroke(.white.opacity(0.12), lineWidth: lineWidth)
+                Circle()
+                    .trim(from: 0, to: p)
+                    .stroke(p >= 1 ? Color(red: 0.30, green: 0.82, blue: 0.48) : MADTheme.Colors.madRed,
+                            style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+                if showsLabel {
+                    VStack(spacing: 0) {
+                        Text(String(format: "%.2f", p * DistanceUnits.current.perMile))
+                            .font(.system(size: size * 0.26, weight: .heavy, design: .rounded))
+                            .monospacedDigit()
+                        Text(DistanceUnits.current.abbreviation)
+                            .font(.system(size: size * 0.11, weight: .bold, design: .rounded))
+                            .opacity(0.6)
+                    }
+                    .foregroundColor(.white)
+                }
+            }
+            .frame(width: size, height: size)
+        }
+    }
+}
+
+private struct IntroPhoneTracker: View {
+    let width: CGFloat
+    let height: CGFloat
+
+    var body: some View {
+        VStack(spacing: height * 0.05) {
+            Text("Walking")
+                .font(.system(size: 12, weight: .bold, design: .rounded))
+                .foregroundColor(.white.opacity(0.6))
+            IntroMileRing(size: width * 0.72, lineWidth: width * 0.06)
+            Text("End")
+                .font(.system(size: 13, weight: .bold, design: .rounded))
+                .foregroundColor(.white)
+                .frame(width: width * 0.62, height: height * 0.13)
+                .background(Capsule().fill(MADTheme.Colors.madRed))
+        }
+        .frame(width: width, height: height)
+        .background(RoundedRectangle(cornerRadius: width * 0.16, style: .continuous)
+            .fill(Color(red: 0.08, green: 0.05, blue: 0.06)))
+        .overlay(RoundedRectangle(cornerRadius: width * 0.16, style: .continuous)
+            .stroke(.white.opacity(0.18), lineWidth: 3))
+        .shadow(color: .black.opacity(0.35), radius: 16, y: 8)
+        .accessibilityHidden(true)
+    }
+}
+
+/// An Apple Watch drawn in shapes (no Apple artwork): band, case, the ring.
+private struct IntroWatch: View {
+    let size: CGFloat
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: size * 0.12, style: .continuous)
+                .fill(Color(red: 0.16, green: 0.12, blue: 0.14))
+                .frame(width: size * 0.56, height: size * 1.5)
+            RoundedRectangle(cornerRadius: size * 0.24, style: .continuous)
+                .fill(.black)
+                .frame(width: size * 0.84, height: size)
+                .overlay(RoundedRectangle(cornerRadius: size * 0.24, style: .continuous)
+                    .stroke(.white.opacity(0.25), lineWidth: 2))
+            IntroMileRing(size: size * 0.62, lineWidth: size * 0.07)
+        }
+        .shadow(color: .black.opacity(0.3), radius: 10, y: 6)
+        .accessibilityHidden(true)
+    }
+}
+
+/// A small home screen widget: Flamey and the streak.
+private struct IntroWidget: View {
+    let size: CGFloat
+
+    var body: some View {
+        VStack(spacing: 2) {
+            FlameBuddyView(health: .blazing, size: size * 0.52, still: true, showsMoodBubble: false)
+                .frame(width: size * 0.52, height: size * 0.52)
+            Text("🔥 535")
+                .font(.system(size: size * 0.15, weight: .heavy, design: .rounded))
+                .foregroundColor(.white)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+        }
+        .frame(width: size, height: size)
+        .background(RoundedRectangle(cornerRadius: size * 0.22, style: .continuous)
+            .fill(LinearGradient(colors: [Color(red: 0.24, green: 0.12, blue: 0.15),
+                                          Color(red: 0.10, green: 0.05, blue: 0.07)],
+                                 startPoint: .top, endPoint: .bottom)))
+        .shadow(color: .black.opacity(0.3), radius: 10, y: 6)
+        .accessibilityHidden(true)
+    }
+}
+
+// MARK: - Step 4: feed photos
 
 private struct IntroFeedArt: View {
     let height: CGFloat
@@ -535,9 +685,9 @@ private struct IntroPhotoCard: View {
     let width: CGFloat
 
     private static let samples: [(name: String, miles: Double, colors: [Color])] = [
-        ("maya", 1.04, [Color(red: 0.98, green: 0.62, blue: 0.35), Color(red: 0.85, green: 0.28, blue: 0.36)]),
-        ("jay", 1.21, [Color(red: 0.36, green: 0.62, blue: 0.95), Color(red: 0.25, green: 0.30, blue: 0.62)]),
-        ("sam", 2.03, [Color(red: 0.40, green: 0.78, blue: 0.52), Color(red: 0.16, green: 0.45, blue: 0.40)])
+        ("rob", 1.02, [Color(red: 0.98, green: 0.62, blue: 0.35), Color(red: 0.85, green: 0.28, blue: 0.36)]),
+        ("dave", 1.21, [Color(red: 0.36, green: 0.62, blue: 0.95), Color(red: 0.25, green: 0.30, blue: 0.62)]),
+        ("mad", 2.03, [Color(red: 0.40, green: 0.78, blue: 0.52), Color(red: 0.16, green: 0.45, blue: 0.40)])
     ]
 
     private var sample: (name: String, miles: Double, colors: [Color]) {
@@ -616,7 +766,7 @@ private struct IntroFeedPost: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 7) {
                 avatar
-                Text(photo?.username ?? "maya")
+                Text(photo?.username ?? "rob")
                     .madFont(size: 13, weight: .bold, design: .rounded, maxScale: 1.1)
                     .lineLimit(1)
                 Spacer(minLength: 4)
@@ -639,7 +789,7 @@ private struct IntroFeedPost: View {
                     .padding(.horizontal, 9)
                     .padding(.vertical, 4)
                     .background(Capsule().fill(MADTheme.Colors.madRed))
-                Text(photo?.caption ?? "Sunset mile 🌅")
+                Text(photo?.caption ?? "Fastest mile since the injury 😮‍💨")
                     .madFont(size: 12, weight: .medium, design: .rounded, maxScale: 1.1)
                     .opacity(0.8)
                     .lineLimit(1)
@@ -655,17 +805,17 @@ private struct IntroFeedPost: View {
         .accessibilityHidden(true)
     }
 
-    /// The real post's streak; the sample's when nothing loaded.
+    /// The real post's streak; rob's when nothing loaded.
     private var streakShown: Int? {
-        guard let photo else { return 128 }
+        guard let photo else { return 535 }
         return photo.streak
     }
 
     @ViewBuilder
     private var avatar: some View {
-        let fallback = Circle().fill(MADTheme.Colors.madRed)
-            .overlay(Text(String((photo?.username ?? "m").prefix(1)).uppercased())
-                .madFont(size: 12, weight: .heavy, design: .rounded, maxScale: 1))
+        // rob's real (kid) photo, bundled: right even offline or before the
+        // showcase loads.
+        let fallback = Image("onboarding-friend-rob").resizable().scaledToFill()
         Group {
             if let url = photo?.avatarURL {
                 AsyncImage(url: url) { phase in
@@ -684,36 +834,72 @@ private struct IntroFeedPost: View {
     }
 }
 
-// MARK: - Step 4: friends (a Today board in miniature)
+// MARK: - Step 5: friends (a Today board in miniature)
 
 private struct IntroFriendsArt: View {
     let height: CGFloat
     @Environment(\.introArtWidth) private var artWidth
 
     var body: some View {
-        // Three tiles + two 12pt gaps inside a 20pt gutter each side.
-        let tile = min((height - 60) * 0.62, 112, (artWidth - 40 - 24) / 3)
-        VStack(spacing: 16) {
+        // A short hero (SE) keeps the note to one line so the tiles stay big
+        // enough to show the faces.
+        let roomy = height >= 210
+        let noteHeight: CGFloat = roomy ? 64 : 40
+        // Three tiles + two 12pt gaps inside a 20pt gutter each side; a tile
+        // is 1.25× as tall as it is wide.
+        let tile = min((height - 14 - noteHeight) / 1.25, 112, (artWidth - 40 - 24) / 3)
+        VStack(spacing: 14) {
             HStack(spacing: 12) {
-                IntroFriendTile(initial: "M", name: "Maya", kind: .done, size: tile)
+                IntroFriendTile(photo: "onboarding-friend-rob", name: "rob", kind: .done, size: tile)
                     .introPop(0)
-                IntroFriendTile(initial: "J", name: "Jay", kind: .nudge, size: tile)
+                IntroFriendTile(photo: "onboarding-friend-dave", name: "dave", kind: .nudged, size: tile)
                     .introPop(0.1)
                     .introBob(4, period: 2.8)
-                IntroFriendTile(initial: "S", name: "Sam", kind: .walking, size: tile)
+                IntroFriendTile(photo: "onboarding-friend-mad", name: "mad", kind: .walking, size: tile)
                     .introPop(0.2)
             }
-            IntroChip(text: "👋 You nudged Jay · 1h 40m left")
-                .introPop(0.35)
-                .introBob(4, period: 3.4, phase: 0.5)
+            IntroKidPhotoNote(roomy: roomy)
+                .introPop(0.4)
+                .introBob(3, period: 3.6, phase: 0.5)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
+/// The team's profile pictures are their kid photos; say so, playfully, and
+/// that a new user's can be anything.
+private struct IntroKidPhotoNote: View {
+    let roomy: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("👶 Yep, those are us as kids.")
+                .madFont(size: 14, weight: .heavy, design: .rounded, maxScale: 1.15)
+            if roomy {
+                Text("You'll spot them all over the app. Your pic can be anything.")
+                    .madFont(size: 12, weight: .medium, design: .rounded, maxScale: 1.15)
+                    .opacity(0.7)
+            }
+        }
+        .foregroundColor(Color(red: 0.12, green: 0.08, blue: 0.09))
+        .lineLimit(2)
+        .minimumScaleFactor(0.85)
+        .multilineTextAlignment(.leading)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .frame(maxWidth: 300, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(.white))
+        .shadow(color: .black.opacity(0.18), radius: 10, y: 5)
+        .rotationEffect(.degrees(-2))
+        .padding(.horizontal, 24)
+        .accessibilityElement(children: .combine)
+    }
+}
+
 private struct IntroFriendTile: View {
-    enum Kind { case done, nudge, walking }
-    let initial: String
+    enum Kind { case done, nudged, walking }
+    /// Asset name of the friend's profile picture (bundled, so it shows offline).
+    let photo: String
     let name: String
     let kind: Kind
     let size: CGFloat
@@ -721,7 +907,7 @@ private struct IntroFriendTile: View {
     private var ring: Color {
         switch kind {
         case .done: return Color(red: 0.30, green: 0.82, blue: 0.48)
-        case .nudge: return MADTheme.Colors.madRed
+        case .nudged: return MADTheme.Colors.madRed
         case .walking: return MADTheme.Colors.walkBlue
         }
     }
@@ -729,7 +915,7 @@ private struct IntroFriendTile: View {
     private var label: String {
         switch kind {
         case .done: return "Done ✓"
-        case .nudge: return "Nudge"
+        case .nudged: return "✓ Nudged"
         case .walking: return "Walking"
         }
     }
@@ -743,20 +929,22 @@ private struct IntroFriendTile: View {
                     .trim(from: 0, to: kind == .done ? 1 : (kind == .walking ? 0.6 : 0.25))
                     .stroke(ring, style: StrokeStyle(lineWidth: 4, lineCap: .round))
                     .rotationEffect(.degrees(-90))
-                Text(initial)
-                    .madFont(size: size * 0.24, weight: .heavy, design: .rounded, maxScale: 1)
-                    .foregroundColor(.white)
+                Image(photo)
+                    .resizable()
+                    .scaledToFill()
+                    .clipShape(Circle())
+                    .padding(6)
             }
-            .frame(width: size * 0.52, height: size * 0.52)
-            .padding(.top, size * 0.14)
+            .frame(width: size * 0.56, height: size * 0.56)
+            .padding(.top, size * 0.12)
 
-            // A small tile (short hero on an SE) keeps ring + label only.
+            // A small tile (short hero on an SE) keeps face + label only.
             if size >= 80 {
                 Text(name)
                     .madFont(size: 13, weight: .semibold, design: .rounded, maxScale: 1.1)
                     .foregroundColor(.white.opacity(0.9))
                     .lineLimit(1)
-                    .padding(.top, 6)
+                    .padding(.top, 5)
             }
 
             Spacer(minLength: 4)
@@ -777,7 +965,7 @@ private struct IntroFriendTile: View {
     }
 }
 
-// MARK: - Step 5: competitions, medals, Flamey's closet
+// MARK: - Step 6: competitions, medals, Flamey's closet
 
 private struct IntroRewardsArt: View {
     let height: CGFloat
