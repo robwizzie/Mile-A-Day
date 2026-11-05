@@ -41,6 +41,11 @@ struct PostStats: Codable, Equatable {
     /// unaffected, and optional so older posts decode fine.
     var ghost_margin_seconds: Double? = nil
     var ghost_target_seconds: Double? = nil
+    /// A finish frame's look (`FinishFrameStyle`), chosen when it was added
+    /// to the story. Same jsonb ride as the ghost fields; absent = defaults.
+    var frame_theme: String? = nil
+    var frame_route: String? = nil
+    var frame_flamey: Bool? = nil
 
     /// The win, when this post carries one.
     var ghostWin: (margin: Double, ghostSeconds: Double)? {
@@ -82,6 +87,9 @@ extension PostStats {
         self.steps = try c.decodeIfPresent(Int.self, forKey: .steps)
         self.ghost_margin_seconds = try c.decodeIfPresent(Double.self, forKey: .ghost_margin_seconds)
         self.ghost_target_seconds = try c.decodeIfPresent(Double.self, forKey: .ghost_target_seconds)
+        self.frame_theme = try? c.decodeIfPresent(String.self, forKey: .frame_theme)
+        self.frame_route = try? c.decodeIfPresent(String.self, forKey: .frame_route)
+        self.frame_flamey = try? c.decodeIfPresent(Bool.self, forKey: .frame_flamey)
     }
 }
 

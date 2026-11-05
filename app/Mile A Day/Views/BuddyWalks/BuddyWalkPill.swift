@@ -142,7 +142,6 @@ struct BuddyWalkPill: View {
                         }
                     }
                 )
-                .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
             }
         }

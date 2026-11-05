@@ -529,14 +529,14 @@ enum RunPostService {
     /// auto card it is drawn live from the walk (`StoryFinishFrame`), and a
     /// later photo story for the same walk replaces it in place.
     @MainActor
-    static func addFinishCardToStory(stats: RunStatsInput) async throws {
+    static func addFinishCardToStory(stats: RunStatsInput, style: FinishFrameStyle = .init()) async throws {
         _ = try await PostService.createPost(
             mediaUrl: nil,
             caption: nil,
             workoutId: stats.workoutId,
             shareToFeed: false,
             shareToStory: true,
-            stats: stats.snapshot,
+            stats: style.apply(to: stats.snapshot),
             isAuto: true
         )
     }
