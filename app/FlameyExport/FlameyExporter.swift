@@ -1,27 +1,23 @@
 import AppKit
 import SwiftUI
 
-// FLAMEY EXPORTER — draws every wardrobe item with TODAY's Swift code and
-// saves what it drew, so the skin files are generated from the real art
-// rather than redrawn by hand. Run by `run.sh` (macOS, no Xcode project):
-// it compiles this file together with the widget extension's Flamey files
-// (SwiftUI + Foundation only, by design) into a command-line tool.
-//
-// Every drawing lands in the same 3S × 3S stage with Flamey's S × S square in
-// the middle, exactly where `FlameyOutfitLayer` puts it, so one transform maps
-// any file back to body units: x_u = (x - 1.5S) / u, y_u = (y - 1.5S) / u
-// (y down), u = S × scale. Both numbers are in meta.json.
+// FLAMEY EXPORTER — runs TODAY's Flamey art code and saves what it draws, so
+// the skin files come from the real art instead of being redrawn by hand.
+// `run.sh` compiles the widget extension's Flamey files, a renamed copy of
+// FlameyArt.swift drawing into `RecContext` (RecContext.swift), and this file
+// into a command-line tool. macOS + Xcode only; no project, no simulator.
 //
 // out/
-//   meta.json                         every item's rules + every variant's anchors
-//   ref/<variant>/<id>.png            the dressed figure, still — the match-check baseline
-//   pdf/<variant>/<id>.dressed.pdf    the same, as vectors
-//   pdf/<variant>/<id>.behind.pdf     FlameyOutfitLayer(side: .behind) alone
-//   pdf/<variant>/<id>.front.pdf      FlameyOutfitLayer(side: .front) alone
-//   pdf/<variant>/<id>.<part>.pdf     the parts that move on their own:
-//                                     held body/accent, companion body/shadow,
-//                                     heart-bopper band/springs
-//   log.txt                           what was written, what failed
+//   meta.json                     catalog-wide numbers (stage, constants, plain anchors)
+//   skins-raw/<id>.json           one item: its rules + every recorded layer
+//   ref/<surface>/<id>.png        the dressed figure as the app draws it today —
+//                                 the match-check baseline
+//   log.txt                       what was written, what needs attention
+//
+// A recorded layer is in BODY UNITS (origin at the centre of Flamey's square,
+// y down, 1 = u) — the op format is documented at the top of RecContext.swift.
+// Layer keys name the part and the conditions it was drawn under, e.g.
+// "behind@reach=0.62,low=1" or "companion-body@pose=cheer".
 
 @main
 struct FlameyExportMain {
@@ -34,30 +30,36 @@ struct FlameyExportMain {
 
 @MainActor
 final class FlameyExporter {
-    /// Flamey's square, in points. Vectors don't care; it sets PNG detail.
+    /// Flamey's square for the reference PNGs, in points.
     let S: CGFloat = 128
     let pngScale: CGFloat = 2
     let out: URL
     var log: [String] = []
     var written = 0
     var failures: [String] = []
+    var attention: [String] = []
 
-    struct Variant {
+    /// The reaches surfaces actually pass (`wardrobeReach` / `reach:`):
+    /// cards and shares 0.9, Closet tiles 0.8, the dashboard hero 0.62.
+    let reaches: [CGFloat] = [0.9, 0.8, 0.62]
+
+    struct Surface {
         let name: String
         let reach: CGFloat
         let detail: FlameyRenderDetail
     }
 
-    /// The three surfaces the art changes between: a wide card, the hero's
-    /// narrow column (`FlameyArt.isTight`), and a widget (`.compact`).
-    let variants = [
-        Variant(name: "wide", reach: 0.9, detail: .full),
-        Variant(name: "tight", reach: 0.6, detail: .full),
-        Variant(name: "compact", reach: 0.9, detail: .compact),
+    let surfaces = [
+        Surface(name: "card", reach: 0.9, detail: .full),
+        Surface(name: "tile", reach: 0.8, detail: .full),
+        Surface(name: "hero", reach: 0.62, detail: .full),
+        Surface(name: "widget", reach: 0.9, detail: .compact),
     ]
 
-    /// A day that is no holiday anywhere (Mar 4), at noon UTC, so `resolve`
-    /// puts on exactly the one item chosen.
+    let poses: [FlameArmPose] = [.rest, .cheer, .highFive, .cheeks, .tucked, .feedOut, .feed, .flail]
+
+    /// A day that is no holiday anywhere (Mar 4), noon UTC: `resolve` puts on
+    /// exactly the one item chosen.
     let date: Date = {
         var c = DateComponents()
         c.year = 2026; c.month = 3; c.day = 4; c.hour = 12
@@ -66,45 +68,210 @@ final class FlameyExporter {
     }()
     let utc = TimeZone(identifier: "UTC")!
 
+    /// A palette of marker colours: art drawn with it shows which of its
+    /// colours come from his palette (→ `{"tok": "outer.1"}` in the skin).
+    static let markerHex: [(String, UInt32)] = [
+        ("outer.0", 0xF10001), ("outer.1", 0xF10002), ("outer.2", 0xF10003), ("outer.3", 0xF10004),
+        ("inner.0", 0xF10011), ("inner.1", 0xF10012), ("inner.2", 0xF10013),
+        ("glow", 0xF10021), ("core", 0xF10022), ("eye", 0xF10023), ("rim", 0xF10024),
+    ]
+    let markerPalette: FlameyPalette = {
+        func m(_ v: UInt32) -> Color { FlameyPalette.hex(v) }
+        return FlameyPalette(outer: [m(0xF10001), m(0xF10002), m(0xF10003), m(0xF10004)],
+                             inner: [m(0xF10011), m(0xF10012), m(0xF10013)],
+                             glow: m(0xF10021), core: m(0xF10022), eye: m(0xF10023), rim: m(0xF10024))
+    }()
+    lazy var markerNames: [String: String] = {
+        var d: [String: String] = [:]
+        for (name, v) in Self.markerHex { d[String(format: "#%06X", v)] = name }
+        return d
+    }()
+
     init(out: URL) { self.out = out }
 
     // MARK: - Run
 
     func run() {
         try? FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
-        var items: [[String: Any]] = []
-        let all = FlameyItem.allCases
-
-        for v in variants {
-            exportOne(nil, id: "_plain", v)
+        for s in surfaces { reference(nil, id: "_plain", s) }
+        for item in FlameyItem.allCases {
+            var skin = itemMeta(item)
+            let (art, pivots) = record(item)
+            skin["art"] = art
+            if !pivots.isEmpty { skin["pivots"] = pivots }
+            write(json: skin, to: "skins-raw/\(item.rawValue).json")
+            for s in surfaces { reference(item, id: item.rawValue, s) }
         }
-        for item in all {
-            var entry = itemMeta(item)
-            var perVariant: [String: Any] = [:]
-            for v in variants {
-                if let m = exportOne(item, id: item.rawValue, v) { perVariant[v.name] = m }
-            }
-            entry["variants"] = perVariant
-            items.append(entry)
-        }
+        write(json: catalogMeta(), to: "meta.json")
 
-        let meta: [String: Any] = [
-            "format": 1,
-            "stage": ["S": S, "size": 3 * S, "png_scale": pngScale,
-                      "note": "x_u = (x - 1.5S)/u, y_u = (y - 1.5S)/u, y down; PDF y is up, flip first"] as [String: Any],
-            "date": ISO8601DateFormatter().string(from: date),
-            "plain": plainMeta(),
-            "items": items,
-            "constants": constants(),
-        ]
-        write(json: meta, to: out.appendingPathComponent("meta.json"))
-        log.append("items: \(all.count)  files: \(written)  failures: \(failures.count)")
+        log.append("items: \(FlameyItem.allCases.count)  files: \(written)  failures: \(failures.count)  attention: \(attention.count)")
         for f in failures { log.append("FAILED \(f)") }
+        for a in attention { log.append("CHECK \(a)") }
         try? log.joined(separator: "\n").write(to: out.appendingPathComponent("log.txt"), atomically: true, encoding: .utf8)
         print(log.suffix(1 + failures.count).joined(separator: "\n"))
     }
 
-    // MARK: - Looks
+    // MARK: - Recording one item's art
+
+    var u: CGFloat { S }
+
+    func anchors(lift: CGFloat = 0) -> FlameyArtRec.Anchors {
+        FlameyArtRec.anchors(size: S, scale: 1, lift: lift, stand: FlameyArtRec.legLength)
+    }
+
+    func rec(_ draw: (inout RecContext) -> Void) -> [String: Any] {
+        let sink = RecSink(u: u)
+        var ctx = RecContext(sink: sink)
+        draw(&ctx)
+        return sink.recording
+    }
+
+    func key(_ v: CGFloat) -> String { String(format: "%g", Double(v)) }
+
+    /// Every layer the item draws, under every condition that changes it.
+    func record(_ item: FlameyItem) -> ([String: Any], [String: Any]) {
+        var art: [String: Any] = [:]
+        var pivots: [String: Any] = [:]
+        let a = anchors()
+        let u = self.u
+
+        switch item.slot {
+        case .color:
+            if item == .jackOLantern || item == .twinkleLights {
+                art["crown"] = rec { FlameyArtRec.drawMonthCrown(item, in: &$0, a: a, u: u) }
+            }
+
+        case .head, .eyes, .chest, .costume:
+            art["front"] = paletteAware(item) { ctx, palette in
+                FlameyArtRec.drawFront(item, in: &ctx, a: a, u: u, palette: palette, jets: true)
+            }
+            if item == .heartBopper {
+                let seat = a.topY + FlameyArtRec.bopperSeat * u
+                art["bopper-band"] = rec { c in
+                    c.translateBy(x: 0, y: seat)
+                    FlameyArtRec.drawHeartBopperBand(in: &c, u: u)
+                }
+                // The springs' canvas (0.7u square, offset up 0.30u) puts its
+                // drawing origin at (0, seat) and sways about its bottom edge.
+                art["bopper-springs"] = rec { c in
+                    c.translateBy(x: 0, y: seat)
+                    FlameyArtRec.drawHeartBopper(in: &c, u: u)
+                }
+                pivots["bopper-springs"] = [0, num((seat + 0.05 * u) / u)]
+            }
+
+        case .feet:
+            for jets in [true, false] {
+                let lift = jets ? item.hoverLift : 0
+                let fa = anchors(lift: lift)
+                art["front@jets=\(jets ? 1 : 0)"] = rec { FlameyArtRec.drawFront(item, in: &$0, a: fa, u: u, palette: nil, jets: jets) }
+            }
+
+        case .back:
+            for r in reaches {
+                for glow in (item == .goldenWings ? [true, false] : [false]) {
+                    let k = "behind@reach=\(key(r))" + (item == .goldenWings ? ",glow=\(glow ? 1 : 0)" : "")
+                    art[k] = rec { FlameyArtRec.drawBack(item, in: &$0, a: a, u: u, reach: r, glow: glow) }
+                }
+            }
+
+        case .trail:
+            for r in reaches {
+                for low in [false, true] {
+                    art["behind@reach=\(key(r)),low=\(low ? 1 : 0)"] = rec {
+                        FlameyArtRec.drawTrail(item, in: &$0, a: a, u: u, reach: r, low: low)
+                    }
+                }
+            }
+
+        case .held:
+            for r in reaches {
+                art["held-body@reach=\(key(r))"] = rec { c in
+                    FlameyArtRec.applyHeldTight(item, &c, a: a, u: u, reach: r)
+                    FlameyArtRec.held(item, &c, a, u, layer: .body)
+                }
+                let grip = FlameyArtRec.heldPoint(item, FlameyArtRec.heldGrip(item), a: a, u: u, reach: r)
+                pivots["held-body@reach=\(key(r))"] = [num(grip.x / u), num(grip.y / u)]
+                if let p = FlameyArtRec.heldAccentPivot(item) {
+                    art["held-accent@reach=\(key(r))"] = rec { c in
+                        FlameyArtRec.applyHeldTight(item, &c, a: a, u: u, reach: r)
+                        FlameyArtRec.held(item, &c, a, u, layer: .accent)
+                    }
+                    let q = FlameyArtRec.heldPoint(item, p, a: a, u: u, reach: r)
+                    pivots["held-accent@reach=\(key(r))"] = [num(q.x / u), num(q.y / u)]
+                }
+            }
+
+        case .companion:
+            let floats = FlameyOutfitLayer.floats(item)
+            art["companion-shadow"] = rec { FlameyArtRec.drawCompanionShadow(item, in: &$0, a: a, u: u, floats: floats) }
+            for pose in poses {
+                art["companion-body@pose=\(String(describing: pose))"] = paletteAware(item) { ctx, palette in
+                    FlameyArtRec.drawCompanion(item, in: &ctx, a: a, u: u, palette: palette, pose: pose)
+                }
+            }
+
+        case .aura, .bubble:
+            break // built-in effect pieces: no geometry of their own (see docs)
+        }
+        return (art, pivots)
+    }
+
+    /// Records the art twice — with no palette (his own lifecycle colours)
+    /// and with the marker palette — and turns every colour that came from
+    /// the palette into a token whose fallback is the no-palette colour.
+    func paletteAware(_ item: FlameyItem, _ draw: (inout RecContext, FlameyPalette?) -> Void) -> [String: Any] {
+        var plain = rec { draw(&$0, nil) }
+        let marked = rec { draw(&$0, markerPalette) }
+        guard var ops = plain["ops"] as? [[String: Any]], let mops = marked["ops"] as? [[String: Any]] else { return plain }
+        if ops.count != mops.count {
+            attention.append("\(item.rawValue): draws a different number of shapes with a palette (\(ops.count) vs \(mops.count)) — palette tokens skipped")
+            return plain
+        }
+        var mapped = 0, derived = 0
+        for i in ops.indices {
+            if let p = ops[i]["paint"], let mp = mops[i]["paint"] {
+                let (np, m, d) = tokenize(p, mp)
+                ops[i]["paint"] = np
+                mapped += m; derived += d
+            }
+        }
+        plain["ops"] = ops
+        if derived > 0 { attention.append("\(item.rawValue): \(derived) colour(s) derived from the palette but not equal to one of its colours") }
+        if mapped > 0 { plain["palette_tokens"] = mapped }
+        return plain
+    }
+
+    /// (paint, mapped, derived)
+    func tokenize(_ p: Any, _ mp: Any) -> (Any, Int, Int) {
+        if let s = p as? String, let ms = mp as? String {
+            if s == ms { return (s, 0, 0) }
+            let rgb = String(ms.prefix(7))
+            if let name = markerNames[rgb] {
+                return (["tok": name, "a": alpha(ms), "fb": s] as [String: Any], 1, 0)
+            }
+            return (s, 0, 1)
+        }
+        if var d = p as? [String: Any], let md = mp as? [String: Any],
+           let stops = d["stops"] as? [[Any]], let mstops = md["stops"] as? [[Any]], stops.count == mstops.count {
+            var mapped = 0, derived = 0
+            var out: [[Any]] = []
+            for (s, ms) in zip(stops, mstops) {
+                let (c, m, dv) = tokenize(s[1], ms[1])
+                out.append([s[0], c]); mapped += m; derived += dv
+            }
+            d["stops"] = out
+            return (d, mapped, derived)
+        }
+        return (p, 0, 0)
+    }
+
+    func alpha(_ hex8: String) -> Double {
+        guard hex8.count == 9, let v = UInt8(hex8.suffix(2), radix: 16) else { return 1 }
+        return num(Double(v) / 255)
+    }
+
+    // MARK: - Reference PNGs (today's app, the match-check baseline)
 
     func makeLook(_ item: FlameyItem?, _ detail: FlameyRenderDetail) -> FlameyLook {
         guard let item else {
@@ -113,7 +280,6 @@ final class FlameyExporter {
             return l
         }
         if item.isMoodProp {
-            // Mood dressing can't be chosen; it goes on by mood. Wear it bare.
             var l = FlameyLook()
             l.detail = detail
             l.wear(item)
@@ -130,172 +296,28 @@ final class FlameyExporter {
                                                               scale: probe.effectiveBodyScale)
     }
 
-    // MARK: - One item on one surface
-
-    @discardableResult
-    func exportOne(_ item: FlameyItem?, id: String, _ v: Variant) -> [String: Any]? {
-        let look = makeLook(item, v.detail)
-        if let item, look.items.isEmpty, item.slot != .color {
-            return nil // this surface drops the slot (compact) — nothing to draw
-        }
+    func reference(_ item: FlameyItem?, id: String, _ s: Surface) {
+        let look = makeLook(item, s.detail)
+        if let item, look.items.isEmpty, item.slot != .color { return }
         let fig = figure(look)
-        let scale = fig.effectiveBodyScale
-        let u = S * scale
-        let a = FlameyArt.anchors(size: S, scale: scale, lift: look.hoverLift, stand: look.standLift)
-        let dir = "\(v.name)"
-
-        // The dressed figure, as a user sees it on that surface.
-        let dressed = stage(dressedView(look, fig: fig, reach: v.reach))
-        png(dressed, "ref/\(dir)/\(id).png")
-        pdf(dressed, "pdf/\(dir)/\(id).dressed.pdf")
-
-        if item != nil {
-            pdf(stage(FlameyOutfitLayer(look: look, size: S, scale: scale, side: .behind, still: true, reach: v.reach)),
-                "pdf/\(dir)/\(id).behind.pdf")
-            pdf(stage(FlameyOutfitLayer(look: look, size: S, scale: scale, side: .front, still: true, reach: v.reach)),
-                "pdf/\(dir)/\(id).front.pdf")
-        }
-
-        var parts: [String: Any] = [:]
-        if let item, look.wears(item) {
-            switch item.slot {
-            case .held: parts = heldParts(item, look: look, a: a, u: u, reach: v.reach, dir: dir)
-            case .companion: parts = companionParts(item, look: look, a: a, u: u, reach: v.reach, dir: dir)
-            default: break
-            }
-            if item == .heartBopper { parts = bopperParts(a: a, u: u, dir: dir) }
-        }
-
-        return [
-            "worn": look.items.map(\.rawValue),
-            "glow": String(describing: look.glow),
-            "scale": scale,
-            "u": u,
-            "hover_lift": look.hoverLift,
-            "stand_lift": look.standLift,
-            "body_lift": look.bodyLift,
-            "shows_arms": look.showsArms,
-            "anchors": anchorsMeta(a),
-            "parts": parts,
-        ]
-    }
-
-    @ViewBuilder
-    func dressedView(_ look: FlameyLook, fig: FlameBuddyFigure, reach: CGFloat) -> some View {
-        if look.detail == .compact {
-            FlameyDressedFigure(look: look, health: .healthy, size: S, scale: fig.effectiveBodyScale)
-        } else {
-            FlameyDressedBody<EmptyView, EmptyView>(look: look, arms: .rest, reach: reach, still: true, figure: fig)
-        }
-    }
-
-    /// Flamey's S × S square, centred in the 3S × 3S stage.
-    func stage<V: View>(_ v: V) -> some View {
-        ZStack { v.frame(width: S, height: S) }
-            .frame(width: 3 * S, height: 3 * S)
-    }
-
-    // MARK: - Parts that move on their own (mirrors FlameyOutfitLayer)
-
-    func heldParts(_ item: FlameyItem, look: FlameyLook, a: FlameyArt.Anchors, u: CGFloat, reach: CGFloat,
-                   dir: String) -> [String: Any] {
-        let S = self.S
-        func layer(_ l: FlameyArt.HeldLayer) -> AnyView {
-            AnyView(
-                Canvas { ctx, canvas in
-                    ctx.translateBy(x: canvas.width / 2, y: canvas.height / 2)
-                    FlameyArt.applyHeldTight(item, &ctx, a: a, u: u, reach: reach)
-                    FlameyArt.held(item, &ctx, a, u, layer: l)
+        let view = ZStack {
+            Group {
+                if look.detail == .compact {
+                    FlameyDressedFigure(look: look, health: .healthy, size: S, scale: fig.effectiveBodyScale)
+                } else {
+                    FlameyDressedBody<EmptyView, EmptyView>(look: look, arms: .rest, reach: s.reach, still: true, figure: fig)
                 }
-                .frame(width: 3 * S, height: 3 * S)
-            )
-        }
-        pdf(layer(.body), "pdf/\(dir)/\(item.rawValue).held-body.pdf")
-        let accentPivot = FlameyArt.heldAccentPivot(item)
-        if accentPivot != nil {
-            pdf(layer(.accent), "pdf/\(dir)/\(item.rawValue).held-accent.pdf")
-        }
-        let m = FlameyArt.heldMotion(item)
-        let grip = FlameyArt.heldPoint(item, FlameyArt.heldGrip(item), a: a, u: u, reach: reach)
-        var out: [String: Any] = [
-            "held-body": ["pivot_stage": point(grip), "motion": "wobble", "degrees": m.wobble,
-                          "period": m.period] as [String: Any],
-        ]
-        if let p = accentPivot {
-            let q = FlameyArt.heldPoint(item, p, a: a, u: u, reach: reach)
-            out["held-accent"] = ["pivot_stage": point(q), "motion": String(describing: m.accent),
-                                  "period": m.period] as [String: Any]
-        }
-        return out
-    }
-
-    func companionParts(_ item: FlameyItem, look: FlameyLook, a: FlameyArt.Anchors, u: CGFloat, reach: CGFloat,
-                        dir: String) -> [String: Any] {
-        let tight = FlameyArt.isTight(reach)
-        let floats = FlameyOutfitLayer.floats(item)
-        let k: CGFloat = tight ? 0.60 : FlameyArt.companionScale(for: look)
-        let x = tight ? (floats ? 0.30 : 0.26) * u : FlameyArt.companionX(u, reach: reach, look: look)
-        let lift = tight && floats ? -0.42 * u : 0
-        let palette = FlameyPalette.palette(for: look.color)
-        let shadow = ZStack {
-            if !(tight && floats) {
-                Canvas { ctx, canvas in
-                    ctx.translateBy(x: canvas.width / 2, y: canvas.height / 2)
-                    ctx.translateBy(x: 0, y: a.ground); ctx.scaleBy(x: k, y: k); ctx.translateBy(x: 0, y: -a.ground)
-                    FlameyArt.drawCompanionShadow(item, in: &ctx, a: a, u: u, floats: floats)
-                }
-                .frame(width: S * 1.6, height: S * 3)
-                .offset(x: x)
             }
+            .frame(width: S, height: S)
         }
         .frame(width: 3 * S, height: 3 * S)
-        let body = ZStack {
-            Canvas { ctx, canvas in
-                ctx.translateBy(x: canvas.width / 2, y: canvas.height / 2)
-                ctx.translateBy(x: 0, y: a.ground); ctx.scaleBy(x: k, y: k); ctx.translateBy(x: 0, y: -a.ground)
-                FlameyArt.drawCompanion(item, in: &ctx, a: a, u: u, palette: palette, pose: .rest)
-            }
-            .frame(width: S * 1.6, height: S * 3)
-            .offset(x: x, y: lift)
+        let r = ImageRenderer(content: view)
+        r.scale = pngScale
+        var ok = false
+        if let cg = r.cgImage, let data = NSBitmapImageRep(cgImage: cg).representation(using: .png, properties: [:]) {
+            ok = (try? data.write(to: url("ref/\(s.name)/\(id).png"))) != nil
         }
-        .frame(width: 3 * S, height: 3 * S)
-        pdf(shadow, "pdf/\(dir)/\(item.rawValue).companion-shadow.pdf")
-        pdf(body, "pdf/\(dir)/\(item.rawValue).companion-body.pdf")
-        return [
-            "companion-body": ["motion": "bob", "amount_u": floats ? 0.05 : 0.02, "period": 1.6, "floats": floats,
-                               "scale": k, "x_stage": x, "lift_stage": lift] as [String: Any],
-            "companion-shadow": ["motion": "none"] as [String: Any],
-        ]
-    }
-
-    func bopperParts(a: FlameyArt.Anchors, u: CGFloat, dir: String) -> [String: Any] {
-        let seat = a.topY + FlameyArt.bopperSeat * u
-        let band = ZStack {
-            Canvas { ctx, canvas in
-                ctx.translateBy(x: canvas.width / 2, y: canvas.height / 2)
-                FlameyArt.drawHeartBopperBand(in: &ctx, u: u)
-            }
-            .frame(width: u * 0.6, height: u * 0.6)
-            .offset(y: seat)
-        }
-        .frame(width: 3 * S, height: 3 * S)
-        let springs = ZStack {
-            Canvas { ctx, canvas in
-                ctx.translateBy(x: canvas.width / 2, y: canvas.height - 0.05 * u)
-                FlameyArt.drawHeartBopper(in: &ctx, u: u)
-            }
-            .frame(width: u * 0.7, height: u * 0.7)
-            .offset(y: seat - u * 0.30)
-        }
-        .frame(width: 3 * S, height: 3 * S)
-        pdf(band, "pdf/\(dir)/heart_bopper.bopper-band.pdf")
-        pdf(springs, "pdf/\(dir)/heart_bopper.bopper-springs.pdf")
-        // The springs sway ±6° about the bottom-centre of their 0.7u box.
-        let pivot = CGPoint(x: 0, y: seat - u * 0.30 + u * 0.35)
-        return [
-            "bopper-band": ["motion": "none"] as [String: Any],
-            "bopper-springs": ["motion": "sway", "degrees": 6, "period": 1.6, "pivot_stage": point(pivot)] as [String: Any],
-        ]
+        record(ok, "ref/\(s.name)/\(id).png")
     }
 
     // MARK: - Metadata
@@ -306,36 +328,35 @@ final class FlameyExporter {
             "slot": item.slot.rawValue,
             "name": item.displayName,
             "family": item.family.rawValue,
-            "unlock": unlockMeta(item.unlock) as Any,
+            "unlock": unlockMeta(item.unlock),
             "unlock_copy": item.unlockCopy,
             "holidays": item.holidays.map(\.rawValue),
             "hides": item.hides.map(\.rawValue).sorted(),
             "clashes": FlameyItem.allCases.filter { $0 != item && item.clashes(with: $0) }.map(\.rawValue),
             "mood_prop": item.isMoodProp,
-            "survives_compact": item.slot.survivesCompact,
-            "hover_lift": item.hoverLift,
-            "head_rise": FlameyArt.headRise(item),
-            "head_scale": FlameyArt.headScale(item),
-            "is_cape": FlameyArt.isCape(item),
+            "compact": item.slot.survivesCompact,
+            "hover_lift": num(item.hoverLift),
+            "head_rise": num(FlameyArtRec.headRise(item)),
+            "head_scale": num(FlameyArtRec.headScale(item)),
+            "is_cape": FlameyArtRec.isCape(item),
         ]
         if item.slot == .held {
-            let m2 = FlameyArt.heldMotion(item)
+            let hm = FlameyArtRec.heldMotion(item)
             m["held"] = [
-                "up": FlameyArt.heldUp(item),
-                "hand": point(FlameyArt.heldHand(item)),
-                "tight_hand": point(FlameyArt.tightHeldHand(item)),
-                "grip": point(FlameyArt.heldGrip(item)),
-                "accent_pivot": FlameyArt.heldAccentPivot(item).map { point($0) as Any } ?? NSNull(),
-                "tight_scale": FlameyArt.tightHeldScale(item),
-                "wobble": m2.wobble, "period": m2.period, "accent": String(describing: m2.accent),
-                "tile_framing": tuple3(FlameyArt.heldTileFraming(item)),
+                "up": FlameyArtRec.heldUp(item),
+                "hand": pt(FlameyArtRec.heldHand(item)),
+                "tight_hand": pt(FlameyArtRec.tightHeldHand(item)),
+                "grip": pt(FlameyArtRec.heldGrip(item)),
+                "accent_pivot": FlameyArtRec.heldAccentPivot(item).map { pt($0) as Any } ?? NSNull(),
+                "tight_scale": num(FlameyArtRec.tightHeldScale(item)),
+                "wobble": hm.wobble, "period": hm.period, "accent": String(describing: hm.accent),
+                "tile_framing": tuple3(FlameyArtRec.heldTileFraming(item)),
             ] as [String: Any]
         }
-        if item.slot == .companion {
-            m["floats"] = FlameyOutfitLayer.floats(item)
-        }
-        if let p = FlameyPalette.palette(for: item) {
-            m["palette"] = reflect(p)
+        if item.slot == .companion { m["floats"] = FlameyOutfitLayer.floats(item) }
+        if let p = FlameyPalette.palette(for: item) { m["palette"] = reflect(p) }
+        if item.slot == .head || item.slot == .costume {
+            m["month_crown_rise"] = num(FlameyArtRec.monthCrownRise(item))
         }
         return m
     }
@@ -348,54 +369,53 @@ final class FlameyExporter {
         }
     }
 
-    func plainMeta() -> [String: Any] {
-        var out: [String: Any] = [:]
-        for v in variants {
-            let l = makeLook(nil, v.detail)
-            let fig = figure(l)
-            let a = FlameyArt.anchors(size: S, scale: fig.effectiveBodyScale, lift: l.hoverLift, stand: l.standLift)
-            out[v.name] = ["u": S * fig.effectiveBodyScale, "scale": fig.effectiveBodyScale,
-                           "anchors": anchorsMeta(a)] as [String: Any]
-        }
-        return out
-    }
-
-    func constants() -> [String: Any] {
-        [
-            "leg_length": FlameyArt.legLength,
-            "leg_spread": FlameyArt.legSpread,
-            "tight_reach": FlameyArt.tightReach,
-            "tight_art_bounds": [FlameyArt.tightArtBounds.left, FlameyArt.tightArtBounds.right],
-            "tight_mask_bounds": [FlameyArt.tightMaskBounds.left, FlameyArt.tightMaskBounds.right],
-            "tight_top_bound": FlameyArt.tightTopBound as CGFloat,
-            "cape_tuck": FlameyArt.capeTuck,
-            "cape_tight_scale": FlameyArt.capeTightScale,
-            "trail_tuck": FlameyArt.trailTuck,
-            "float_height": FlameyArt.floatHeight,
-            "bopper_seat": FlameyArt.bopperSeat,
-            "chest_top": FlameyArt.chestTop,
-            "ink": hex(FlameyArt.ink),
-            "compact_threshold": FlameyRenderDetail.compactThreshold,
+    func catalogMeta() -> [String: Any] {
+        var plain: [String: Any] = [:]
+        let a = anchors()
+        plain["anchors_u"] = ["bottom": num(a.bottom / u), "ground": num(a.ground / u), "face_y": num(a.faceY / u),
+                              "eye_x": num(a.eyeX / u), "top_y": num(a.topY / u), "feet": num(a.feet / u)]
+        return [
+            "format": 1,
+            "units": "body units: origin at the centre of Flamey's square, y down, 1 = u (= S × body scale)",
+            "reference": ["S": S, "stage": 3 * S, "png_scale": pngScale,
+                          "surfaces": surfaces.map { ["name": $0.name, "reach": $0.reach,
+                                                      "detail": $0.detail.rawValue] as [String: Any] }] as [String: Any],
+            "reaches": reaches,
+            "poses": poses.map { String(describing: $0) },
+            "plain": plain,
+            "markers": Dictionary(uniqueKeysWithValues: Self.markerHex.map { ($0.0, String(format: "#%06X", $0.1)) }),
+            "constants": [
+                "leg_length": num(FlameyArtRec.legLength),
+                "leg_spread": num(FlameyArtRec.legSpread),
+                "tight_reach": num(FlameyArtRec.tightReach),
+                "tight_art_bounds": [num(FlameyArtRec.tightArtBounds.left), num(FlameyArtRec.tightArtBounds.right)],
+                "tight_mask_bounds": [num(FlameyArtRec.tightMaskBounds.left), num(FlameyArtRec.tightMaskBounds.right)],
+                "tight_top_bound": num(FlameyArtRec.tightTopBound as CGFloat),
+                "cape_tuck": num(FlameyArtRec.capeTuck),
+                "cape_tight_scale": num(FlameyArtRec.capeTightScale),
+                "trail_tuck": num(FlameyArtRec.trailTuck),
+                "float_height": num(FlameyArtRec.floatHeight),
+                "bopper_seat": num(FlameyArtRec.bopperSeat),
+                "chest_top": num(FlameyArtRec.chestTop),
+                "ink": hex(FlameyArtRec.ink),
+                "compact_threshold": num(FlameyRenderDetail.compactThreshold),
+            ] as [String: Any],
         ]
     }
 
-    func anchorsMeta(_ a: FlameyArt.Anchors) -> [String: Any] {
-        ["bottom": a.bottom, "ground": a.ground, "face_y": a.faceY, "eye_x": a.eyeX, "top_y": a.topY, "feet": a.feet]
-    }
+    func pt(_ p: CGPoint) -> [Double] { [num(p.x), num(p.y)] }
 
-    func point(_ p: CGPoint) -> [Double] { [Double(p.x), Double(p.y)] }
-
-    func tuple3(_ t: (CGFloat, CGFloat, CGFloat)) -> [Double] { [Double(t.0), Double(t.1), Double(t.2)] }
+    func tuple3(_ t: (CGFloat, CGFloat, CGFloat)) -> [Double] { [num(t.0), num(t.1), num(t.2)] }
 
     /// Every stored field of a value, colours as hex — survives the palette
-    /// struct growing new fields without this file changing.
+    /// struct growing fields without this file changing.
     func reflect(_ value: Any) -> Any {
         if let c = value as? Color { return hex(c) }
         if let cs = value as? [Color] { return cs.map(hex) }
-        if let p = value as? UnitPoint { return [Double(p.x), Double(p.y)] }
+        if let p = value as? UnitPoint { return [num(p.x), num(p.y)] }
         if let b = value as? Bool { return b }
-        if let d = value as? Double { return d }
-        if let f = value as? CGFloat { return Double(f) }
+        if let d = value as? Double { return num(d) }
+        if let f = value as? CGFloat { return num(f) }
         if let s = value as? String { return s }
         let mirror = Mirror(reflecting: value)
         if mirror.displayStyle == .optional {
@@ -415,14 +435,6 @@ final class FlameyExporter {
         return String(describing: value)
     }
 
-    func hex(_ c: Color) -> String {
-        guard let ns = NSColor(c).usingColorSpace(.sRGB) else { return String(describing: c) }
-        let r = Int((ns.redComponent * 255).rounded()), g = Int((ns.greenComponent * 255).rounded())
-        let b = Int((ns.blueComponent * 255).rounded())
-        let base = String(format: "#%02X%02X%02X", max(0, min(255, r)), max(0, min(255, g)), max(0, min(255, b)))
-        return ns.alphaComponent < 0.999 ? base + String(format: "@%.3f", ns.alphaComponent) : base
-    }
-
     // MARK: - Writers
 
     func url(_ rel: String) -> URL {
@@ -431,40 +443,13 @@ final class FlameyExporter {
         return u
     }
 
-    func pdf<V: View>(_ view: V, _ rel: String) {
-        let target = url(rel)
-        let renderer = ImageRenderer(content: view)
-        var ok = false
-        renderer.render { size, draw in
-            var box = CGRect(origin: .zero, size: size)
-            guard let ctx = CGContext(target as CFURL, mediaBox: &box, nil) else { return }
-            ctx.beginPDFPage(nil)
-            draw(ctx)
-            ctx.endPDFPage()
-            ctx.closePDF()
-            ok = true
-        }
-        record(ok, rel)
-    }
-
-    func png<V: View>(_ view: V, _ rel: String) {
-        let renderer = ImageRenderer(content: view)
-        renderer.scale = pngScale
-        var ok = false
-        if let cg = renderer.cgImage,
-           let data = NSBitmapImageRep(cgImage: cg).representation(using: .png, properties: [:]) {
-            ok = (try? data.write(to: url(rel))) != nil
-        }
-        record(ok, rel)
-    }
-
-    func write(json: Any, to target: URL) {
+    func write(json: Any, to rel: String) {
         do {
             let data = try JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted, .sortedKeys])
-            try data.write(to: target)
-            written += 1
+            try data.write(to: url(rel))
+            record(true, rel)
         } catch {
-            failures.append("meta.json: \(error)")
+            failures.append("\(rel): \(error)")
         }
     }
 
