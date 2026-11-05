@@ -503,8 +503,10 @@ private struct IntroTrackingArt: View {
     @Environment(\.introArtWidth) private var artWidth
 
     var body: some View {
-        // Phone card is the hero; watch and widget tuck in beside it.
-        let phoneH = min(height - 44, 220)
+        // Phone card is the hero; watch and widget tuck in beside it. A short
+        // hero (SE) drops the Health chip and gives the phone its room.
+        let roomy = height >= 200
+        let phoneH = min(height - (roomy ? 44 : 4), 220)
         let phoneW = phoneH * 0.56
         let side = min(phoneW * 0.78, (artWidth - phoneW - 40) / 2 + 18)
         ZStack {
@@ -512,17 +514,19 @@ private struct IntroTrackingArt: View {
                 .introPop(0)
             IntroWatch(size: side)
                 .rotationEffect(.degrees(-8))
-                .offset(x: -(phoneW / 2 + side * 0.32), y: phoneH * 0.18)
+                .offset(x: -(phoneW / 2 + side * 0.42), y: phoneH * 0.18)
                 .introPop(0.15)
                 .introBob(4, period: 3.2)
             IntroWidget(size: side)
                 .rotationEffect(.degrees(7))
-                .offset(x: phoneW / 2 + side * 0.32, y: -phoneH * 0.16)
+                .offset(x: phoneW / 2 + side * 0.42, y: -phoneH * 0.16)
                 .introPop(0.25)
                 .introBob(4, period: 3.6, phase: 0.4)
-            IntroChip(text: "❤️ Counts from Apple Health")
-                .introPop(0.4)
-                .offset(y: phoneH / 2 + 14)
+            if roomy {
+                IntroChip(text: "❤️ Counts from Apple Health")
+                    .introPop(0.4)
+                    .offset(y: phoneH / 2 + 14)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
