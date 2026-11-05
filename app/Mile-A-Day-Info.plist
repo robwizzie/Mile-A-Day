@@ -40,6 +40,8 @@
 	<array>
 		<string>com.mileaday.background-refresh</string>
 	</array>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>Mile A Day uses Bluetooth to connect to a gym treadmill during an indoor workout, so your mile counts the treadmill's own distance and speed. It only reads the treadmill's data and never controls the machine.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Mile A Day uses the camera to take photos for your walk and run posts and stories, and to scan a friend's profile QR code so you can add each other quickly.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
@@ -72,6 +74,12 @@
 		     Info.plist key, not an entitlement: aps-environment is already
 		     provisioned for the app's visible pushes. -->
 		<string>remote-notification</string>
+		<!-- Treadmill Data notifications (TreadmillLink) while the phone is
+		     locked mid-workout. Without it CoreBluetooth holds every event
+		     until the app is foregrounded, so the Live Activity and a buddy
+		     walk's roster freeze on a treadmill. Only used while an indoor
+		     workout the user connected a treadmill to is running. -->
+		<string>bluetooth-central</string>
 	</array>
 </dict>
 </plist>
