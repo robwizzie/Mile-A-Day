@@ -145,8 +145,21 @@ final class MADNotificationService: NSObject, ObservableObject {
     // MARK: - Public API
 
     /// Requests notification permission from the user.
+    ///
+    /// While a new account is going through setup the system prompt is held
+    /// (`NotificationPrePrompt.isHolding`) until Flamey's pre-prompt asks, so
+    /// the launch/foreground/sign-in callers can't pop it before the user
+    /// knows what it's for. Once permission is decided this is a no-op prompt
+    /// and only refreshes the status, as before.
     @MainActor
     func requestAuthorization() async {
+        if NotificationPrePrompt.isHolding {
+            let settings = await center.notificationSettings()
+            if settings.authorizationStatus == .notDetermined {
+                authorizationStatus = .notDetermined
+                return
+            }
+        }
         do {
             let options: UNAuthorizationOptions = [.alert, .sound, .badge]
             let granted = try await center.requestAuthorization(options: options)
@@ -784,5 +797,36 @@ extension MADNotificationService: UNUserNotificationCenterDelegate {
         } catch {
             print("[Hype] Failed to post toast: \(error.localizedDescription)")
         }
+    }
+}
+
+
+/// Holds the system notification prompt during new-account setup until the
+/// Flamey pre-prompt (`NotificationPrePromptView`) asks for it. Set only when
+/// a sign-in is routed into setup; cleared when the pre-prompt is answered
+/// and whenever the app is entered by any path, so a returning user is asked
+/// exactly as before.
+/// "Not now" defers the system prompt for `deferral` (the main tab's own
+/// request would otherwise pop it seconds later).
+enum NotificationPrePrompt {
+    private static let holdKey = "MAD_NotificationPrePromptHold"
+    private static let notNowKey = "MAD_NotificationPrePromptNotNowAt"
+    static let deferral: TimeInterval = 3 * 24 * 60 * 60
+
+    static var isHolding: Bool {
+        let defaults = UserDefaults.standard
+        if defaults.bool(forKey: holdKey) { return true }
+        let notNowAt = defaults.double(forKey: notNowKey)
+        return notNowAt > 0 && Date().timeIntervalSince1970 - notNowAt < deferral
+    }
+
+    static func hold() { UserDefaults.standard.set(true, forKey: holdKey) }
+
+    static func release() { UserDefaults.standard.removeObject(forKey: holdKey) }
+
+    /// The user tapped "Not now" on the pre-prompt.
+    static func notNow() {
+        UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: notNowKey)
+        release()
     }
 }

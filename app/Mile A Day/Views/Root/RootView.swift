@@ -51,6 +51,13 @@ struct RootView: View {
                         removal: .move(edge: .leading).combined(with: .opacity)
                     ))
 
+            case .notifications:
+                NotificationPrePromptView()
+                    .transition(.asymmetric(
+                        insertion: .move(edge: .trailing).combined(with: .opacity),
+                        removal: .move(edge: .leading).combined(with: .opacity)
+                    ))
+
             case .plusOffer:
                 PlusPaywallView(context: .onboarding) { _ in
                     appStateManager.completePlusOffer()

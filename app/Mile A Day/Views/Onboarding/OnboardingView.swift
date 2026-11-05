@@ -1,9 +1,8 @@
 import SwiftUI
 
-/// First-launch onboarding, shown once before sign-up. Presents the same
-/// full-screen feature tour (`WelcomeTourView`) so new users get a polished,
-/// complete walkthrough of every mode the moment they open the app, then moves
-/// them into authentication.
+/// First-launch onboarding, shown once before sign-up: the five-step intro
+/// (`OnboardingIntroView`), then authentication. "Already have an account?"
+/// goes to the same Sign in with Apple screen (it resolves both).
 ///
 /// The same tour is auto-shown once on the dashboard for users who upgrade and
 /// never saw onboarding, and is replayable any time from
@@ -12,7 +11,7 @@ struct OnboardingView: View {
     @Environment(\.appStateManager) var appStateManager
 
     var body: some View {
-        WelcomeTourView(finishButtonTitle: "Get Started") {
+        OnboardingIntroView(finishButtonTitle: "Get started", showsSignInLink: true) {
             // The user has seen the full tour during onboarding — suppress the
             // dashboard's first-run auto-play and the welcome banner so it
             // isn't shown to them a second time.
