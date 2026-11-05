@@ -31,24 +31,29 @@ struct SplashView: View {
     /// When the dissolve into the dashboard starts (overlay mode only).
     @State private var revealAt: Date?
 
-    private static let wordmarkHandoffDelay: TimeInterval = 1.9
+    private static let wordmarkHandoffDelay: TimeInterval = 3.7
     private static let reducedHandoffDelay: TimeInterval = 0.9
     /// Reveal anyway if the dashboard hasn't reported ready by then.
-    private static let revealCap: TimeInterval = 4.4
-    private static let revealDuration: TimeInterval = 0.6
+    private static let revealCap: TimeInterval = 6.0
+    private static let revealDuration: TimeInterval = 0.9
+    /// Flap changes per second while a tile is still searching. Fast enough
+    /// to read as a departures board, slow enough that each fold is seen
+    /// (28/s read as flicker).
+    private static let flipRate: Double = 9
 
     // MARK: - Timeline (seconds after appear)
     private enum Beat {
-        static let tilesIn: Double = 0.15
+        static let tilesIn: Double = 0.35
         /// Tile i lands at `firstLanding + i * landingGap`.
-        static let firstLanding: Double = 0.55
-        static let landingGap: Double = 0.15
-        static let flash: Double = 0.12
-        static let mergeStart: Double = 1.05
-        static let mergeEnd: Double = 1.35
-        static let wordmarkIn: Double = 1.3
-        static let taglineIn: Double = 1.45
-        static let textSettle: Double = 0.35
+        static let firstLanding: Double = 1.1
+        static let landingGap: Double = 0.35
+        /// The soft red glow a tile gives as it lands.
+        static let flash: Double = 0.35
+        static let mergeStart: Double = 2.3
+        static let mergeEnd: Double = 2.85
+        static let wordmarkIn: Double = 2.8
+        static let taglineIn: Double = 3.05
+        static let textSettle: Double = 0.5
     }
 
     private static let letters: [Character] = ["M", "A", "D"]
@@ -139,22 +144,27 @@ struct SplashView: View {
         .frame(width: size.width, height: size.height)
     }
 
-    /// One flap tile: cycles digits until its landing, then shows its letter
-    /// with a short red flash. The flip is a vertical squash on each change.
+    /// One flap tile. Each change is a fold: the face eases shut (vertical
+    /// scale cos→0), the next character swaps in at the fold, and it eases
+    /// open, so nothing ever jumps. It searches through digits until its
+    /// landing, folds once more onto its letter, then glows softly red.
     private func tile(_ i: Int, at t: Double, width: CGFloat, height: CGFloat) -> some View {
         let landing = Beat.firstLanding + Double(i) * Beat.landingGap
-        let landed = t >= landing
-        let character: Character
-        let flip: Double
-        if landed {
-            character = Self.letters[i]
-            flip = max(0, 1 - (t - landing) * 8)
-        } else {
-            let k = Int(t * 28) + i * 3
-            character = Self.digits[(k * 7 + i) % Self.digits.count]
-            flip = (t * 28).truncatingRemainder(dividingBy: 1)
-        }
-        let flash = landed ? max(0, 1 - (t - landing) / Beat.flash) : 0
+        // Fold phase: whole numbers are "open", .5 is fully folded. Tiles
+        // are offset so they don't fold in lockstep. Frozen open after the
+        // landing fold completes.
+        let raw = t * Self.flipRate + Double(i) * 0.33
+        let landingRaw = (landing * Self.flipRate + Double(i) * 0.33).rounded(.up)
+        let phase = min(raw, landingRaw)
+        let landed = raw >= landingRaw - 0.5
+        let character: Character = landed
+            ? Self.letters[i]
+            : Self.digits[(Int((phase + 0.5).rounded(.down)) * 7 + i * 3) % Self.digits.count]
+        let fold = abs(cos(Double.pi * phase.truncatingRemainder(dividingBy: 1)))
+        let open = raw >= landingRaw ? 1 : fold
+        let flash = t >= landing
+            ? 0.55 * max(0, 1 - (t - landing) / Beat.flash)
+            : 0
 
         return ZStack {
             RoundedRectangle(cornerRadius: 10, style: .continuous)
@@ -163,8 +173,8 @@ struct SplashView: View {
                 .fill(red.opacity(flash))
             Text(String(character))
                 .font(.system(size: height * 0.62, weight: .black, design: .rounded))
-                .foregroundColor(.white.opacity(landed ? 1 : 0.85))
-                .scaleEffect(x: 1, y: CGFloat(1 - flip * 0.5))
+                .foregroundColor(.white.opacity(landed ? 1 : 0.8))
+                .scaleEffect(x: 1, y: CGFloat(max(0.04, open)))
             Rectangle()
                 .fill(seam)
                 .frame(height: 2)
@@ -230,7 +240,7 @@ struct SplashView: View {
     /// Start the dissolve: never before the icon has landed, once only.
     private func scheduleReveal() {
         guard overApp, revealAt == nil, let start else { return }
-        let earliest = start.addingTimeInterval(reduceMotion ? 0.3 : Beat.mergeEnd + 0.05)
+        let earliest = start.addingTimeInterval(reduceMotion ? 0.3 : Beat.mergeEnd + 0.25)
         let at = max(Date(), earliest)
         revealAt = at
         let finish = at.timeIntervalSinceNow + Self.revealDuration + 0.05
@@ -255,9 +265,10 @@ struct SplashView: View {
         x < 0.5 ? 4 * x * x * x : 1 - pow(-2 * x + 2, 3) / 2
     }
 
-    /// Overshoots slightly then settles: the icon landing.
+    /// Overshoots a touch then settles: the icon landing (gentle; a bigger
+    /// overshoot read as a jump).
     private static func easeOutBack(_ x: Double) -> Double {
-        let c1 = 1.70158, c3 = c1 + 1
+        let c1 = 1.1, c3 = c1 + 1
         return 1 + c3 * pow(x - 1, 3) + c1 * pow(x - 1, 2)
     }
 }
