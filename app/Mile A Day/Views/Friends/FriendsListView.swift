@@ -59,6 +59,7 @@ struct FriendsListView: View {
         ZStack(alignment: .top) {
             VStack(spacing: 0) {
                 friendsHeader
+                    .tourAnchor("friends.header")
                 modePicker
 
                 switch topMode {
