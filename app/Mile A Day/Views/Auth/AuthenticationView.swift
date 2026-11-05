@@ -94,6 +94,7 @@ struct AuthenticationView: View {
 /// Flamey blazing, ready for day one.
 private struct AuthHeroArt: View {
     let height: CGFloat
+    @Environment(\.introArtWidth) private var artWidth
 
     var body: some View {
         let flame = min(height * 0.7, 220)
@@ -105,7 +106,7 @@ private struct AuthHeroArt: View {
             IntroChip(text: "🔥 Day 1 starts today")
                 .introBob(5, period: 3.0, phase: 0.3)
                 .introPop(0.25)
-                .offset(x: flame * 0.55, y: -flame * 0.38)
+                .offset(x: introClampX(flame * 0.55, "🔥 Day 1 starts today", width: artWidth), y: -flame * 0.38)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }

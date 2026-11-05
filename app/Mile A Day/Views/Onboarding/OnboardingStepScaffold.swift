@@ -25,8 +25,10 @@ struct OnboardingStepScaffold<Art: View, Actions: View>: View {
             let topInset = geo.safeAreaInsets.top
             let bottomInset = geo.safeAreaInsets.bottom
             let fullHeight = geo.size.height + topInset + bottomInset
-            let heroHeight = max(240, min(fullHeight * 0.52, fullHeight - 420))
-            let artHeight = max(140, heroHeight - topInset - curve - iconSize / 2 - 12)
+            // ~56%, always leaving 420pt for copy + actions (taller than the
+            // intro's: setup copy runs longer and the actions stack).
+            let heroHeight = max(240, min(fullHeight * 0.56, fullHeight - 420))
+            let artHeight = max(160, heroHeight - topInset - curve - iconSize / 2 - 24)
 
             ZStack(alignment: .top) {
                 ZStack {
@@ -41,6 +43,7 @@ struct OnboardingStepScaffold<Art: View, Actions: View>: View {
                     .frame(height: artHeight)
                     .padding(.top, topInset + 8)
                     .environment(\.introShown, shown)
+                    .environment(\.introArtWidth, geo.size.width)
 
                 IntroSheetShape(curve: curve)
                     .fill(OnboardingIntroView.sheetColor)
@@ -51,11 +54,8 @@ struct OnboardingStepScaffold<Art: View, Actions: View>: View {
                     .aspectRatio(contentMode: .fit)
                     .frame(width: iconSize, height: iconSize)
                     .clipShape(RoundedRectangle(cornerRadius: iconSize * 0.24, style: .continuous))
-                    .padding(5)
-                    .background(
-                        RoundedRectangle(cornerRadius: iconSize * 0.24 + 5, style: .continuous)
-                            .fill(OnboardingIntroView.sheetColor)
-                    )
+                    // No frame ring: the icon sits straight on the crest.
+                    .shadow(color: .black.opacity(0.35), radius: 10, y: 4)
                     .padding(.top, heroHeight - curve - iconSize / 2)
                     .accessibilityHidden(true)
 
@@ -79,8 +79,9 @@ struct OnboardingStepScaffold<Art: View, Actions: View>: View {
                             .madFont(size: 16, weight: .medium, design: .rounded, maxScale: 1.25)
                             .foregroundColor(.white.opacity(0.62))
                             .lineLimit(4)
-                            .minimumScaleFactor(0.85)
-                            .fixedSize(horizontal: false, vertical: true)
+                            // Not fixedSize: on a 320pt phone it shrinks a
+                            // little rather than pushing the actions off screen.
+                            .minimumScaleFactor(0.8)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 28)

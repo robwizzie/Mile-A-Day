@@ -13,7 +13,7 @@ struct NotificationPrePromptView: View {
             colors: [Color(red: 1.0, green: 0.58, blue: 0.24), Color(red: 0.85, green: 0.25, blue: 0.27)],
             chip: "Last step",
             headline: "Let Flamey nudge you",
-            message: "A reminder before your streak runs out, and a heads-up when friends hype or nudge you. You choose which ones in Settings.",
+            message: "A reminder before your streak runs out, and a heads-up when friends hype or nudge you. Change it any time in Settings.",
             art: { height in NotificationHeroArt(height: height) },
             actions: {
                 VStack(spacing: 6) {
@@ -45,16 +45,22 @@ private struct NotificationHeroArt: View {
     let height: CGFloat
 
     var body: some View {
-        let flame = min(height * 0.5, 150)
-        VStack(spacing: 14) {
+        // Banners are ~58pt. A short hero (SE) shows one banner; Flamey
+        // takes whatever height is left.
+        let showsSecond = height >= 260
+        let banners: CGFloat = showsSecond ? 58 + 12 + 55 : 58
+        let flame = max(48, min(height - banners - 12, 160))
+        VStack(spacing: 12) {
             banner(title: "Flamey", text: "2h left to keep your 12 day streak 🔥")
                 .introPop(0.15)
                 .introBob(3, period: 3.2)
-            banner(title: "Maya hyped your mile", text: "🔥🔥🔥")
-                .introPop(0.3)
-                .introBob(3, period: 3.6, phase: 0.4)
-                .scaleEffect(0.94)
-                .opacity(0.9)
+            if showsSecond {
+                banner(title: "Maya hyped your mile", text: "🔥🔥🔥")
+                    .introPop(0.3)
+                    .introBob(3, period: 3.6, phase: 0.4)
+                    .scaleEffect(0.94)
+                    .opacity(0.9)
+            }
             FlameBuddyView(health: .healthy, size: flame, showsMoodBubble: false)
                 .frame(width: flame, height: flame)
                 .introPop(0)

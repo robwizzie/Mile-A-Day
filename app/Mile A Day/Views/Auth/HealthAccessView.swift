@@ -13,7 +13,7 @@ struct HealthAccessView: View {
             headline: "Connect Apple Health",
             message: wasDenied
                 ? "Health isn't available right now. Turn it on in Settings › Privacy & Security › Health › Mile A Day so your miles count."
-                : "Mile A Day reads your walks and runs from Apple Health, so every mile counts: your Watch, a treadmill or any app. Your health data never leaves your account.",
+                : "Every walk and run in Apple Health counts: your Watch, a treadmill or any app. Your health data stays private.",
             art: { height in HealthHeroArt(height: height) },
             actions: {
                 OnboardingPrimaryButton(title: wasDenied ? "Open Settings" : "Connect Health",
@@ -77,6 +77,7 @@ struct HealthAccessView: View {
 /// A heart in a mile ring with the kinds of activity Health brings in.
 private struct HealthHeroArt: View {
     let height: CGFloat
+    @Environment(\.introArtWidth) private var artWidth
 
     var body: some View {
         let ring = min(height * 0.62, 200)
@@ -99,13 +100,13 @@ private struct HealthHeroArt: View {
                 .accessibilityHidden(true)
 
             IntroChip(text: "🚶 Walks").introBob(5, period: 3.0, phase: 0.1).introPop(0.2)
-                .offset(x: -ring * 0.62, y: -ring * 0.32)
+                .offset(x: introClampX(-ring * 0.62, "🚶 Walks", width: artWidth), y: -ring * 0.32)
             IntroChip(text: "🏃 Runs").introBob(5, period: 3.3, phase: 0.4).introPop(0.28)
-                .offset(x: ring * 0.62, y: -ring * 0.18)
+                .offset(x: introClampX(ring * 0.62, "🏃 Runs", width: artWidth), y: -ring * 0.18)
             IntroChip(text: "👟 Steps").introBob(5, period: 3.6, phase: 0.7).introPop(0.36)
-                .offset(x: -ring * 0.5, y: ring * 0.42)
+                .offset(x: introClampX(-ring * 0.5, "👟 Steps", width: artWidth), y: ring * 0.42)
             IntroChip(text: "⌚️ Watch").introBob(5, period: 3.1, phase: 0.9).introPop(0.44)
-                .offset(x: ring * 0.55, y: ring * 0.38)
+                .offset(x: introClampX(ring * 0.55, "⌚️ Watch", width: artWidth), y: ring * 0.38)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }

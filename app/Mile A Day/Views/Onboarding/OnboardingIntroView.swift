@@ -39,7 +39,9 @@ struct OnboardingIntroView: View {
             let fullHeight = geo.size.height + topInset + bottomInset
             // Hero takes ~58% but always leaves 380pt for the sheet (SE fits).
             let heroHeight = max(260, min(fullHeight * 0.58, fullHeight - 380))
-            let artHeight = max(160, heroHeight - topInset - curve - iconSize / 2 - 12)
+            // Art starts under the Skip button (44pt bar) and stops 16pt above the icon.
+            let artTop = topInset + 48
+            let artHeight = max(140, heroHeight - artTop - curve - iconSize / 2 - 16)
 
             ZStack(alignment: .top) {
                 heroBackdrop
@@ -54,7 +56,7 @@ struct OnboardingIntroView: View {
                             count: steps.count,
                             isActive: index == page,
                             artHeight: artHeight,
-                            topInset: topInset,
+                            artTop: artTop,
                             textTop: heroHeight + iconSize / 2 + 18,
                             photos: showcase.photos
                         )
@@ -63,6 +65,7 @@ struct OnboardingIntroView: View {
                 }
                 .tabViewStyle(.page(indexDisplayMode: .never))
                 .ignoresSafeArea()
+                .environment(\.introArtWidth, geo.size.width)
                 .background(alignment: .top) {
                     // The sheet sits UNDER the paged content so both art
                     // (above it) and copy (on it) swipe as one page.
@@ -111,11 +114,8 @@ struct OnboardingIntroView: View {
             .aspectRatio(contentMode: .fit)
             .frame(width: iconSize, height: iconSize)
             .clipShape(RoundedRectangle(cornerRadius: iconSize * 0.24, style: .continuous))
-            .padding(5)
-            .background(
-                RoundedRectangle(cornerRadius: iconSize * 0.24 + 5, style: .continuous)
-                    .fill(Self.sheetColor)
-            )
+            // No frame ring: the icon sits straight on the crest.
+            .shadow(color: .black.opacity(0.35), radius: 10, y: 4)
             .accessibilityHidden(true)
     }
 
@@ -256,7 +256,7 @@ private struct IntroStepPage: View {
     let count: Int
     let isActive: Bool
     let artHeight: CGFloat
-    let topInset: CGFloat
+    let artTop: CGFloat
     let textTop: CGFloat
     let photos: [ShowcasePhoto]
 
@@ -268,7 +268,7 @@ private struct IntroStepPage: View {
             art
                 .frame(maxWidth: .infinity)
                 .frame(height: artHeight)
-                .padding(.top, topInset + 8)
+                .padding(.top, artTop)
                 .environment(\.introShown, shown)
                 .environment(\.introActive, isActive)
 
@@ -329,6 +329,7 @@ private struct IntroStepPage: View {
 // MARK: - Shared art pieces
 
 private struct IntroShownKey: EnvironmentKey { static let defaultValue = true }
+private struct IntroArtWidthKey: EnvironmentKey { static let defaultValue: CGFloat = 375 }
 private struct IntroActiveKey: EnvironmentKey { static let defaultValue = true }
 extension EnvironmentValues {
     var introShown: Bool {
@@ -339,6 +340,20 @@ extension EnvironmentValues {
         get { self[IntroActiveKey.self] }
         set { self[IntroActiveKey.self] = newValue }
     }
+    /// The screen width the hero art lays out in (set by the containers).
+    var introArtWidth: CGFloat {
+        get { self[IntroArtWidthKey.self] }
+        set { self[IntroArtWidthKey.self] = newValue }
+    }
+}
+
+/// Keeps a floating chip's centre far enough from the screen edge that its
+/// text never clips (320pt phones and wide art on Pro Max alike). The width is
+/// estimated from the text: 14pt bold rounded averages ~8.4pt a character.
+func introClampX(_ x: CGFloat, _ text: String, width: CGFloat) -> CGFloat {
+    let half = CGFloat(text.count) * 4.2 + 16
+    let limit = max(0, width / 2 - half - 10)
+    return min(max(x, -limit), limit)
 }
 
 /// Gentle float, a pure function of the clock. Paused off-page / Reduce Motion.
@@ -404,6 +419,7 @@ func introMiles(_ miles: Double) -> String {
 
 private struct IntroWelcomeArt: View {
     let height: CGFloat
+    @Environment(\.introArtWidth) private var artWidth
 
     var body: some View {
         let flame = min(height * 0.62, 240)
@@ -427,11 +443,11 @@ private struct IntroWelcomeArt: View {
             IntroChip(text: "🔥 128 day streak")
                 .introBob(6, period: 3.0, phase: 0.2)
                 .introPop(0.25)
-                .offset(x: -flame * 0.62, y: -flame * 0.42)
+                .offset(x: introClampX(-flame * 0.62, "🔥 128 day streak", width: artWidth), y: -flame * 0.42)
             IntroChip(text: "✓ " + introMiles(1.02) + " today", tint: Color(red: 0.15, green: 0.55, blue: 0.3))
                 .introBob(6, period: 3.4, phase: 0.6)
                 .introPop(0.35)
-                .offset(x: flame * 0.58, y: flame * 0.40)
+                .offset(x: introClampX(flame * 0.58, "✓ 1.02 mi today", width: artWidth), y: flame * 0.40)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -476,6 +492,7 @@ private struct IntroFlameyArt: View {
 
 private struct IntroFeedArt: View {
     let height: CGFloat
+    @Environment(\.introArtWidth) private var artWidth
     let photos: [ShowcasePhoto]
 
     var body: some View {
@@ -495,11 +512,12 @@ private struct IntroFeedArt: View {
                 .introPop(0)
                 .introBob(4, period: 3.6)
 
-            // Lower left, over the side print: clear of Skip and the post.
+            // Mid left, over the side print: clear of Skip, the post's
+            // header and its Hype button.
             IntroChip(text: "🔥 Hyped by 12")
                 .introBob(6, period: 3.0, phase: 0.4)
                 .introPop(0.35)
-                .offset(x: -width * 0.72, y: width * 0.52)
+                .offset(x: introClampX(-width * 0.8, "🔥 Hyped by 12", width: artWidth), y: -width * 0.05)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -670,9 +688,11 @@ private struct IntroFeedPost: View {
 
 private struct IntroFriendsArt: View {
     let height: CGFloat
+    @Environment(\.introArtWidth) private var artWidth
 
     var body: some View {
-        let tile = min((height - 60) * 0.62, 112)
+        // Three tiles + two 12pt gaps inside a 20pt gutter each side.
+        let tile = min((height - 60) * 0.62, 112, (artWidth - 40 - 24) / 3)
         VStack(spacing: 16) {
             HStack(spacing: 12) {
                 IntroFriendTile(initial: "M", name: "Maya", kind: .done, size: tile)
@@ -730,11 +750,14 @@ private struct IntroFriendTile: View {
             .frame(width: size * 0.52, height: size * 0.52)
             .padding(.top, size * 0.14)
 
-            Text(name)
-                .madFont(size: 13, weight: .semibold, design: .rounded, maxScale: 1.1)
-                .foregroundColor(.white.opacity(0.9))
-                .lineLimit(1)
-                .padding(.top, 6)
+            // A small tile (short hero on an SE) keeps ring + label only.
+            if size >= 80 {
+                Text(name)
+                    .madFont(size: 13, weight: .semibold, design: .rounded, maxScale: 1.1)
+                    .foregroundColor(.white.opacity(0.9))
+                    .lineLimit(1)
+                    .padding(.top, 6)
+            }
 
             Spacer(minLength: 4)
 
@@ -758,6 +781,7 @@ private struct IntroFriendTile: View {
 
 private struct IntroRewardsArt: View {
     let height: CGFloat
+    @Environment(\.introArtWidth) private var artWidth
 
     var body: some View {
         let flame = min(height * 0.6, 220)
@@ -769,15 +793,15 @@ private struct IntroRewardsArt: View {
             IntroChip(text: "🏆 Won the weekend duel")
                 .introBob(5, period: 3.0, phase: 0.1)
                 .introPop(0.2)
-                .offset(x: -flame * 0.5, y: -flame * 0.5)
+                .offset(x: introClampX(-flame * 0.5, "🏆 Won the weekend duel", width: artWidth), y: -flame * 0.5)
             IntroChip(text: "🏅 100 miles")
                 .introBob(5, period: 3.3, phase: 0.5)
                 .introPop(0.3)
-                .offset(x: flame * 0.7, y: -flame * 0.05)
+                .offset(x: introClampX(flame * 0.7, "🏅 100 miles", width: artWidth), y: -flame * 0.05)
             IntroChip(text: "❄️ January flame")
                 .introBob(5, period: 3.6, phase: 0.8)
                 .introPop(0.4)
-                .offset(x: -flame * 0.55, y: flame * 0.42)
+                .offset(x: introClampX(-flame * 0.55, "❄️ January flame", width: artWidth), y: flame * 0.42)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
