@@ -60,17 +60,29 @@ struct AppGuidedTourView: View {
                         .allowsHitTesting(false)
                 }
 
-                VStack(spacing: 0) {
-                    if !cardOnTop { Spacer(minLength: 0) }
+                // Two placements, not one card sliding between them: when
+                // the spotlight crosses the middle, the card dips out at its
+                // edge and the next one rises in at the other, instead of
+                // the card gliding across the whole screen (and over the
+                // spotlight) on the way.
+                if cardOnTop {
                     card
                         .padding(.horizontal, 16)
-                        .padding(.top, cardOnTop ? insets.top + 8 : 0)
+                        .padding(.top, insets.top + 8)
+                        .frame(maxHeight: .infinity, alignment: .top)
+                        .transition(Self.cardSwap(edge: .top))
+                } else {
+                    card
+                        .padding(.horizontal, 16)
                         // Clear the tab bar (~49pt) above the home indicator.
-                        .padding(.bottom, cardOnTop ? 0 : insets.bottom + 62)
-                    if cardOnTop { Spacer(minLength: 0) }
+                        .padding(.bottom, insets.bottom + 62)
+                        .frame(maxHeight: .infinity, alignment: .bottom)
+                        .transition(Self.cardSwap(edge: .bottom))
                 }
             }
             .frame(width: size.width, height: size.height)
+            // A late anchor report can flip the side without a step change.
+            .animation(.easeInOut(duration: 0.3), value: cardOnTop)
             .offset(x: -insets.leading, y: -insets.top)
             .opacity(shown ? 1 : 0)
         }
@@ -92,6 +104,19 @@ struct AppGuidedTourView: View {
     }
 
     // MARK: - Card
+
+    /// The card leaving or arriving at `edge`: a short drift toward that edge
+    /// with a fade. The old card goes quickly; the new one follows a beat
+    /// later, so the two never cross.
+    private static func cardSwap(edge: VerticalEdge) -> AnyTransition {
+        let drift: CGFloat = edge == .top ? -24 : 24
+        return .asymmetric(
+            insertion: .offset(y: drift).combined(with: .opacity).combined(with: .scale(scale: 0.97))
+                .animation(.spring(response: 0.38, dampingFraction: 0.9).delay(0.12)),
+            removal: .offset(y: drift).combined(with: .opacity)
+                .animation(.easeIn(duration: 0.14))
+        )
+    }
 
     private var card: some View {
         VStack(alignment: .leading, spacing: 12) {

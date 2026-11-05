@@ -53,6 +53,8 @@ enum SplashBeat {
     static let mergeEnd: Double = 2.85
     static let wordmarkIn: Double = 2.8
     static let taglineIn: Double = 3.05
+    /// Returning users: the day's slogan, once the last flap has landed.
+    static let sloganIn: Double = 1.85
     static let textSettle: Double = 0.5
     /// Flap changes per second while a tile is searching.
     static let flipRate: Double = 9
@@ -62,8 +64,9 @@ enum SplashBeat {
     static let mountMain: Double = 0.5
     /// New users: hand off after the wordmark.
     static let wordmarkHandoff: Double = 3.7
-    /// Returning users: never reveal before the icon has landed and rested.
-    static let earliestReveal: Double = 3.1
+    /// Returning users: never reveal before the icon has landed and rested
+    /// (and the slogan has had time to be read).
+    static let earliestReveal: Double = 3.35
     /// After the dashboard reports ready, let its first data pass settle.
     static let readySettle: Double = 0.35
     /// Reveal anyway if the dashboard hasn't reported by then.
@@ -198,6 +201,7 @@ final class SplashLayerView: UIView {
     private let background = CAGradientLayer()
     private let glow = CAGradientLayer()
     private let icon = CALayer()
+    private var slogan: CATextLayer?
     private var tiles: [CALayer] = []
     private var iconSize: CGFloat = 100
 
@@ -281,7 +285,11 @@ final class SplashLayerView: UIView {
             glow.opacity = 1
             icon.opacity = 1
             fade(layer: self.layer, from: 0, to: 1, at: t0, duration: 0.3)
-            if endsOnWordmark { addWordmark(below: center, width: width, at: t0, animated: false) }
+            if endsOnWordmark {
+                addWordmark(below: center, width: width, at: t0, animated: false)
+            } else {
+                addSlogan(below: center, width: width, at: t0, animated: false)
+            }
             return
         }
 
@@ -315,7 +323,11 @@ final class SplashLayerView: UIView {
                                      times: [0, SplashBeat.tilesIn, SplashBeat.mergeStart, total], total: total), at: t0)
         }
 
-        if endsOnWordmark { addWordmark(below: center, width: width, at: t0, animated: true) }
+        if endsOnWordmark {
+            addWordmark(below: center, width: width, at: t0, animated: true)
+        } else {
+            addSlogan(below: center, width: width, at: t0, animated: true)
+        }
     }
 
     /// One flap tile: a card, a red landing glow, the character (folding by
@@ -438,6 +450,36 @@ final class SplashLayerView: UIView {
         }
     }
 
+    /// Returning users: a different slogan each launch, where new users see
+    /// the wordmark. It goes first when the splash reveals the app.
+    private func addSlogan(below center: CGPoint, width: CGFloat, at t0: CFTimeInterval, animated: Bool) {
+        let font = Self.rounded(17, .semibold)
+        let label = CATextLayer()
+        label.string = NSAttributedString(string: SplashSlogans.next(), attributes: [
+            .font: font,
+            .foregroundColor: UIColor.white.withAlphaComponent(0.72)
+        ])
+        label.alignmentMode = .center
+        label.contentsScale = traitCollection.displayScale > 0 ? traitCollection.displayScale : 3
+        label.bounds = CGRect(x: 0, y: 0, width: bounds.width - 64, height: font.lineHeight + 4)
+        label.position = CGPoint(x: bounds.width / 2, y: center.y + iconSize / 2 + width * 0.12)
+        label.opacity = 1
+        layer.addSublayer(label)
+        slogan = label
+        guard animated else { return }
+        let rise = CABasicAnimation(keyPath: "position.y")
+        rise.fromValue = label.position.y + 10
+        rise.toValue = label.position.y
+        let show = CABasicAnimation(keyPath: "opacity")
+        show.fromValue = 0
+        show.toValue = 1
+        let both = CAAnimationGroup()
+        both.animations = [rise, show]
+        both.duration = SplashBeat.textSettle
+        both.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        addTimed(label, both, at: t0 + SplashBeat.sloganIn)
+    }
+
     // MARK: Reveal
 
     /// Fly the icon into the real title and fade the splash away, all on the
@@ -457,6 +499,16 @@ final class SplashLayerView: UIView {
             fade.timingFunction = ease
             faded.opacity = 0
             faded.add(fade, forKey: "reveal")
+        }
+
+        if let slogan {
+            let fade = CABasicAnimation(keyPath: "opacity")
+            fade.fromValue = slogan.presentation()?.opacity ?? 1
+            fade.toValue = 0
+            fade.duration = duration * 0.35
+            fade.timingFunction = CAMediaTimingFunction(name: .easeIn)
+            slogan.opacity = 0
+            slogan.add(fade, forKey: "reveal")
         }
 
         let iconFade = CAKeyframeAnimation(keyPath: "opacity")
@@ -603,4 +655,34 @@ struct SplashRevealBeacon: View {
 
 #Preview {
     SplashView()
+}
+
+// MARK: - Slogans
+
+/// The returning-user splash's line: one per launch, rotating through the
+/// list so it never repeats back to back.
+enum SplashSlogans {
+    static let all = [
+        "One mile closer.",
+        "Every mile counts.",
+        "Today's mile awaits.",
+        "Lace up. Let's move.",
+        "One day, one mile.",
+        "Chase the streak.",
+        "Keep the streak alive.",
+        "Show up. Every day.",
+        "Stay active. Stay motivated.",
+        "Your mile is waiting."
+    ]
+
+    private static let key = "splashSloganIndex"
+
+    static func next() -> String {
+        let defaults = UserDefaults.standard
+        let last = defaults.object(forKey: key) as? Int
+        // First launch on this build: start somewhere random, then rotate.
+        let index = last.map { ($0 + 1) % all.count } ?? Int.random(in: 0..<all.count)
+        defaults.set(index, forKey: key)
+        return all[index]
+    }
 }
