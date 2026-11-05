@@ -79,6 +79,14 @@ struct RootView: View {
                     ))
             }
         }
+        // Returning users: the app is already running underneath; the splash
+        // plays on top and dissolves into the real dashboard.
+        .overlay {
+            if appStateManager.splashOverlay {
+                SplashView()
+                    .transition(.identity)
+            }
+        }
         .environment(\.appStateManager, appStateManager)
         .animation(MADTheme.Animation.standard, value: appStateManager.currentState)
         .onAppear {
@@ -90,8 +98,10 @@ struct RootView: View {
         // Apply theme to navigation bar
         configureNavigationAppearance()
         
-        // Request health permissions early if needed
-        if appStateManager.currentState == .main {
+        // Request health permissions early if needed. Not on a cold launch
+        // under the splash overlay: before the overlay existed the app always
+        // started on `.splash` here, and the dashboard loads Health itself.
+        if appStateManager.currentState == .main && !appStateManager.splashOverlay {
             requestHealthPermissions()
         }
     }

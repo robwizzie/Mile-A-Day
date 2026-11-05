@@ -682,6 +682,9 @@ struct DashboardView: View {
                 subtitle: headerSubtitle,
                 actions: dashboardHeaderActions
             )
+            // Tells the launch splash where the real title sits and when the
+            // home screen has its data, so it can dissolve into it.
+            .background(SplashRevealBeacon(isReady: healthManager.hasLoadedInitialData))
 
             ScrollView(.vertical, showsIndicators: true) {
                 ScrollViewReader { scrollProxy in
