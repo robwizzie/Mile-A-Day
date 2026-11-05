@@ -1,241 +1,153 @@
 import SwiftUI
 
-/// Live guided tour that overlays the real app and navigates the user through
-/// each tab. Presented as a fullScreenCover from DashboardView; on each step
-/// it posts a `MAD_SwitchTab` notification to flip the underlying tab, then
-/// shows a floating coach-mark card explaining what they're looking at.
+/// Live guided tour over the real app: each step switches the tab underneath
+/// and explains it on one card pinned above the tab bar.
+///
+/// Built to stay smooth: no material blur (a blur re-samples the live tabs
+/// behind it every frame), no full-screen dark scrim hiding the very screen
+/// being explained (just a fade behind the card), and the card never leaves.
+/// A step change switches the tab FIRST and cross-fades only the card's text
+/// on the next run loop, so the tab's rebuild doesn't land mid-animation.
 struct AppGuidedTourView: View {
-    /// Stamped when the tour ends (Done or End Tour) — the dashboard's
+    /// Stamped when the tour ends (Done or Skip) — the dashboard's
     /// getting-started checklist reads it.
     static let seenKey = "hasSeenAppGuidedTour"
 
     let onComplete: () -> Void
 
     @State private var step = 0
-    @State private var didAppear = false
-    @State private var cardVisible = false
+    @State private var shown = false
 
     private let steps = GuidedTourStep.all
     private var isLast: Bool { step >= steps.count - 1 }
     private var current: GuidedTourStep { steps[step] }
 
+    private static let surface = Color(red: 0.09, green: 0.06, blue: 0.075)
+
     var body: some View {
-        ZStack {
-            // Semi-transparent scrim so the real app shows through but dimmed.
-            Color.black.opacity(0.75)
+        ZStack(alignment: .bottom) {
+            // Taps on the app are absorbed, but the app stays visible: only
+            // the area behind the card is shaded.
+            Color.black.opacity(0.001)
                 .ignoresSafeArea()
-                .onTapGesture { } // absorb taps
+                .onTapGesture { }
+            LinearGradient(colors: [.clear, .black.opacity(0.7)], startPoint: .top, endPoint: .bottom)
+                .frame(height: 420)
+                .frame(maxWidth: .infinity)
+                .allowsHitTesting(false)
+                .ignoresSafeArea()
 
-            VStack {
-                // Top bar
-                topBar
-                    .padding(.horizontal, 20)
-                    .padding(.top, 12)
-
-                Spacer()
-
-                // Floating coach-mark card
-                if cardVisible {
-                    coachCard
-                        .padding(.horizontal, 20)
-                        .transition(.asymmetric(
-                            insertion: .move(edge: .bottom).combined(with: .opacity),
-                            removal: .opacity
-                        ))
-                }
-
-                // Bottom navigation
-                bottomControls
-                    .padding(.horizontal, 20)
-                    .padding(.bottom, 100) // clear tab bar
-            }
-            .opacity(didAppear ? 1 : 0)
+            card
+                .padding(.horizontal, 16)
+                .padding(.bottom, 96) // clear the tab bar
+                .offset(y: shown ? 0 : 40)
+                .opacity(shown ? 1 : 0)
         }
         .onAppear {
             switchToTab(steps[0].tabIndex)
-            withAnimation(.easeOut(duration: 0.3)) { didAppear = true }
-            withAnimation(.spring(response: 0.5, dampingFraction: 0.8).delay(0.3)) {
-                cardVisible = true
+            DispatchQueue.main.async {
+                withAnimation(.spring(response: 0.45, dampingFraction: 0.86)) { shown = true }
             }
         }
     }
 
-    // MARK: - Top Bar
+    // MARK: - Card
 
-    private var topBar: some View {
-        HStack {
-            // Step indicator
-            HStack(spacing: 6) {
-                Image(systemName: current.icon)
-                    .font(.system(size: 12, weight: .bold))
+    private var card: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Label(current.tabName, systemImage: current.icon)
+                    .madFont(size: 13, weight: .bold, design: .rounded, maxScale: 1.3)
                     .foregroundColor(current.accent)
-                Text("\(step + 1) of \(steps.count)")
-                    .font(.system(size: 13, weight: .bold, design: .rounded))
-                    .foregroundColor(.white.opacity(0.6))
+                Spacer()
+                Button("Skip", action: finish)
+                    .madFont(size: 14, weight: .semibold, design: .rounded, maxScale: 1.3)
+                    .foregroundColor(.white.opacity(0.55))
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            .background(Capsule().fill(Color.white.opacity(0.1)))
 
-            Spacer()
-
-            Button {
-                switchToTab(0)
-                UserDefaults.standard.set(true, forKey: Self.seenKey)
-                onComplete()
-            } label: {
-                Text("End Tour")
-                    .font(.system(size: 14, weight: .semibold, design: .rounded))
-                    .foregroundColor(.white.opacity(0.6))
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 7)
-                    .background(Capsule().fill(Color.white.opacity(0.1)))
-            }
-        }
-    }
-
-    // MARK: - Coach Card
-
-    private var coachCard: some View {
-        VStack(spacing: 14) {
-            // Tab badge
-            HStack(spacing: 8) {
-                Image(systemName: current.icon)
-                    .font(.system(size: 16, weight: .bold))
-                Text(current.tabName.uppercased())
-                    .font(.system(size: 13, weight: .black, design: .rounded))
-                    .tracking(1.5)
-            }
-            .foregroundColor(current.accent)
-
-            Text(current.title)
-                .font(.system(size: 24, weight: .bold, design: .rounded))
-                .foregroundColor(.white)
-                .multilineTextAlignment(.center)
-
-            Text(current.body)
-                .font(.system(size: 15, weight: .medium, design: .rounded))
-                .foregroundColor(.white.opacity(0.75))
-                .multilineTextAlignment(.center)
-                .lineSpacing(3)
-                .fixedSize(horizontal: false, vertical: true)
-
-            // Tips
             VStack(alignment: .leading, spacing: 8) {
-                ForEach(current.tips, id: \.self) { tip in
-                    HStack(alignment: .top, spacing: 8) {
-                        Image(systemName: "arrow.right.circle.fill")
-                            .font(.system(size: 12, weight: .bold))
-                            .foregroundColor(current.accent)
-                            .padding(.top, 2)
-                        Text(tip)
-                            .font(.system(size: 13, weight: .medium, design: .rounded))
-                            .foregroundColor(.white.opacity(0.8))
+                Text(current.title)
+                    .madFont(size: 22, weight: .heavy, design: .rounded, maxScale: 1.3)
+                    .foregroundColor(.white)
+                Text(current.body)
+                    .madFont(size: 15, weight: .medium, design: .rounded, maxScale: 1.3)
+                    .foregroundColor(.white.opacity(0.7))
+                    .fixedSize(horizontal: false, vertical: true)
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(current.tips, id: \.self) { tip in
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Circle()
+                                .fill(current.accent)
+                                .frame(width: 5, height: 5)
+                                .alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 }
+                            Text(tip)
+                                .madFont(size: 14, weight: .medium, design: .rounded, maxScale: 1.3)
+                                .foregroundColor(.white.opacity(0.85))
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                     }
                 }
+                .padding(.top, 4)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(14)
-            .background(
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(current.accent.opacity(0.1))
-            )
+            .id(step)
+            .transition(.opacity)
+
+            controls
         }
-        .padding(20)
-        .background(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .fill(.ultraThinMaterial)
-                .shadow(color: .black.opacity(0.4), radius: 20, y: 10)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .stroke(current.accent.opacity(0.3), lineWidth: 1)
-        )
+        .padding(18)
+        .background(RoundedRectangle(cornerRadius: 22, style: .continuous).fill(Self.surface))
+        .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(.white.opacity(0.06), lineWidth: 1))
     }
 
-    // MARK: - Bottom Controls
-
-    private var bottomControls: some View {
-        HStack {
-            // Back button
+    private var controls: some View {
+        HStack(spacing: 12) {
             if step > 0 {
-                Button {
-                    navigate(to: step - 1)
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "arrow.left")
-                            .font(.system(size: 14, weight: .bold))
-                        Text("Back")
-                            .font(.system(size: 14, weight: .semibold, design: .rounded))
-                    }
+                Button("Back") { go(to: step - 1) }
+                    .madFont(size: 15, weight: .semibold, design: .rounded, maxScale: 1.3)
                     .foregroundColor(.white.opacity(0.7))
-                    .padding(.horizontal, 18)
-                    .padding(.vertical, 12)
-                    .background(Capsule().fill(Color.white.opacity(0.12)))
-                }
             }
 
-            Spacer()
-
-            // Progress dots
             HStack(spacing: 6) {
                 ForEach(steps.indices, id: \.self) { i in
-                    Circle()
-                        .fill(i == step ? current.accent : Color.white.opacity(0.25))
-                        .frame(width: i == step ? 10 : 6, height: i == step ? 10 : 6)
-                        .animation(.spring(response: 0.3), value: step)
+                    Capsule()
+                        .fill(i == step ? current.accent : Color.white.opacity(0.2))
+                        .frame(width: i == step ? 18 : 6, height: 6)
                 }
             }
+            .frame(maxWidth: .infinity)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Step \(step + 1) of \(steps.count)")
 
-            Spacer()
-
-            // Next / Done button
             Button {
-                if isLast {
-                    switchToTab(0)
-                    UserDefaults.standard.set(true, forKey: Self.seenKey)
-                    onComplete()
-                } else {
-                    navigate(to: step + 1)
-                }
+                if isLast { finish() } else { go(to: step + 1) }
             } label: {
-                HStack(spacing: 6) {
-                    Text(isLast ? "Done" : "Next")
-                        .font(.system(size: 15, weight: .bold, design: .rounded))
-                    Image(systemName: isLast ? "checkmark" : "arrow.right")
-                        .font(.system(size: 13, weight: .bold))
-                }
-                .foregroundColor(.white)
-                .padding(.horizontal, 22)
-                .padding(.vertical, 12)
-                .background(
-                    Capsule().fill(
-                        LinearGradient(
-                            colors: [current.accent, current.accent.opacity(0.75)],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                    )
-                )
-                .shadow(color: current.accent.opacity(0.35), radius: 8, y: 3)
+                Text(isLast ? "Done" : "Next")
+                    .madFont(size: 15, weight: .bold, design: .rounded, maxScale: 1.3)
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 22)
+                    .padding(.vertical, 11)
+                    .background(Capsule().fill(MADTheme.Colors.madRed))
             }
         }
     }
 
     // MARK: - Navigation
 
-    private func navigate(to newStep: Int) {
-        // Hide card, switch tab, then show card for the new step.
-        withAnimation(.easeOut(duration: 0.15)) {
-            cardVisible = false
+    /// Tab first, then (next run loop, after the tab has rebuilt) a short
+    /// cross-fade of the card's text. The card itself never moves.
+    private func go(to newStep: Int) {
+        MADHaptics.tap()
+        switchToTab(steps[newStep].tabIndex)
+        DispatchQueue.main.async {
+            withAnimation(.easeInOut(duration: 0.22)) { step = newStep }
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
-            step = newStep
-            switchToTab(steps[newStep].tabIndex)
-            withAnimation(.spring(response: 0.45, dampingFraction: 0.82)) {
-                cardVisible = true
-            }
-        }
+    }
+
+    private func finish() {
+        switchToTab(0)
+        UserDefaults.standard.set(true, forKey: Self.seenKey)
+        withAnimation(.easeOut(duration: 0.2)) { shown = false }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { onComplete() }
     }
 
     private func switchToTab(_ tab: Int) {
@@ -263,12 +175,12 @@ private struct GuidedTourStep {
             tabName: "Dashboard",
             icon: "house.fill",
             tabIndex: 0,
-            title: "Your Home Base",
-            body: "This is where you track today's progress, see your streak, and stay on top of competitions and challenges.",
+            title: "Your day at a glance",
+            body: "Your streak, today's mile and Flamey, all in one place.",
             tips: [
-                "Tap the pencil icon to log a manual workout",
-                "Your streak and today's miles update live",
-                "Scroll down for stats, medals, and workout history"
+                "Tap Start to track a walk or run",
+                "Walks from Apple Health count on their own",
+                "Scroll down for challenges and medals"
             ],
             accent: MADTheme.Colors.madRed
         ),
@@ -276,12 +188,11 @@ private struct GuidedTourStep {
             tabName: "Compete",
             icon: "trophy.fill",
             tabIndex: 1,
-            title: "Challenge Your Friends",
-            body: "Create head-to-head or group competitions. Race to hit miles, maintain streaks, or outlast each other over days or weeks.",
+            title: "Race your friends",
+            body: "Head-to-head or group competitions over days or weeks.",
             tips: [
-                "Tap + to create a new competition",
-                "Invite friends or share a join code",
-                "Watch the leaderboard update in real time"
+                "Tap + to start a competition",
+                "Invite friends to race with you"
             ],
             accent: .orange
         ),
@@ -289,25 +200,23 @@ private struct GuidedTourStep {
             tabName: "Feed",
             icon: "square.stack.fill",
             tabIndex: 2,
-            title: "See What's Happening",
-            body: "Photo posts, workout activity, and stories from you and your friends all flow through here.",
+            title: "See everyone's walks",
+            body: "Photos, stories and who's out walking right now.",
             tips: [
-                "Complete your mile to unlock posting",
-                "Hype friends' workouts with the fire button",
-                "Tap a name or photo to visit their profile"
+                "Post a photo once your mile is done",
+                "Tap the clap to hype a friend's walk"
             ],
-            accent: .blue
+            accent: MADTheme.Colors.walkBlue
         ),
         GuidedTourStep(
             tabName: "Friends",
             icon: "person.2.fill",
             tabIndex: 3,
-            title: "Build Your Crew",
-            body: "Find friends, climb the leaderboard, and nudge anyone who's slacking. Streaks are better together.",
+            title: "Keep each other going",
+            body: "See who's done today and nudge anyone running out of time.",
             tips: [
-                "Search by username or share your QR code",
-                "Star close friends for quick access",
-                "Check the leaderboard for weekly rankings"
+                "Tap Add friends to find people",
+                "Walk together live with a friend"
             ],
             accent: .cyan
         ),
@@ -315,12 +224,11 @@ private struct GuidedTourStep {
             tabName: "Profile",
             icon: "person.fill",
             tabIndex: 4,
-            title: "Your Running Resume",
-            body: "View your stats, earned medals, posts, and activity history. Pin your favorite badges and share your profile.",
+            title: "Your streak, your story",
+            body: "Your stats, medals and posts, all in one place.",
             tips: [
-                "Pin up to 3 favorite medals to show off",
-                "Tap the gear icon for all settings",
-                "Share your profile QR code with friends"
+                "The gear opens Settings",
+                "Share your profile with friends"
             ],
             accent: .purple
         )
