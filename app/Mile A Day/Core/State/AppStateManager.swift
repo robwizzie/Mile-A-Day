@@ -47,6 +47,10 @@ class AppStateManager: ObservableObject {
             NotificationPrePrompt.release()
             currentState = .main
             splashOverlay = true
+            // Build the home screen only once the splash is on screen
+            // (`SplashView` calls `mountMain()`): building it first held the
+            // launch on black for ~1.5s.
+            mainMounted = false
             startSplashOverlayFallback()
         } else {
             startSplashTimer()
@@ -59,6 +63,16 @@ class AppStateManager: ObservableObject {
     /// users). `SplashView` clears it via `finishSplashOverlay()` once it has
     /// dissolved into the real dashboard.
     @Published var splashOverlay = false
+
+    /// False only while a cold launch's splash is getting on screen; then
+    /// `mountMain()` lets RootView build `MainTabView` under it.
+    @Published var mainMounted = true
+
+    func mountMain() {
+        DispatchQueue.main.async {
+            if !self.mainMounted { self.mainMounted = true }
+        }
+    }
 
     /// Whether the splash hands off straight into the app (the same test
     /// `completeSplash` routes on).
@@ -76,6 +90,7 @@ class AppStateManager: ObservableObject {
     /// splash that never appeared at all.
     private func startSplashOverlayFallback() {
         DispatchQueue.main.asyncAfter(deadline: .now() + 8) {
+            self.mainMounted = true
             self.splashOverlay = false
         }
     }

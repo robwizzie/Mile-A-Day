@@ -1,275 +1,544 @@
 import SwiftUI
 import UIKit
+import QuartzCore
 
 /// Launch experience for Mile A Day: split-flap, then a real reveal.
 ///
-/// Three red flap tiles rattle through numbers like a departures board and
-/// land, one after another, on M · A · D (a tick each). They merge into the
-/// app icon with a thump. Then:
-/// - **Returning users** (`AppStateManager.splashOverlay`): the app is
-///   already running UNDER the splash. The splash waits until the dashboard
-///   reports, through `SplashGate`, that its data has loaded and where its
-///   real "Mile A Day" title sits on screen. Then the icon flies into that
-///   title and dissolves while the splash's own background fades away,
-///   revealing the actual home screen. There is no fake skeleton: what shows
-///   through is the real dashboard. If the dashboard never reports (another
-///   tab restored, a stuck load), the reveal starts anyway at `revealCap`.
-/// - **New users / sign-in** (no dashboard yet): "Mile A Day" rises under
-///   the icon and the splash hands off at `wordmarkHandoffDelay`.
+/// Three flap tiles fold through numbers like a departures board and land,
+/// one after another, on M · A · D; they merge into the app icon. Then:
+/// - **Returning users** (`AppStateManager.splashOverlay`): the home screen
+///   is built UNDER the splash (`mountMain()`, once the splash is showing).
+///   When the dashboard reports through `SplashGate` that its data has loaded
+///   (plus a short settle), the icon flies into the real "Mile A Day" title
+///   and the splash's background fades away, revealing the actual dashboard.
+///   Capped at `revealCap` if the dashboard never reports.
+/// - **New users / sign-in**: "Mile A Day" rises under the icon and the
+///   splash hands off with `completeSplash()`.
 ///
-/// Every frame is a pure function of time (`TimelineView`), never a chain of
-/// `withAnimation` / `asyncAfter` state flips, so a first frame before
-/// `onAppear`, a safe-area settle or a slow launch can't leave one layer out
-/// of step with another.
+/// Everything moves with Core Animation (`SplashLayerView`): every fold, the
+/// merge and the reveal are scheduled up front as `CAAnimation`s and drawn by
+/// the render server. A SwiftUI `TimelineView` re-renders on the main thread,
+/// and launch is when the main thread is busiest (building the tab view,
+/// loading HealthKit), so the first version dropped to ~20fps exactly while
+/// the flaps were flipping and the icon was flying. Render-server animations
+/// keep their frame rate even while the app's main thread is blocked.
 struct SplashView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ObservedObject private var gate = SplashGate.shared
-
-    @State private var start: Date?
-    /// Decided once on appear: is the app running underneath?
-    @State private var overApp = false
-    /// When the dissolve into the dashboard starts (overlay mode only).
-    @State private var revealAt: Date?
-
-    private static let wordmarkHandoffDelay: TimeInterval = 3.7
-    private static let reducedHandoffDelay: TimeInterval = 0.9
-    /// Reveal anyway if the dashboard hasn't reported ready by then.
-    private static let revealCap: TimeInterval = 6.0
-    private static let revealDuration: TimeInterval = 0.9
-    /// Flap changes per second while a tile is still searching. Fast enough
-    /// to read as a departures board, slow enough that each fold is seen
-    /// (28/s read as flicker).
-    private static let flipRate: Double = 9
-
-    // MARK: - Timeline (seconds after appear)
-    private enum Beat {
-        static let tilesIn: Double = 0.35
-        /// Tile i lands at `firstLanding + i * landingGap`.
-        static let firstLanding: Double = 1.1
-        static let landingGap: Double = 0.35
-        /// The soft red glow a tile gives as it lands.
-        static let flash: Double = 0.35
-        static let mergeStart: Double = 2.3
-        static let mergeEnd: Double = 2.85
-        static let wordmarkIn: Double = 2.8
-        static let taglineIn: Double = 3.05
-        static let textSettle: Double = 0.5
-    }
-
-    private static let letters: [Character] = ["M", "A", "D"]
-    private static let digits: [Character] = Array("0123456789")
-
-    // MARK: - Palette (the app's own: dark ember background, madRed)
-    private let red = MADTheme.Colors.madRed
-    private let tileFill = Color(red: 0.165, green: 0.09, blue: 0.114)
-    private let seam = Color(red: 0.05, green: 0.02, blue: 0.04)
+    @StateObject private var driver = SplashDriver()
 
     var body: some View {
-        GeometryReader { geo in
-            TimelineView(.animation(minimumInterval: nil, paused: start == nil)) { context in
-                let t = start.map { context.date.timeIntervalSince($0) } ?? 0
-                let r = revealAt.map { context.date.timeIntervalSince($0) / Self.revealDuration } ?? 0
-                frame(at: reduceMotion ? 10 : t,
-                      reveal: Self.easeInOut(Self.clamp(r)),
-                      size: geo.size,
-                      origin: geo.frame(in: .global).origin)
-                    .opacity(reduceMotion ? Self.progress(t, 0, 0.3) : 1)
+        SplashLayerRepresentable(driver: driver, reduceMotion: reduceMotion)
+            .ignoresSafeArea()
+            .allowsHitTesting(!driver.revealing)
+            .onReceive(gate.$ready) { ready in
+                if ready { driver.dashboardReady() }
             }
-        }
-        .ignoresSafeArea()
-        .allowsHitTesting(revealAt == nil)
-        .onAppear(perform: begin)
-        .onReceive(gate.$ready) { ready in
-            if ready { scheduleReveal() }
-        }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Mile A Day")
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Mile A Day")
     }
+}
 
-    // MARK: - Frame
+// MARK: - Timeline
 
-    private func frame(at t: Double, reveal: Double, size: CGSize, origin: CGPoint) -> some View {
-        let width = min(size.width, 440)
-        let tileWidth = width * 0.2
-        let tileHeight = width * 0.27
-        let gap = width * 0.03
-        let iconSize = width * 0.27
-        let center = CGPoint(x: size.width / 2, y: size.height * 0.42)
+/// Seconds after the splash's first frame.
+enum SplashBeat {
+    static let tilesIn: Double = 0.35
+    /// Tile i lands at `firstLanding + i * landingGap`.
+    static let firstLanding: Double = 1.1
+    static let landingGap: Double = 0.35
+    /// The soft red glow a tile gives as it lands.
+    static let flash: Double = 0.35
+    static let mergeStart: Double = 2.3
+    static let mergeEnd: Double = 2.85
+    static let wordmarkIn: Double = 2.8
+    static let taglineIn: Double = 3.05
+    static let textSettle: Double = 0.5
+    /// Flap changes per second while a tile is searching.
+    static let flipRate: Double = 9
+    /// When the home screen starts building under the splash: the tiles are
+    /// on screen and animating on the render server by then, so the build's
+    /// main-thread work can't show.
+    static let mountMain: Double = 0.5
+    /// New users: hand off after the wordmark.
+    static let wordmarkHandoff: Double = 3.7
+    /// Returning users: never reveal before the icon has landed and rested.
+    static let earliestReveal: Double = 3.1
+    /// After the dashboard reports ready, let its first data pass settle.
+    static let readySettle: Double = 0.35
+    /// Reveal anyway if the dashboard hasn't reported by then.
+    static let revealCap: Double = 6.0
+    static let revealDuration: Double = 0.9
+}
 
-        let merge = Self.easeInOut(Self.progress(t, Beat.mergeStart, Beat.mergeEnd))
+// MARK: - Driver
 
-        // Where the real title is, in this view's coordinates (fallback: the
-        // header's usual spot under the status bar).
-        let target: CGPoint = gate.titleAnchor.map { CGPoint(x: $0.x - origin.x, y: $0.y - origin.y) }
-            ?? CGPoint(x: MADTheme.Spacing.md + 14, y: 70)
-        let iconX = center.x + (target.x - center.x) * CGFloat(reveal)
-        let iconY = center.y + (target.y - center.y) * CGFloat(reveal)
-        // Shrink to about the title's cap height, fading out over the second
-        // half so it reads as becoming the title underneath.
-        let landed = 0.6 + 0.4 * Self.easeOutBack(merge)
-        let iconScale = landed * (1 - (1 - 26 / Double(iconSize)) * reveal)
-        let iconOpacity = merge * (1 - Self.progress(reveal, 0.4, 1))
+/// Owns the splash's lifecycle on the main thread: when it started, when to
+/// build the home screen, when to reveal, when to hand off. The motion
+/// itself lives in `SplashLayerView`.
+@MainActor
+final class SplashDriver: ObservableObject {
+    @Published private(set) var revealing = false
 
-        return ZStack {
-            // The splash's own background: fades away to show the app.
-            MADTheme.Colors.appBackgroundGradient
-                .opacity(1 - reveal)
+    fileprivate weak var view: SplashLayerView?
+    private var startedAt: Date?
+    private var overApp = false
+    private var readyAt: Date?
+    private var revealScheduled = false
+    private var reduceMotion = false
 
-            RadialGradient(colors: [red.opacity(0.22 * merge * (1 - reveal)), .clear],
-                           center: UnitPoint(x: 0.5, y: center.y / max(size.height, 1)),
-                           startRadius: 0, endRadius: width * 0.7)
+    /// The layer view has put its first frame on screen.
+    fileprivate func started(overApp: Bool, reduceMotion: Bool) {
+        guard startedAt == nil else { return }
+        startedAt = Date()
+        self.overApp = overApp
+        self.reduceMotion = reduceMotion
 
-            // The flaps, sliding together and fading as they merge.
-            ForEach(0..<3, id: \.self) { i in
-                tile(i, at: t, width: tileWidth, height: tileHeight)
-                    .position(x: center.x + CGFloat(i - 1) * (tileWidth + gap) * CGFloat(1 - merge),
-                              y: center.y)
-                    .opacity(Self.progress(t, 0, Beat.tilesIn) * (1 - merge))
-            }
-
-            Image("mad-logo")
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .frame(width: iconSize, height: iconSize)
-                .clipShape(RoundedRectangle(cornerRadius: iconSize * 0.23, style: .continuous))
-                .scaleEffect(CGFloat(iconScale))
-                .opacity(iconOpacity)
-                .position(x: iconX, y: iconY)
-
-            if !overApp {
-                wordmark(at: t)
-                    .position(x: center.x, y: center.y + iconSize / 2 + width * 0.16)
-            }
-        }
-        .frame(width: size.width, height: size.height)
-    }
-
-    /// One flap tile. Each change is a fold: the face eases shut (vertical
-    /// scale cos→0), the next character swaps in at the fold, and it eases
-    /// open, so nothing ever jumps. It searches through digits until its
-    /// landing, folds once more onto its letter, then glows softly red.
-    private func tile(_ i: Int, at t: Double, width: CGFloat, height: CGFloat) -> some View {
-        let landing = Beat.firstLanding + Double(i) * Beat.landingGap
-        // Fold phase: whole numbers are "open", .5 is fully folded. Tiles
-        // are offset so they don't fold in lockstep. Frozen open after the
-        // landing fold completes.
-        let raw = t * Self.flipRate + Double(i) * 0.33
-        let landingRaw = (landing * Self.flipRate + Double(i) * 0.33).rounded(.up)
-        let phase = min(raw, landingRaw)
-        let landed = raw >= landingRaw - 0.5
-        let character: Character = landed
-            ? Self.letters[i]
-            : Self.digits[(Int((phase + 0.5).rounded(.down)) * 7 + i * 3) % Self.digits.count]
-        let fold = abs(cos(Double.pi * phase.truncatingRemainder(dividingBy: 1)))
-        let open = raw >= landingRaw ? 1 : fold
-        let flash = t >= landing
-            ? 0.55 * max(0, 1 - (t - landing) / Beat.flash)
-            : 0
-
-        return ZStack {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(tileFill)
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(red.opacity(flash))
-            Text(String(character))
-                .font(.system(size: height * 0.62, weight: .black, design: .rounded))
-                .foregroundColor(.white.opacity(landed ? 1 : 0.8))
-                .scaleEffect(x: 1, y: CGFloat(max(0.04, open)))
-            Rectangle()
-                .fill(seam)
-                .frame(height: 2)
-        }
-        .frame(width: width, height: height)
-    }
-
-    private func wordmark(at t: Double) -> some View {
-        let title = Self.easeOut(Self.progress(t, Beat.wordmarkIn, Beat.wordmarkIn + Beat.textSettle))
-        let line = Self.easeOut(Self.progress(t, Beat.taglineIn, Beat.taglineIn + Beat.textSettle))
-        return VStack(spacing: MADTheme.Spacing.sm) {
-            Text("Mile A Day")
-                .font(.system(size: 38, weight: .black, design: .rounded))
-                .foregroundColor(.white)
-                .lineLimit(1)
-                .minimumScaleFactor(0.6)
-                .opacity(title)
-                .offset(y: CGFloat(10 * (1 - title)))
-            Text("Day 1 starts today.")
-                .font(.system(size: 16, weight: .medium, design: .rounded))
-                .foregroundColor(.white.opacity(0.6))
-                .lineLimit(1)
-                .opacity(line)
-                .offset(y: CGFloat(8 * (1 - line)))
-        }
-        .padding(.horizontal, 32)
-    }
-
-    // MARK: - Lifecycle
-
-    private func begin() {
-        guard start == nil else { return }
-        overApp = AppStateManager.shared.splashOverlay
-        start = Date()
-
-        if !reduceMotion {
-            let tick = UIImpactFeedbackGenerator(style: .light)
-            let thump = UIImpactFeedbackGenerator(style: .heavy)
-            tick.prepare()
-            thump.prepare()
-            for i in 0..<3 {
-                DispatchQueue.main.asyncAfter(deadline: .now() + Beat.firstLanding + Double(i) * Beat.landingGap) {
-                    tick.impactOccurred(intensity: 0.6)
-                }
-            }
-            DispatchQueue.main.asyncAfter(deadline: .now() + Beat.mergeStart + 0.1) {
-                thump.impactOccurred(intensity: 0.9)
-            }
-        }
+        if !reduceMotion { scheduleHaptics() }
 
         if overApp {
-            // The dashboard may already be ready; otherwise wait for it, capped.
-            if gate.ready { scheduleReveal() }
-            DispatchQueue.main.asyncAfter(deadline: .now() + Self.revealCap) { scheduleReveal() }
+            after(reduceMotion ? 0.1 : SplashBeat.mountMain) { AppStateManager.shared.mountMain() }
+            after(SplashBeat.revealCap) { [weak self] in self?.scheduleReveal() }
+            if readyAt != nil { scheduleReveal() }
         } else {
-            let handoff = reduceMotion ? Self.reducedHandoffDelay : Self.wordmarkHandoffDelay
-            DispatchQueue.main.asyncAfter(deadline: .now() + handoff) {
-                AppStateManager.shared.completeSplash()
-            }
+            after(reduceMotion ? 0.9 : SplashBeat.wordmarkHandoff) { AppStateManager.shared.completeSplash() }
         }
     }
 
-    /// Start the dissolve: never before the icon has landed, once only.
+    func dashboardReady() {
+        guard readyAt == nil else { return }
+        readyAt = Date()
+        if startedAt != nil { scheduleReveal() }
+    }
+
     private func scheduleReveal() {
-        guard overApp, revealAt == nil, let start else { return }
-        let earliest = start.addingTimeInterval(reduceMotion ? 0.3 : Beat.mergeEnd + 0.25)
-        let at = max(Date(), earliest)
-        revealAt = at
-        let finish = at.timeIntervalSinceNow + Self.revealDuration + 0.05
-        DispatchQueue.main.asyncAfter(deadline: .now() + max(0, finish)) {
+        guard overApp, !revealScheduled, let startedAt else { return }
+        revealScheduled = true
+        let earliest = startedAt.addingTimeInterval(reduceMotion ? 0.3 : SplashBeat.earliestReveal)
+        let settled = (readyAt ?? Date()).addingTimeInterval(readyAt == nil ? 0 : SplashBeat.readySettle)
+        let at = max(Date(), earliest, settled)
+        after(at.timeIntervalSinceNow) { [weak self] in self?.reveal() }
+    }
+
+    private func reveal() {
+        revealing = true
+        guard let view else {
+            AppStateManager.shared.finishSplashOverlay()
+            return
+        }
+        // The real title, in this view's coordinates (fallback: where the
+        // header's title sits under the status bar).
+        let target = SplashGate.shared.titleAnchor.map { view.convert($0, from: nil) }
+            ?? CGPoint(x: MADTheme.Spacing.md + 14, y: view.safeAreaInsets.top + MADTheme.Spacing.sm + 16)
+        view.reveal(to: target, flying: !reduceMotion) {
             AppStateManager.shared.finishSplashOverlay()
         }
     }
 
-    // MARK: - Easing (pure functions of t)
-
-    private static func clamp(_ x: Double) -> Double { min(max(x, 0), 1) }
-
-    /// 0→1 as `t` goes from `from` to `to`, clamped.
-    private static func progress(_ t: Double, _ from: Double, _ to: Double) -> Double {
-        guard to > from else { return t >= to ? 1 : 0 }
-        return clamp((t - from) / (to - from))
+    private func scheduleHaptics() {
+        let tick = UIImpactFeedbackGenerator(style: .light)
+        let thump = UIImpactFeedbackGenerator(style: .heavy)
+        tick.prepare()
+        thump.prepare()
+        for i in 0..<3 {
+            after(SplashBeat.firstLanding + Double(i) * SplashBeat.landingGap) {
+                tick.impactOccurred(intensity: 0.6)
+            }
+        }
+        after(SplashBeat.mergeStart + 0.1) { thump.impactOccurred(intensity: 0.9) }
     }
 
-    private static func easeOut(_ x: Double) -> Double { 1 - pow(1 - x, 3) }
+    private func after(_ seconds: Double, _ work: @escaping @MainActor () -> Void) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + max(0, seconds)) {
+            MainActor.assumeIsolated { work() }
+        }
+    }
+}
 
-    private static func easeInOut(_ x: Double) -> Double {
-        x < 0.5 ? 4 * x * x * x : 1 - pow(-2 * x + 2, 3) / 2
+// MARK: - SwiftUI bridge
+
+private struct SplashLayerRepresentable: UIViewRepresentable {
+    let driver: SplashDriver
+    let reduceMotion: Bool
+
+    func makeUIView(context: Context) -> SplashLayerView {
+        let overApp = AppStateManager.shared.splashOverlay
+        let view = SplashLayerView(endsOnWordmark: !overApp, reduceMotion: reduceMotion)
+        view.onFirstFrame = { [weak driver] in
+            driver?.started(overApp: overApp, reduceMotion: reduceMotion)
+        }
+        driver.view = view
+        return view
     }
 
-    /// Overshoots a touch then settles: the icon landing (gentle; a bigger
-    /// overshoot read as a jump).
-    private static func easeOutBack(_ x: Double) -> Double {
-        let c1 = 1.1, c3 = c1 + 1
-        return 1 + c3 * pow(x - 1, 3) + c1 * pow(x - 1, 2)
+    func updateUIView(_ uiView: SplashLayerView, context: Context) {}
+}
+
+// MARK: - Core Animation splash
+
+/// The splash's drawing. Builds its layers once it has a size, then adds
+/// every animation in one go with `beginTime`s relative to that moment, so
+/// the render server plays the whole sequence no matter what the main thread
+/// is doing.
+final class SplashLayerView: UIView {
+    var onFirstFrame: (@MainActor () -> Void)?
+
+    private let endsOnWordmark: Bool
+    private let reduceMotion: Bool
+    private var built = false
+
+    private let background = CAGradientLayer()
+    private let glow = CAGradientLayer()
+    private let icon = CALayer()
+    private var tiles: [CALayer] = []
+    private var iconSize: CGFloat = 100
+
+    private static let red = UIColor(MADTheme.Colors.madRed)
+    private static let tileFill = UIColor(red: 0.165, green: 0.09, blue: 0.114, alpha: 1)
+    private static let seam = UIColor(red: 0.05, green: 0.02, blue: 0.04, alpha: 1)
+    private static let letters: [Character] = ["M", "A", "D"]
+    private static let digits: [Character] = Array("0123456789")
+
+    init(endsOnWordmark: Bool, reduceMotion: Bool) {
+        self.endsOnWordmark = endsOnWordmark
+        self.reduceMotion = reduceMotion
+        super.init(frame: .zero)
+        backgroundColor = .clear
+        isOpaque = false
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        guard !built, bounds.width > 0, bounds.height > 0 else { return }
+        built = true
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        build()
+        CATransaction.commit()
+        onFirstFrame?()
+    }
+
+    // MARK: Build
+
+    private func build() {
+        let size = bounds.size
+        let width = min(size.width, 440)
+        let tileW = width * 0.2
+        let tileH = width * 0.27
+        let gap = width * 0.03
+        iconSize = width * 0.27
+        let center = CGPoint(x: size.width / 2, y: size.height * 0.42)
+        let scale = traitCollection.displayScale > 0 ? traitCollection.displayScale : 3
+        // Everything starts a beat after the first commit, so even a slow
+        // first frame can't eat the start of the sequence.
+        let t0 = CACurrentMediaTime() + 0.05
+        let total = SplashBeat.mergeEnd
+
+        // Background: the app's own gradient.
+        background.frame = bounds
+        background.colors = [
+            UIColor(red: 0.15, green: 0.08, blue: 0.10, alpha: 1).cgColor,
+            UIColor(red: 0.12, green: 0.06, blue: 0.08, alpha: 1).cgColor,
+            UIColor(red: 0.08, green: 0.04, blue: 0.06, alpha: 1).cgColor,
+            UIColor(red: 0.05, green: 0.02, blue: 0.04, alpha: 1).cgColor
+        ]
+        layer.addSublayer(background)
+
+        // Soft red light behind the mark, rising as it lands.
+        glow.type = .radial
+        glow.frame = bounds
+        glow.colors = [Self.red.withAlphaComponent(0.22).cgColor, Self.red.withAlphaComponent(0).cgColor]
+        glow.startPoint = CGPoint(x: 0.5, y: center.y / size.height)
+        glow.endPoint = CGPoint(x: 0.5 + width * 0.7 / size.width, y: center.y / size.height + width * 0.7 / size.height)
+        layer.addSublayer(glow)
+
+        // The icon.
+        icon.contents = UIImage(named: "mad-logo")?.cgImage
+        icon.contentsGravity = .resizeAspect
+        icon.bounds = CGRect(x: 0, y: 0, width: iconSize, height: iconSize)
+        icon.position = center
+        icon.cornerRadius = iconSize * 0.23
+        icon.cornerCurve = .continuous
+        icon.masksToBounds = true
+        layer.addSublayer(icon)
+
+        if reduceMotion {
+            // The finished frame, faded in once.
+            glow.opacity = 1
+            icon.opacity = 1
+            fade(layer: self.layer, from: 0, to: 1, at: t0, duration: 0.3)
+            if endsOnWordmark { addWordmark(below: center, width: width, at: t0, animated: false) }
+            return
+        }
+
+        // Glow and icon arrive with the merge.
+        glow.opacity = 1
+        addTimed(glow, keyframes("opacity", [0, 0, 1], times: [0, SplashBeat.mergeStart, total], total: total), at: t0)
+        icon.opacity = 1
+        addTimed(icon, keyframes("opacity", [0, 0, 1], times: [0, SplashBeat.mergeStart, total], total: total), at: t0)
+        let landed = keyframes("transform.scale", [0.6, 0.6, 1.04, 1.0],
+                               times: [0, SplashBeat.mergeStart, SplashBeat.mergeEnd - 0.15, total], total: total)
+        landed.timingFunctions = [CAMediaTimingFunction(name: .linear),
+                                  CAMediaTimingFunction(name: .easeOut),
+                                  CAMediaTimingFunction(name: .easeInEaseOut)]
+        addTimed(icon, landed, at: t0)
+
+        // The three flaps.
+        for i in 0..<3 {
+            let tile = makeTile(i, width: tileW, height: tileH, scale: scale, t0: t0)
+            let restX = center.x + CGFloat(i - 1) * (tileW + gap)
+            tile.position = CGPoint(x: center.x, y: center.y)
+            tile.opacity = 0
+            layer.insertSublayer(tile, below: icon)
+            tiles.append(tile)
+
+            let slide = keyframes("position.x", [Double(restX), Double(restX), Double(center.x)],
+                                  times: [0, SplashBeat.mergeStart, total], total: total)
+            slide.timingFunctions = [CAMediaTimingFunction(name: .linear),
+                                     CAMediaTimingFunction(name: .easeInEaseOut)]
+            addTimed(tile, slide, at: t0)
+            addTimed(tile, keyframes("opacity", [0, 1, 1, 0],
+                                     times: [0, SplashBeat.tilesIn, SplashBeat.mergeStart, total], total: total), at: t0)
+        }
+
+        if endsOnWordmark { addWordmark(below: center, width: width, at: t0, animated: true) }
+    }
+
+    /// One flap tile: a card, a red landing glow, the character (folding by
+    /// `transform.scale.y`, swapping its picture at each fold), and a seam.
+    private func makeTile(_ i: Int, width: CGFloat, height: CGFloat, scale: CGFloat, t0: CFTimeInterval) -> CALayer {
+        let tile = CALayer()
+        tile.bounds = CGRect(x: 0, y: 0, width: width, height: height)
+        tile.backgroundColor = Self.tileFill.cgColor
+        tile.cornerRadius = 10
+        tile.cornerCurve = .continuous
+
+        let flash = CALayer()
+        flash.frame = tile.bounds
+        flash.backgroundColor = Self.red.cgColor
+        flash.cornerRadius = 10
+        flash.cornerCurve = .continuous
+        flash.opacity = 0
+        tile.addSublayer(flash)
+
+        let glyph = CALayer()
+        glyph.frame = tile.bounds
+        glyph.contentsGravity = .center
+        glyph.contentsScale = scale
+        tile.addSublayer(glyph)
+
+        let seam = CALayer()
+        seam.frame = CGRect(x: 0, y: height / 2 - 1, width: width, height: 2)
+        seam.backgroundColor = Self.seam.cgColor
+        tile.addSublayer(seam)
+
+        // Fold phase in "flip units": whole numbers are open, .5 is shut.
+        // Tiles are offset a third of a flip so they don't fold in lockstep.
+        let rate = SplashBeat.flipRate
+        let offset = Double(i) * 0.33
+        let landing = SplashBeat.firstLanding + Double(i) * SplashBeat.landingGap
+        let landingRaw = (landing * rate + offset).rounded(.up)
+        let end = (landingRaw - offset) / rate
+        let time: (Double) -> Double = { raw in (raw - offset) / rate }
+
+        // Pictures swap at each fold; the letter arrives on the last one.
+        let fontSize = height * 0.62
+        func digit(at raw: Double) -> Character {
+            Self.digits[(Int((raw + 0.5).rounded(.down)) * 7 + i * 3) % Self.digits.count]
+        }
+        var images: [Any] = [Self.glyph(digit(at: offset), size: fontSize, alpha: 0.8, scale: scale)]
+        var imageTimes: [Double] = [0]
+        var n = (offset - 0.5).rounded(.up) + 0.5
+        while n < landingRaw - 0.5 {
+            images.append(Self.glyph(digit(at: n + 0.5), size: fontSize, alpha: 0.8, scale: scale))
+            imageTimes.append(time(n))
+            n += 1
+        }
+        let letter = Self.glyph(Self.letters[i], size: fontSize, alpha: 1, scale: scale)
+        images.append(letter)
+        imageTimes.append(time(landingRaw - 0.5))
+        glyph.contents = letter
+        let swap = CAKeyframeAnimation(keyPath: "contents")
+        swap.values = images
+        swap.keyTimes = imageTimes.map { NSNumber(value: $0 / end) }
+        swap.calculationMode = .discrete
+        swap.duration = end
+        addTimed(glyph, swap, at: t0)
+
+        // The fold: |cos(π · phase)|, sampled 8 times a flip.
+        var folds: [Double] = []
+        var foldTimes: [Double] = []
+        var raw = offset
+        while raw < landingRaw {
+            folds.append(max(0.04, abs(cos(Double.pi * raw.truncatingRemainder(dividingBy: 1)))))
+            foldTimes.append(time(raw))
+            raw += 0.125
+        }
+        folds.append(1)
+        foldTimes.append(end)
+        let fold = CAKeyframeAnimation(keyPath: "transform.scale.y")
+        fold.values = folds
+        fold.keyTimes = foldTimes.map { NSNumber(value: $0 / end) }
+        fold.duration = end
+        addTimed(glyph, fold, at: t0)
+
+        // A soft red glow as it lands.
+        let glowEnd = landing + SplashBeat.flash
+        addTimed(flash, keyframes("opacity", [0, 0, 0.55, 0], times: [0, landing, landing + 0.001, glowEnd], total: glowEnd), at: t0)
+
+        return tile
+    }
+
+    /// "Mile A Day" and the tagline under the icon (new users).
+    private func addWordmark(below center: CGPoint, width: CGFloat, at t0: CFTimeInterval, animated: Bool) {
+        let scale = traitCollection.displayScale > 0 ? traitCollection.displayScale : 3
+        let titleY = center.y + iconSize / 2 + width * 0.16
+        let lines: [(String, UIFont, CGFloat, Double, Double)] = [
+            ("Mile A Day", Self.rounded(38, .black), 1.0, SplashBeat.wordmarkIn, -12),
+            ("Day 1 starts today.", Self.rounded(16, .medium), 0.6, SplashBeat.taglineIn, 22)
+        ]
+        for (text, font, alpha, start, dy) in lines {
+            let label = CATextLayer()
+            label.string = NSAttributedString(string: text, attributes: [
+                .font: font,
+                .foregroundColor: UIColor.white.withAlphaComponent(alpha)
+            ])
+            label.alignmentMode = .center
+            label.contentsScale = scale
+            label.bounds = CGRect(x: 0, y: 0, width: bounds.width - 64, height: font.lineHeight + 4)
+            label.position = CGPoint(x: bounds.width / 2, y: titleY + CGFloat(dy))
+            label.opacity = 1
+            layer.addSublayer(label)
+            guard animated else { continue }
+            let rise = CABasicAnimation(keyPath: "position.y")
+            rise.fromValue = label.position.y + 10
+            rise.toValue = label.position.y
+            let show = CABasicAnimation(keyPath: "opacity")
+            show.fromValue = 0
+            show.toValue = 1
+            let both = CAAnimationGroup()
+            both.animations = [rise, show]
+            both.duration = SplashBeat.textSettle
+            both.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            both.beginTime = t0 + start
+            both.fillMode = .backwards
+            label.add(both, forKey: "in")
+        }
+    }
+
+    // MARK: Reveal
+
+    /// Fly the icon into the real title and fade the splash away, all on the
+    /// render server. `completion` runs once it's fully transparent.
+    func reveal(to target: CGPoint, flying: Bool, completion: @escaping () -> Void) {
+        let duration = SplashBeat.revealDuration
+        CATransaction.begin()
+        CATransaction.setCompletionBlock(completion)
+        CATransaction.setDisableActions(true)
+
+        let ease = CAMediaTimingFunction(name: .easeInEaseOut)
+        for faded in [background, glow] {
+            let fade = CABasicAnimation(keyPath: "opacity")
+            fade.fromValue = faded.presentation()?.opacity ?? 1
+            fade.toValue = 0
+            fade.duration = duration
+            fade.timingFunction = ease
+            faded.opacity = 0
+            faded.add(fade, forKey: "reveal")
+        }
+
+        let iconFade = CAKeyframeAnimation(keyPath: "opacity")
+        iconFade.values = [1, 1, 0]
+        iconFade.keyTimes = [0, 0.4, 1]
+        iconFade.duration = duration
+        icon.opacity = 0
+
+        if flying {
+            let move = CABasicAnimation(keyPath: "position")
+            move.fromValue = NSValue(cgPoint: icon.position)
+            move.toValue = NSValue(cgPoint: target)
+            let shrink = CABasicAnimation(keyPath: "transform.scale")
+            shrink.fromValue = 1
+            shrink.toValue = 26 / iconSize
+            let group = CAAnimationGroup()
+            group.animations = [move, shrink, iconFade]
+            group.duration = duration
+            group.timingFunction = ease
+            icon.position = target
+            icon.transform = CATransform3DMakeScale(26 / iconSize, 26 / iconSize, 1)
+            icon.add(group, forKey: "reveal")
+        } else {
+            icon.add(iconFade, forKey: "reveal")
+        }
+        CATransaction.commit()
+    }
+
+    // MARK: Helpers
+
+    private func keyframes(_ keyPath: String, _ values: [Double], times: [Double], total: Double) -> CAKeyframeAnimation {
+        let animation = CAKeyframeAnimation(keyPath: keyPath)
+        animation.values = values
+        animation.keyTimes = times.map { NSNumber(value: $0 / total) }
+        animation.duration = total
+        return animation
+    }
+
+    /// Add an animation that starts at `t0` and, before then, holds its
+    /// first value (so the model value — the END state — never flashes).
+    private func addTimed(_ target: CALayer, _ animation: CAAnimation, at t0: CFTimeInterval) {
+        animation.beginTime = t0
+        animation.fillMode = .backwards
+        target.add(animation, forKey: nil)
+    }
+
+    private func fade(layer target: CALayer, from: Float, to: Float, at t0: CFTimeInterval, duration: Double) {
+        let animation = CABasicAnimation(keyPath: "opacity")
+        animation.fromValue = from
+        animation.toValue = to
+        animation.duration = duration
+        animation.beginTime = t0
+        animation.fillMode = .backwards
+        target.opacity = to
+        target.add(animation, forKey: nil)
+    }
+
+    private static func rounded(_ size: CGFloat, _ weight: UIFont.Weight) -> UIFont {
+        let base = UIFont.systemFont(ofSize: size, weight: weight)
+        guard let descriptor = base.fontDescriptor.withDesign(.rounded) else { return base }
+        return UIFont(descriptor: descriptor, size: size)
+    }
+
+    private static var glyphCache: [String: CGImage] = [:]
+
+    /// A transparent pixel, should a glyph ever fail to render.
+    private static let blank: CGImage = {
+        let context = CGContext(data: nil, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
+                                space: CGColorSpaceCreateDeviceRGB(),
+                                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        return context!.makeImage()!
+    }()
+
+    /// One character as a picture, drawn once and reused.
+    private static func glyph(_ character: Character, size: CGFloat, alpha: CGFloat, scale: CGFloat) -> CGImage {
+        let key = "\(character)-\(Int(size))-\(alpha)"
+        if let cached = glyphCache[key] { return cached }
+        let font = rounded(size, .black)
+        let text = NSAttributedString(string: String(character), attributes: [
+            .font: font,
+            .foregroundColor: UIColor.white.withAlphaComponent(alpha)
+        ])
+        let textSize = text.size()
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = scale
+        let image = UIGraphicsImageRenderer(size: textSize, format: format).image { _ in
+            text.draw(at: .zero)
+        }
+        let cgImage = image.cgImage ?? blank
+        glyphCache[key] = cgImage
+        return cgImage
     }
 }
 

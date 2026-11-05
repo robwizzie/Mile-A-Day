@@ -68,15 +68,19 @@ struct RootView: View {
                 ))
 
             case .main:
-                MainTabView()
-                    .environmentObject(healthManager)
-                    .environmentObject(userManager)
-                    .environmentObject(notificationService)
-                    .environment(\.appStateManager, appStateManager)
-                    .transition(.asymmetric(
-                        insertion: .scale.combined(with: .opacity),
-                        removal: .opacity
-                    ))
+                // On a cold launch under the splash, the tab view is built only
+                // once the splash is showing (`mainMounted`).
+                if appStateManager.mainMounted {
+                    MainTabView()
+                        .environmentObject(healthManager)
+                        .environmentObject(userManager)
+                        .environmentObject(notificationService)
+                        .environment(\.appStateManager, appStateManager)
+                        .transition(.asymmetric(
+                            insertion: .scale.combined(with: .opacity),
+                            removal: .opacity
+                        ))
+                }
             }
         }
         // Returning users: the app is already running underneath; the splash

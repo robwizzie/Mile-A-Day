@@ -661,18 +661,12 @@ private struct IntroFeedArt: View {
                 .rotationEffect(.degrees(-9))
                 .offset(x: -width * 0.66, y: 14)
                 .introPop(0.12)
-            // The front one is a real feed post: who, their streak, the
-            // photo, the caption and the hype button, like in the app.
-            IntroFeedPost(photo: photos.first, height: height)
+            // The front one is the feed's real post card, scaled down
+            // (`PostCardView` .stacked: header, 4:5 photo, clap + comment +
+            // share, streak pill, caption).
+            IntroFeedPost(photo: photos.first, height: height, maxWidth: min(artWidth * 0.58, 240))
                 .introPop(0)
                 .introBob(4, period: 3.6)
-
-            // Mid left, over the side print: clear of Skip, the post's
-            // header and its Hype button.
-            IntroChip(text: "🔥 Hyped by 12")
-                .introBob(6, period: 3.0, phase: 0.4)
-                .introPop(0.35)
-                .offset(x: introClampX(-width * 0.8, "🔥 Hyped by 12", width: artWidth), y: -width * 0.05)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -760,84 +754,148 @@ private struct IntroPhotoCard: View {
     }
 }
 
-/// A feed post in miniature, from a real showcase photo (drawn sample when
-/// none loaded): avatar + name + streak, the photo, caption and hype row.
+/// The feed's post card in miniature, drawn to `PostCardView`'s `.stacked`
+/// chrome scaled by `k` (its sizes are for a ~375pt-wide card): 40pt avatar,
+/// 15pt bold name over "Walk · 1.02 mi · 2d", "…"; the photo edge to edge at
+/// 4:5; the clap (`hands.clap.fill`, orange once hyped) with its count,
+/// comment and share; the orange "N-day streak" pill; "name caption".
+/// Taller than the hero allows, it peeks: clipped with a soft bottom fade,
+/// like a feed scrolled to it.
 private struct IntroFeedPost: View {
     let photo: ShowcasePhoto?
     let height: CGFloat
+    let maxWidth: CGFloat
 
     var body: some View {
-        // Width first (a card that reads as a post), photo fills what's left.
-        let width = min(height * 0.82, 200)
-        let photoHeight = max(70, min(width * 1.1, height - 80))
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 7) {
-                avatar
-                Text(photo?.username ?? "rob")
-                    .madFont(size: 13, weight: .bold, design: .rounded, maxScale: 1.1)
-                    .lineLimit(1)
-                Spacer(minLength: 4)
-                if let streak = streakShown {
-                    Text("🔥 \(streak)")
-                        .madFont(size: 12, weight: .heavy, design: .rounded, maxScale: 1.1)
-                        .foregroundColor(Color(red: 1.0, green: 0.6, blue: 0.25))
-                        .lineLimit(1)
-                        .fixedSize()
-                }
+        let width = maxWidth
+        let k = width / 375
+        let natural = width * 1.72
+        let peeks = natural > height
+        let radius = 18 * max(k, 0.7)
+        card(width: width, k: k)
+            .frame(width: width, height: min(natural, height), alignment: .top)
+            .clipped()
+            .mask {
+                LinearGradient(stops: [.init(color: .black, location: 0),
+                                       .init(color: .black, location: peeks ? 0.82 : 1),
+                                       .init(color: .black.opacity(peeks ? 0 : 1), location: 1)],
+                               startPoint: .top, endPoint: .bottom)
             }
-            .padding(.horizontal, 10)
-            .frame(height: 40)
-
-            IntroPhotoCard.photoFace(photo: photo, slot: 0, width: width, height: photoHeight)
-
-            HStack(spacing: 6) {
-                Text("🔥 Hype")
-                    .madFont(size: 12, weight: .bold, design: .rounded, maxScale: 1.1)
-                    .padding(.horizontal, 9)
-                    .padding(.vertical, 4)
-                    .background(Capsule().fill(MADTheme.Colors.madRed))
-                Text(photo?.caption ?? "Fastest mile since the injury 😮‍💨")
-                    .madFont(size: 12, weight: .medium, design: .rounded, maxScale: 1.1)
-                    .opacity(0.8)
-                    .lineLimit(1)
-            }
-            .padding(.horizontal, 10)
-            .frame(height: 40)
-        }
-        .foregroundColor(.white)
-        .frame(width: width)
-        .background(Color(red: 0.10, green: 0.07, blue: 0.08))
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .shadow(color: .black.opacity(0.35), radius: 16, y: 8)
-        .accessibilityHidden(true)
+            .background(Color(red: 0.10, green: 0.06, blue: 0.08),
+                        in: RoundedRectangle(cornerRadius: radius, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+            .shadow(color: .black.opacity(0.35), radius: 16, y: 8)
+            .accessibilityHidden(true)
     }
 
-    /// The real post's streak; rob's when nothing loaded.
-    private var streakShown: Int? {
-        guard let photo else { return 535 }
-        return photo.streak
+    private var name: String { photo?.username ?? "rob" }
+    private var miles: Double { photo?.distance ?? 1.02 }
+    private var caption: String { photo?.caption ?? "Sunset beach walk 🌅" }
+    private var streak: Int { photo?.streak ?? 535 }
+    private var accent: Color { MADTheme.workoutColor("walking") }
+
+    private func card(width: CGFloat, k: CGFloat) -> some View {
+        VStack(alignment: .leading, spacing: 8 * k) {
+            // Header
+            HStack(spacing: 10 * k) {
+                avatar
+                    .frame(width: 40 * k, height: 40 * k)
+                    .clipShape(Circle())
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(name)
+                        .font(.system(size: 15 * k, weight: .bold, design: .rounded))
+                        .foregroundColor(.white)
+                    HStack(spacing: 4 * k) {
+                        Image(systemName: "figure.walk")
+                            .font(.system(size: 10 * k, weight: .bold))
+                            .foregroundColor(accent)
+                        Text("Walk · " + introMiles(miles) + " · 2d")
+                            .font(.system(size: 12 * k, weight: .medium, design: .rounded))
+                            .foregroundColor(.white.opacity(0.5))
+                    }
+                }
+                .lineLimit(1)
+                Spacer(minLength: 0)
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 15 * k, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.45))
+            }
+            .padding(.horizontal, 16 * k)
+            .padding(.top, 12 * k)
+
+            // Photo, edge to edge, 4:5
+            IntroPhotoCard.photoFace(photo: photo, slot: 0, width: width, height: width * 1.25)
+
+            // Clap + count, comment + count, share
+            HStack(spacing: 2 * k) {
+                HStack(spacing: 4 * k) {
+                    Image(systemName: "hands.clap.fill")
+                        .font(.system(size: 22 * k, weight: .medium))
+                        .foregroundColor(.orange)
+                    Text("12")
+                        .font(.system(size: 14 * k, weight: .heavy, design: .rounded))
+                        .monospacedDigit()
+                        .foregroundColor(.white.opacity(0.92))
+                }
+                .frame(minWidth: 44 * k, minHeight: 44 * k)
+                HStack(spacing: 4 * k) {
+                    Image(systemName: "bubble.right")
+                        .font(.system(size: 20 * k))
+                    Text("3")
+                        .font(.system(size: 13 * k, weight: .semibold, design: .rounded))
+                        .monospacedDigit()
+                }
+                .foregroundColor(.white.opacity(0.62))
+                .frame(minWidth: 44 * k, minHeight: 44 * k)
+                Image(systemName: "paperplane")
+                    .font(.system(size: 20 * k))
+                    .foregroundColor(.white.opacity(0.62))
+                    .frame(minWidth: 44 * k, minHeight: 44 * k)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 6 * k)
+
+            // Streak pill
+            HStack(spacing: 4 * k) {
+                Image(systemName: "flame.fill")
+                    .font(.system(size: 11 * k, weight: .bold))
+                Text("\(streak)-day streak")
+                    .font(.system(size: 12 * k, weight: .bold, design: .rounded))
+                    .monospacedDigit()
+            }
+            .foregroundColor(.orange)
+            .padding(.horizontal, 9 * k)
+            .padding(.vertical, 4 * k)
+            .background(Capsule().fill(Color.orange.opacity(0.16)))
+            .padding(.horizontal, 18 * k)
+
+            // Caption: bold name, then the caption
+            (Text(name).bold() + Text(" " + caption))
+                .font(.system(size: 14 * k, weight: .medium, design: .rounded))
+                .foregroundColor(.white.opacity(0.9))
+                .lineLimit(2)
+                .padding(.horizontal, 18 * k)
+                .padding(.bottom, 14 * k)
+        }
+        .frame(width: width, alignment: .leading)
     }
 
     @ViewBuilder
     private var avatar: some View {
-        // rob's real (kid) photo, bundled: right even offline or before the
-        // showcase loads.
+        // The poster's real (kid) photo: bundled for rob, so it's right even
+        // offline or before the showcase loads.
         let fallback = Image("onboarding-friend-rob").resizable().scaledToFill()
-        Group {
-            if let url = photo?.avatarURL {
-                AsyncImage(url: url) { phase in
-                    if case .success(let image) = phase {
-                        image.resizable().scaledToFill()
-                    } else {
-                        fallback
-                    }
+        if let url = photo?.avatarURL {
+            AsyncImage(url: url) { phase in
+                if case .success(let image) = phase {
+                    image.resizable().scaledToFill()
+                } else {
+                    fallback
                 }
-            } else {
-                fallback
             }
+        } else {
+            fallback
         }
-        .frame(width: 24, height: 24)
-        .clipShape(Circle())
     }
 }
 
@@ -851,7 +909,7 @@ private struct IntroFriendsArt: View {
         // A short hero (SE) keeps the note to one line so the tiles stay big
         // enough to show the faces.
         let roomy = height >= 210
-        let noteHeight: CGFloat = roomy ? 64 : 40
+        let noteHeight: CGFloat = roomy ? 72 : 40
         // Three tiles + two 12pt gaps inside a 20pt gutter each side; a tile
         // is 1.25× as tall as it is wide.
         let tile = min((height - 14 - noteHeight) / 1.25, 112, (artWidth - 40 - 24) / 3)
@@ -873,23 +931,24 @@ private struct IntroFriendsArt: View {
     }
 }
 
-/// The team's profile pictures are their kid photos; say so, playfully, and
-/// that a new user's can be anything.
+/// The team's profile pictures are their kid photos, and new users will see
+/// baby pics all over the app: say so, and that theirs can be anything
+/// (though a kid pic of themselves is the cool move).
 private struct IntroKidPhotoNote: View {
     let roomy: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text("👶 Yep, those are us as kids.")
+            Text("👶 Baby pics are our thing")
                 .madFont(size: 14, weight: .heavy, design: .rounded, maxScale: 1.15)
             if roomy {
-                Text("You'll spot them all over the app. Your pic can be anything.")
+                Text("You'll see them all over the app. Any pic works for yours, but a kid pic is way cooler 😎")
                     .madFont(size: 12, weight: .medium, design: .rounded, maxScale: 1.15)
                     .opacity(0.7)
             }
         }
         .foregroundColor(Color(red: 0.12, green: 0.08, blue: 0.09))
-        .lineLimit(2)
+        .lineLimit(3)
         .minimumScaleFactor(0.85)
         .multilineTextAlignment(.leading)
         .padding(.horizontal, 14)
