@@ -325,6 +325,7 @@ final class FlameyExporter {
     func itemMeta(_ item: FlameyItem) -> [String: Any] {
         var m: [String: Any] = [
             "id": item.rawValue,
+            "order": FlameyItem.allCases.firstIndex(of: item) ?? 0,
             "slot": item.slot.rawValue,
             "name": item.displayName,
             "family": item.family.rawValue,
@@ -357,6 +358,25 @@ final class FlameyExporter {
         if let p = FlameyPalette.palette(for: item) { m["palette"] = reflect(p) }
         if item.slot == .head || item.slot == .costume {
             m["month_crown_rise"] = num(FlameyArtRec.monthCrownRise(item))
+        }
+        // What wearing it does to Flamey himself (the figure stays code).
+        let look = makeLook(item, .full)
+        let fig = figure(look)
+        m["shows_face"] = fig.showsFace
+        m["shows_arms"] = look.showsArms
+        if item.slot != .color, let fp = look.figurePalette { m["figure_palette"] = reflect(fp) }
+        if item.slot == .held {
+            var holds: [String: Any] = [:]
+            for r in reaches {
+                if let h = FlameyArtRec.heldArmTargets(item, reach: r) {
+                    holds[key(r)] = [
+                        "left": h.left.map { pt($0) as Any } ?? NSNull(),
+                        "right": h.right.map { pt($0) as Any } ?? NSNull(),
+                        "left_hand": h.leftHand, "right_hand": h.rightHand,
+                    ] as [String: Any]
+                }
+            }
+            m["arm_hold"] = holds
         }
         return m
     }
