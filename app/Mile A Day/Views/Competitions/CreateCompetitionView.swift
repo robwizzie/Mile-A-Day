@@ -635,7 +635,7 @@ struct CreateCompetitionView: View {
                         Text(selectedType.description)
                             .madFont(size: 12, design: .rounded)
                             .foregroundColor(.white.opacity(0.7))
-                            .madBodyLines(2)
+                            .madBodyLines(3)
                     }
 
                     Spacer()
