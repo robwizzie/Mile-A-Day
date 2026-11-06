@@ -97,11 +97,11 @@ struct CompetitionDayDetailSheet: View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
                 Text(competition.type.displayName.uppercased())
-                    .font(.system(size: 10, weight: .black, design: .rounded))
+                    .madFont(size: 11, weight: .black, design: .rounded)
                     .tracking(1.2)
                     .foregroundColor(gradientColors.first ?? .white.opacity(0.5))
                 Text(titleText)
-                    .font(.system(size: 20, weight: .bold, design: .rounded))
+                    .madFont(size: 20, weight: .bold, design: .rounded)
                     .foregroundColor(.white)
             }
 
@@ -111,7 +111,7 @@ struct CompetitionDayDetailSheet: View {
                 dismiss()
             } label: {
                 Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 24))
+                    .madFont(size: 24, maxScale: 1.5)
                     .foregroundColor(.white.opacity(0.4))
             }
             .buttonStyle(.plain)
@@ -157,11 +157,13 @@ struct CompetitionDayDetailSheet: View {
     private func summaryStat(label: String, value: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(label.uppercased())
-                .font(.system(size: 9, weight: .heavy, design: .rounded))
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+                .madFont(size: 11, weight: .heavy, design: .rounded)
                 .tracking(1.0)
                 .foregroundColor(.white.opacity(0.45))
             Text(value)
-                .font(.system(size: 13, weight: .bold, design: .rounded))
+                .madFont(size: 13, weight: .bold, design: .rounded)
                 .foregroundColor(.white)
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
@@ -187,7 +189,7 @@ struct CompetitionDayDetailSheet: View {
                         .foregroundColor(.yellow)
                 } else {
                     Text("\(rank)")
-                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                        .madFont(size: 12, weight: .bold, design: .rounded)
                         .foregroundColor(.white.opacity(0.6))
                 }
             }
@@ -197,12 +199,14 @@ struct CompetitionDayDetailSheet: View {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 5) {
                     Text(user.displayName)
-                        .font(.system(size: 14, weight: .semibold, design: .rounded))
+                        .madFont(size: 14, weight: .semibold, design: .rounded)
                         .foregroundColor(.white)
-                        .lineLimit(1)
+                        .madNameLines()
                     if isMe {
                         Text("YOU")
-                            .font(.system(size: 8, weight: .bold))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.6)
+                            .madFont(size: 11, weight: .bold)
                             .foregroundColor(.white)
                             .padding(.horizontal, 4)
                             .padding(.vertical, 1)
@@ -215,7 +219,7 @@ struct CompetitionDayDetailSheet: View {
             Spacer()
 
             Text(miles > 0 ? String(format: "%.2f mi", miles) : "—")
-                .font(.system(size: 14, weight: .bold, design: .rounded))
+                .madFont(size: 14, weight: .bold, design: .rounded)
                 .foregroundColor(miles > 0 ? .white : .white.opacity(0.3))
                 .lineLimit(1)
                 .fixedSize(horizontal: true, vertical: false)
@@ -238,69 +242,69 @@ struct CompetitionDayDetailSheet: View {
         case .clash:
             if isWinner {
                 Text("Won the day · +1 pt")
-                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .madFont(size: 11, weight: .semibold, design: .rounded)
                     .foregroundColor(.yellow)
             } else if miles > 0 {
                 Text("No point")
-                    .font(.system(size: 10, weight: .medium, design: .rounded))
-                    .foregroundColor(.white.opacity(0.4))
+                    .madFont(size: 11, weight: .medium, design: .rounded)
+                    .foregroundColor(.white.opacity(0.6))
             } else {
                 Text("No activity")
-                    .font(.system(size: 10, weight: .medium, design: .rounded))
-                    .foregroundColor(.white.opacity(0.3))
+                    .madFont(size: 11, weight: .medium, design: .rounded)
+                    .foregroundColor(.white.opacity(0.6))
             }
         case .targets:
             if hitGoal {
                 Text("Hit target · +1 pt")
-                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .madFont(size: 11, weight: .semibold, design: .rounded)
                     .foregroundColor(.green)
             } else if miles > 0 {
                 let progress = min(1, miles / max(competition.options.goal, 0.1))
                 Text("\(ProgressCalculator.formatProgress(progress)) of target")
-                    .font(.system(size: 10, weight: .medium, design: .rounded))
+                    .madFont(size: 11, weight: .medium, design: .rounded)
                     .foregroundColor(.orange)
             } else {
                 Text("Missed target")
-                    .font(.system(size: 10, weight: .medium, design: .rounded))
-                    .foregroundColor(.white.opacity(0.4))
+                    .madFont(size: 11, weight: .medium, design: .rounded)
+                    .foregroundColor(.white.opacity(0.6))
             }
         case .streaks:
             if hitGoal {
                 Text("Streak safe")
-                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .madFont(size: 11, weight: .semibold, design: .rounded)
                     .foregroundColor(.green)
             } else if Calendar.current.isDateInToday(date) && miles >= 0 {
                 Text("Today — not yet done")
-                    .font(.system(size: 10, weight: .medium, design: .rounded))
+                    .madFont(size: 11, weight: .medium, design: .rounded)
                     .foregroundColor(.orange)
             } else {
                 Text("Life lost")
-                    .font(.system(size: 10, weight: .medium, design: .rounded))
+                    .madFont(size: 11, weight: .medium, design: .rounded)
                     .foregroundColor(.red.opacity(0.7))
             }
         case .apex:
             if isWinner {
                 Text("Most miles today")
-                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .madFont(size: 11, weight: .semibold, design: .rounded)
                     .foregroundColor(.green)
             } else if miles > 0 {
                 Text("Banked toward total")
-                    .font(.system(size: 10, weight: .medium, design: .rounded))
+                    .madFont(size: 11, weight: .medium, design: .rounded)
                     .foregroundColor(.white.opacity(0.5))
             } else {
                 Text("No activity")
-                    .font(.system(size: 10, weight: .medium, design: .rounded))
-                    .foregroundColor(.white.opacity(0.3))
+                    .madFont(size: 11, weight: .medium, design: .rounded)
+                    .foregroundColor(.white.opacity(0.6))
             }
         case .race:
             if miles > 0 {
                 Text("Toward finish line")
-                    .font(.system(size: 10, weight: .medium, design: .rounded))
+                    .madFont(size: 11, weight: .medium, design: .rounded)
                     .foregroundColor(.white.opacity(0.5))
             } else {
                 Text("No activity")
-                    .font(.system(size: 10, weight: .medium, design: .rounded))
-                    .foregroundColor(.white.opacity(0.3))
+                    .madFont(size: 11, weight: .medium, design: .rounded)
+                    .foregroundColor(.white.opacity(0.6))
             }
         }
     }

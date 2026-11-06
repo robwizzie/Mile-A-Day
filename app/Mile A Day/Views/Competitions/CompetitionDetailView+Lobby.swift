@@ -19,7 +19,7 @@ extension CompetitionDetailView {
                         Image(systemName: "slider.horizontal.3")
                             .font(.callout)
                         Text("Edit Settings")
-                            .font(MADTheme.Typography.callout)
+                            .madFont(size: 16, design: .rounded)
                             .fontWeight(.semibold)
                     }
                     .foregroundColor(CompeteDesign.ink)
@@ -66,12 +66,12 @@ extension CompetitionDetailView {
                 Image(systemName: "person.2.fill")
                     .foregroundColor(.orange)
                 Text("\(competition.acceptedUsersCount) of \(competition.users.count) joined")
-                    .font(MADTheme.Typography.headline)
+                    .madFont(size: 17, weight: .semibold, design: .rounded)
                     .foregroundColor(.white)
             }
 
             Text("Waiting for everyone to accept...")
-                .font(MADTheme.Typography.callout)
+                .madFont(size: 16, design: .rounded)
                 .foregroundColor(.white.opacity(0.6))
 
             ProgressView(
@@ -101,41 +101,41 @@ extension CompetitionDetailView {
 
         return VStack(spacing: MADTheme.Spacing.md) {
             Image(systemName: "calendar.badge.clock")
-                .font(.system(size: 32))
+                .madFont(size: 32, maxScale: 1.5)
                 .foregroundColor(.blue)
 
             Text("Competition Starts Soon")
-                .font(MADTheme.Typography.headline)
+                .madFont(size: 17, weight: .semibold, design: .rounded)
                 .foregroundColor(.white)
 
             // Countdown display
             HStack(spacing: MADTheme.Spacing.lg) {
                 VStack(spacing: 2) {
                     Text("\(hours)")
-                        .font(.system(size: 32, weight: .bold, design: .rounded))
+                        .madFont(size: 32, weight: .bold, design: .rounded)
                         .foregroundColor(.white)
                     Text("hours")
-                        .font(MADTheme.Typography.caption)
+                        .madFont(size: 12, design: .rounded)
                         .foregroundColor(.white.opacity(0.5))
                 }
 
                 Text(":")
-                    .font(.system(size: 28, weight: .bold, design: .rounded))
-                    .foregroundColor(.white.opacity(0.3))
+                    .madFont(size: 28, weight: .bold, design: .rounded)
+                    .foregroundColor(.white.opacity(0.6))
 
                 VStack(spacing: 2) {
                     Text("\(minutes)")
-                        .font(.system(size: 32, weight: .bold, design: .rounded))
+                        .madFont(size: 32, weight: .bold, design: .rounded)
                         .foregroundColor(.white)
                     Text("min")
-                        .font(MADTheme.Typography.caption)
+                        .madFont(size: 12, design: .rounded)
                         .foregroundColor(.white.opacity(0.5))
                 }
             }
 
             if let startDate = competition.startDateFormatted {
                 Text("Begins \(startDate.formatted(date: .abbreviated, time: .omitted))")
-                    .font(MADTheme.Typography.callout)
+                    .madFont(size: 16, design: .rounded)
                     .foregroundColor(.white.opacity(0.6))
             }
         }
@@ -197,16 +197,16 @@ extension CompetitionDetailView {
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Start Competition")
-                        .font(MADTheme.Typography.headline)
+                        .madFont(size: 17, weight: .semibold, design: .rounded)
 
                     if !canStart {
                         let needed = 2 - competition.acceptedUsersCount
                         Text("Need \(needed) more participant\(needed == 1 ? "" : "s")")
-                            .font(MADTheme.Typography.caption)
+                            .madFont(size: 12, design: .rounded)
                             .foregroundColor(.white.opacity(0.7))
                     } else {
                         Text("Begins tomorrow at midnight")
-                            .font(MADTheme.Typography.caption)
+                            .madFont(size: 12, design: .rounded)
                             .foregroundColor(.white.opacity(0.7))
                     }
                 }

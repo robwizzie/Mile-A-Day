@@ -20,10 +20,10 @@ struct RacePRsSection: View {
         VStack(spacing: MADTheme.Spacing.md) {
             HStack(spacing: MADTheme.Spacing.sm) {
                 Image(systemName: "stopwatch.fill")
-                    .font(.system(size: 14, weight: .semibold))
+                    .madFont(size: 14, weight: .semibold, maxScale: 1.5)
                     .foregroundStyle(MADTheme.Colors.redGradient)
                 Text("Race PRs")
-                    .font(MADTheme.Typography.headline)
+                    .madFont(size: 17, weight: .semibold, design: .rounded)
                     .foregroundColor(.primary)
                 Spacer()
             }
@@ -34,7 +34,7 @@ struct RacePRsSection: View {
                     .padding(.vertical, MADTheme.Spacing.md)
             } else if recordedDistances.isEmpty {
                 Text("No race PRs yet. Finish a mile, 5K or longer in one go to set your first.")
-                    .font(MADTheme.Typography.caption)
+                    .madFont(size: 12, design: .rounded)
                     .foregroundColor(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
             } else {
@@ -48,10 +48,10 @@ struct RacePRsSection: View {
                 HStack(spacing: 4) {
                     Text("See all distances")
                     Image(systemName: "chevron.right")
-                        .font(.system(size: 10, weight: .bold))
+                        .madFont(size: 10, weight: .bold, maxScale: 1.5)
                         .accessibilityHidden(true)
                 }
-                .font(.system(size: 13, weight: .bold, design: .rounded))
+                .madFont(size: 13, weight: .bold, design: .rounded)
                 .foregroundColor(MADTheme.Colors.madRed)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
@@ -219,16 +219,16 @@ struct RaceHistoryView: View {
     private func prHeader(_ rec: RaceRecord) -> some View {
         VStack(spacing: MADTheme.Spacing.sm) {
             Image(systemName: "trophy.fill")
-                .font(.system(size: 28, weight: .bold))
+                .madFont(size: 28, weight: .bold, maxScale: 1.5)
                 .foregroundStyle(MADTheme.Colors.redGradient)
             Text(RaceCatalog.formatTime(rec.durationSec))
-                .font(.system(size: 44, weight: .bold, design: .rounded))
+                .madFont(size: 44, weight: .bold, design: .rounded)
                 .foregroundColor(.primary)
             Text(RaceCatalog.formatPace(seconds: rec.durationSec, miles: rec.distanceMiles))
-                .font(.system(size: 17, weight: .semibold, design: .rounded))
+                .madFont(size: 17, weight: .semibold, design: .rounded)
                 .foregroundColor(MADTheme.Colors.madRed)
             Text("Personal record · \(formatDate(rec.achievedDate))")
-                .font(MADTheme.Typography.caption)
+                .madFont(size: 12, design: .rounded)
                 .foregroundColor(.secondary)
         }
         .frame(maxWidth: .infinity)
@@ -240,29 +240,29 @@ struct RaceHistoryView: View {
         VStack(spacing: MADTheme.Spacing.sm) {
             HStack {
                 Text("History")
-                    .font(MADTheme.Typography.headline)
+                    .madFont(size: 17, weight: .semibold, design: .rounded)
                     .foregroundColor(.primary)
                 Spacer()
                 Text("\(history.count) run\(history.count == 1 ? "" : "s")")
-                    .font(MADTheme.Typography.caption)
+                    .madFont(size: 12, design: .rounded)
                     .foregroundColor(.secondary)
             }
             ForEach(history) { rec in
                 HStack {
                     Text(formatDate(rec.achievedDate))
-                        .font(.system(size: 15, weight: .medium, design: .rounded))
+                        .madFont(size: 15, weight: .medium, design: .rounded)
                         .foregroundColor(.primary)
                     if rec.id == best?.id {
                         Image(systemName: "trophy.fill")
-                            .font(.system(size: 12, weight: .bold))
+                            .madFont(size: 12, weight: .bold, maxScale: 1.5)
                             .foregroundColor(MADTheme.Colors.madRed)
                     }
                     Spacer()
                     Text(RaceCatalog.formatPace(seconds: rec.durationSec, miles: rec.distanceMiles))
-                        .font(MADTheme.Typography.caption)
+                        .madFont(size: 12, design: .rounded)
                         .foregroundColor(.secondary)
                     Text(RaceCatalog.formatTime(rec.durationSec))
-                        .font(.system(size: 16, weight: .semibold, design: .rounded))
+                        .madFont(size: 16, weight: .semibold, design: .rounded)
                         .foregroundColor(rec.id == best?.id ? MADTheme.Colors.madRed : .primary)
                         .frame(minWidth: 68, alignment: .trailing)
                 }
@@ -278,13 +278,13 @@ struct RaceHistoryView: View {
     private var emptyState: some View {
         VStack(spacing: MADTheme.Spacing.sm) {
             Image(systemName: "stopwatch")
-                .font(.system(size: 32, weight: .medium))
+                .madFont(size: 32, weight: .medium, maxScale: 1.5)
                 .foregroundColor(.secondary)
             Text("No \(distance.name) runs yet")
-                .font(MADTheme.Typography.headline)
+                .madFont(size: 17, weight: .semibold, design: .rounded)
                 .foregroundColor(.primary)
             Text("Run this distance to set your first PR.")
-                .font(MADTheme.Typography.caption)
+                .madFont(size: 12, design: .rounded)
                 .foregroundColor(.secondary)
         }
         .padding(.top, 60)

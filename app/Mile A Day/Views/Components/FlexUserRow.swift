@@ -42,24 +42,24 @@ struct FlexUserRow: View {
 
                     VStack(alignment: .leading, spacing: 2) {
                         Text(user.displayName)
-                            .font(.system(size: 13, weight: .semibold, design: .rounded))
+                            .madFont(size: 13, weight: .semibold, design: .rounded)
                             .foregroundColor(.white)
 
                         let score = user.score ?? 0
                         Text(scoreLabel(score))
-                            .font(.system(size: 10, design: .rounded))
-                            .foregroundColor(.white.opacity(0.4))
+                            .madFont(size: 11, design: .rounded)
+                            .foregroundColor(.white.opacity(0.6))
                     }
 
                     Spacer()
 
                     HStack(spacing: 6) {
                         Text("Flex")
-                            .font(.system(size: 12, weight: .bold, design: .rounded))
+                            .madFont(size: 12, weight: .bold, design: .rounded)
                             .foregroundColor(typeColor)
 
                         Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                            .font(.system(size: 9, weight: .bold))
+                            .madFont(size: 9, weight: .bold, maxScale: 1.5)
                             .foregroundColor(typeColor.opacity(0.6))
                     }
                     .padding(.horizontal, 12)
@@ -86,10 +86,10 @@ struct FlexUserRow: View {
                     } label: {
                         HStack(spacing: MADTheme.Spacing.sm) {
                             Image(systemName: "paperplane.fill")
-                                .font(.system(size: 12))
+                                .madFont(size: 12, maxScale: 1.5)
                                 .foregroundColor(typeColor)
                             Text("Send flex (no message)")
-                                .font(.system(size: 12, weight: .medium, design: .rounded))
+                                .madFont(size: 12, weight: .medium, design: .rounded)
                                 .foregroundColor(.white.opacity(0.6))
                             Spacer()
                         }
@@ -110,7 +110,7 @@ struct FlexUserRow: View {
                                     sendFlex(message: preset)
                                 } label: {
                                     Text(preset)
-                                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                                        .madFont(size: 11, weight: .medium, design: .rounded)
                                         .foregroundColor(.white.opacity(0.8))
                                         .padding(.horizontal, 10)
                                         .padding(.vertical, 6)
@@ -132,7 +132,7 @@ struct FlexUserRow: View {
                     // Custom message input
                     HStack(spacing: MADTheme.Spacing.sm) {
                         TextField("Custom message...", text: $customMessage)
-                            .font(.system(size: 12, design: .rounded))
+                            .madFont(size: 12, design: .rounded)
                             .foregroundColor(.white)
                             .padding(.horizontal, 12)
                             .padding(.vertical, 8)
@@ -178,16 +178,17 @@ struct FlexUserRow: View {
             if showSentIndicator {
                 HStack(spacing: 6) {
                     Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 12))
+                        .madFont(size: 12, maxScale: 1.5)
                         .foregroundColor(typeColor)
                     Text("Flex sent")
-                        .font(.system(size: 11, weight: .semibold, design: .rounded))
+                        .madFont(size: 11, weight: .semibold, design: .rounded)
                         .foregroundColor(typeColor)
                     if let msg = sentMessage {
                         Text("— \"\(msg)\"")
-                            .font(.system(size: 11, design: .rounded))
+                            .madFont(size: 11, design: .rounded)
                             .foregroundColor(.white.opacity(0.5))
                             .lineLimit(1)
+                            .minimumScaleFactor(0.75)
                     }
                 }
                 .padding(.horizontal, MADTheme.Spacing.md)

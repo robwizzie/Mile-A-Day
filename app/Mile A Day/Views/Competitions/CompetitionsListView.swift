@@ -438,21 +438,22 @@ struct InlineConfirmBanner: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
-                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                    .madFont(size: 14, weight: .bold, design: .rounded, maxScale: 1.3)
                     .foregroundColor(.white)
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
                 Text(subtitle)
-                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .madFont(size: 11, weight: .medium, design: .rounded)
                     .foregroundColor(.white.opacity(0.62))
                     .lineLimit(1)
+                    .minimumScaleFactor(0.75)
             }
 
             Spacer(minLength: 6)
 
             Button(action: onCancel) {
                 Text("Cancel")
-                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .madFont(size: 13, weight: .semibold, design: .rounded)
                     .foregroundColor(.white.opacity(0.75))
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
@@ -464,7 +465,7 @@ struct InlineConfirmBanner: View {
 
             Button(action: onConfirm) {
                 Text(confirmLabel)
-                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .madFont(size: 13, weight: .bold, design: .rounded)
                     .foregroundColor(.white)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 8)

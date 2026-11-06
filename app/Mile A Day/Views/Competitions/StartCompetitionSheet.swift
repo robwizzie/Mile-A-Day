@@ -46,9 +46,9 @@ struct StartCompetitionSheet: View {
                     Button { choose(.blank) } label: {
                         HStack(spacing: 6) {
                             Image(systemName: "slider.horizontal.3")
-                                .font(.system(size: 12, weight: .bold))
+                                .madFont(size: 12, weight: .bold, maxScale: 1.5)
                             Text("Build a custom competition")
-                                .font(.system(size: 13, weight: .bold, design: .rounded))
+                                .madFont(size: 13, weight: .bold, design: .rounded)
                         }
                         .foregroundColor(MADTheme.Colors.madRed)
                         .frame(maxWidth: .infinity)

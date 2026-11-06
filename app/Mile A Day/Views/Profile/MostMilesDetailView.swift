@@ -52,9 +52,9 @@ struct MostMilesDetailView: View {
         VStack(spacing: MADTheme.Spacing.md) {
             HStack(spacing: MADTheme.Spacing.sm) {
                 Image(systemName: "trophy.fill")
-                    .font(.system(size: 14, weight: .semibold))
+                    .madFont(size: 14, weight: .semibold, maxScale: 1.5)
                 Text("Personal Record")
-                    .font(MADTheme.Typography.smallBold)
+                    .madFont(size: 14, weight: .semibold, design: .rounded)
             }
             .foregroundColor(.purple)
             .padding(.horizontal, MADTheme.Spacing.md)
@@ -65,17 +65,17 @@ struct MostMilesDetailView: View {
             )
 
             Text(miles.milesFormatted)
-                .font(.system(size: 52, weight: .bold, design: .rounded))
+                .madFont(size: 52, weight: .bold, design: .rounded)
                 .foregroundColor(.primary)
 
             VStack(spacing: MADTheme.Spacing.xs) {
                 Text("Most Miles in One Day")
-                    .font(MADTheme.Typography.body)
+                    .madFont(size: 17, design: .rounded)
                     .foregroundColor(.secondary)
 
                 if let dateString = bestDayDateString {
                     Text(dateString)
-                        .font(MADTheme.Typography.caption)
+                        .madFont(size: 12, design: .rounded)
                         .foregroundColor(.secondary)
                 }
             }
@@ -118,10 +118,10 @@ struct MostMilesDetailView: View {
             VStack(spacing: MADTheme.Spacing.md) {
                 HStack(spacing: MADTheme.Spacing.sm) {
                     Image(systemName: "figure.run")
-                        .font(.system(size: 14, weight: .semibold))
+                        .madFont(size: 14, weight: .semibold, maxScale: 1.5)
                         .foregroundStyle(MADTheme.Colors.redGradient)
                     Text("Workouts That Day")
-                        .font(MADTheme.Typography.headline)
+                        .madFont(size: 17, weight: .semibold, design: .rounded)
                         .foregroundColor(.primary)
                     Spacer()
                 }
@@ -130,7 +130,7 @@ struct MostMilesDetailView: View {
                         .tint(.secondary)
                         .scaleEffect(0.8)
                     Text("Loading workouts...")
-                        .font(MADTheme.Typography.caption)
+                        .madFont(size: 12, design: .rounded)
                         .foregroundColor(.secondary)
                 }
             }
@@ -140,10 +140,10 @@ struct MostMilesDetailView: View {
             VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
                 HStack(spacing: MADTheme.Spacing.sm) {
                     Image(systemName: "figure.run")
-                        .font(.system(size: 14, weight: .semibold))
+                        .madFont(size: 14, weight: .semibold, maxScale: 1.5)
                         .foregroundStyle(MADTheme.Colors.redGradient)
                     Text("Workouts That Day")
-                        .font(MADTheme.Typography.headline)
+                        .madFont(size: 17, weight: .semibold, design: .rounded)
                         .foregroundColor(.primary)
                 }
                 ForEach(dayWorkouts, id: \.uuid) { workout in
@@ -216,12 +216,12 @@ struct StatBox: View {
             }
             VStack(spacing: MADTheme.Spacing.xs) {
                 Text(value)
-                    .font(MADTheme.Typography.headline)
+                    .madFont(size: 17, weight: .semibold, design: .rounded)
                     .fontWeight(.bold)
                     .foregroundColor(MADTheme.Colors.primaryText)
                     .multilineTextAlignment(.center)
                 Text(title)
-                    .font(MADTheme.Typography.caption)
+                    .madFont(size: 12, design: .rounded)
                     .foregroundColor(MADTheme.Colors.secondaryText)
                     .multilineTextAlignment(.center)
             }
@@ -249,6 +249,7 @@ extension HKWorkoutActivityType {
 
 // Workout row component
 struct WorkoutRow: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let workout: HKWorkout
     var showDate: Bool = false
     /// Whether this run has a linked photo post — supplied by the list so we
@@ -336,11 +337,12 @@ struct WorkoutRow: View {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(alignment: .firstTextBaseline, spacing: 5) {
                     Text(verb)
-                        .font(.system(size: 14, weight: .bold, design: .rounded))
+                        .madFont(size: 14, weight: .bold, design: .rounded)
                         .foregroundColor(MADTheme.Colors.secondaryText)
                         .lineLimit(1)
+                        .minimumScaleFactor(0.75)
                     Text(workoutDistance)
-                        .font(.system(size: 17, weight: .black, design: .rounded))
+                        .madFont(size: 17, weight: .black, design: .rounded)
                         .monospacedDigit()
                         // Muted, never struck through: this distance is real and
                         // the user walked it. It just isn't being added twice.
@@ -354,13 +356,23 @@ struct WorkoutRow: View {
                 }
                 HStack(spacing: 5) {
                     Image(systemName: "clock.fill")
-                        .font(.system(size: 10, weight: .bold))
+                        .madFont(size: 10, weight: .bold, maxScale: 1.5)
                         .foregroundColor(.orange)
                     Text(paceText == nil ? workoutDuration : "\(workoutDuration) \u{2022} \(paceText!)")
-                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .madFont(size: 12, weight: .semibold, design: .rounded)
                         .monospacedDigit()
                         .foregroundColor(MADTheme.Colors.secondaryText)
                         .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                }
+
+                // At the accessibility sizes the date gives up its trailing
+                // column, which would otherwise squeeze everything beside it.
+                if dynamicTypeSize.isAccessibilitySize {
+                    let time = DateFormatter.shortTime.string(from: correctedStartTime)
+                    Text(showDate ? "\(workoutDateString) \u{2022} \(time)" : time)
+                        .madFont(size: 12, weight: .medium, design: .rounded)
+                        .foregroundColor(MADTheme.Colors.secondaryText)
                 }
 
                 // How it was recorded + what tapping in reveals — so a manual
@@ -376,18 +388,20 @@ struct WorkoutRow: View {
                 provenanceLine
             }
             Spacer(minLength: MADTheme.Spacing.sm)
-            VStack(alignment: .trailing, spacing: 2) {
-                if showDate {
-                    Text(workoutDateString)
-                        .font(.system(size: 12, weight: .bold, design: .rounded))
-                        .foregroundColor(MADTheme.Colors.primaryText)
+            if !dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .trailing, spacing: 2) {
+                    if showDate {
+                        Text(workoutDateString)
+                            .madFont(size: 12, weight: .bold, design: .rounded)
+                            .foregroundColor(MADTheme.Colors.primaryText)
+                    }
+                    Text(DateFormatter.shortTime.string(from: correctedStartTime))
+                        .madFont(size: 12, weight: .medium, design: .rounded)
+                        .foregroundColor(MADTheme.Colors.secondaryText)
                 }
-                Text(DateFormatter.shortTime.string(from: correctedStartTime))
-                    .font(.system(size: 12, weight: .medium, design: .rounded))
-                    .foregroundColor(MADTheme.Colors.secondaryText)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
             }
-            .lineLimit(1)
-            .fixedSize(horizontal: true, vertical: false)
         }
         .task(id: workout.uuid) {
             // Cheap existence probe (limit 1) — never enumerates route points.
@@ -439,7 +453,7 @@ struct WorkoutRow: View {
         }
         if !isCounted {
             Text(exclusionReason)
-                .font(.system(size: 11, weight: .medium, design: .rounded))
+                .madFont(size: 11, weight: .medium, design: .rounded)
                 .foregroundColor(MADTheme.Colors.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.top, 1)

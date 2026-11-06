@@ -158,7 +158,7 @@ struct HallOfStreaksSection: View {
                     withAnimation(MADTheme.Animation.quick) { showAll.toggle() }
                 } label: {
                     Text(showAll ? "Show less" : "Show all \(list.rows.count)")
-                        .font(MADTheme.Typography.smallBold)
+                        .madFont(size: 14, weight: .semibold, design: .rounded)
                         .foregroundColor(MADTheme.Colors.madRed)
                 }
                 .buttonStyle(.plain)
@@ -170,7 +170,7 @@ struct HallOfStreaksSection: View {
             // and once we start hiding rows it's also what keeps the section
             // honest about the history it isn't showing.
             Text(summaryLine(list))
-                .font(MADTheme.Typography.caption)
+                .madFont(size: 12, design: .rounded)
                 .foregroundColor(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -187,7 +187,7 @@ struct HallOfStreaksSection: View {
             // gone and assumes the section is broken.
             if list.minLength > 2, list.isTrimmed {
                 Text("\(list.minLength)+ days")
-                    .font(.system(size: 10, weight: .bold, design: .rounded))
+                    .madFont(size: 11, weight: .bold, design: .rounded)
                     .foregroundColor(.secondary)
                     .fixedSize()
                     .padding(.horizontal, 8)
@@ -227,18 +227,18 @@ struct HallOfStreaksSection: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(live ? "Longest ever — and still going" : "Longest ever")
-                    .font(MADTheme.Typography.caption)
+                    .madFont(size: 12, design: .rounded)
                     .foregroundColor(.secondary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.85)
                 HStack(spacing: 6) {
                     Text("\(response.longest_streak) days")
-                        .font(.system(size: 20, weight: .black, design: .rounded))
+                        .madFont(size: 20, weight: .black, design: .rounded)
                         .monospacedDigit()
                         .foregroundColor(.primary)
                     if let recordEra, !live {
                         Text(rangeText(recordEra))
-                            .font(.system(size: 12, weight: .medium, design: .rounded))
+                            .madFont(size: 12, weight: .medium, design: .rounded)
                             .foregroundColor(.secondary)
                             .lineLimit(1)
                             .minimumScaleFactor(0.8)
@@ -250,7 +250,7 @@ struct HallOfStreaksSection: View {
 
             if live {
                 Image(systemName: "flame.fill")
-                    .font(.system(size: 18, weight: .bold))
+                    .madFont(size: 18, weight: .bold, maxScale: 1.5)
                     .foregroundColor(gold)
             }
         }
@@ -282,24 +282,24 @@ struct HallOfStreaksSection: View {
             // Rank means something: #1 IS the record. Contrast with "ERA 27",
             // which was a position in a list nobody sees.
             Text("\(item.rank)")
-                .font(.system(size: 13, weight: .black, design: .rounded))
+                .madFont(size: 13, weight: .black, design: .rounded)
                 .monospacedDigit()
                 .foregroundColor(isRecord ? gold : .secondary)
                 .frame(width: 22, alignment: .center)
 
             HStack(alignment: .firstTextBaseline, spacing: 3) {
                 Text("\(era.length)")
-                    .font(.system(size: 19, weight: .black, design: .rounded))
+                    .madFont(size: 19, weight: .black, design: .rounded)
                     .monospacedDigit()
                     .foregroundColor(.primary)
                 Text(era.length == 1 ? "day" : "days")
-                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                    .madFont(size: 11, weight: .bold, design: .rounded)
                     .foregroundColor(.secondary)
             }
             .frame(width: 74, alignment: .leading)
 
             Text(era.is_current ? "\(startText(era)) – now" : rangeText(era))
-                .font(.system(size: 12, weight: .medium, design: .rounded))
+                .madFont(size: 12, weight: .medium, design: .rounded)
                 .foregroundColor(.secondary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
@@ -334,7 +334,7 @@ struct HallOfStreaksSection: View {
 
     private func tag(_ text: String, color: Color) -> some View {
         Text(text)
-            .font(.system(size: 9, weight: .black, design: .rounded))
+            .madFont(size: 11, weight: .black, design: .rounded)
             .tracking(0.8)
             .foregroundColor(color)
             .fixedSize()

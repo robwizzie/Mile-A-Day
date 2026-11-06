@@ -105,7 +105,7 @@ struct WorkoutSourceChip: View {
                             image.resizable().scaledToFill()
                         } placeholder: {
                             Image(systemName: attribution.symbol)
-                                .font(.system(size: 9, weight: .bold))
+                                .madFont(size: 9, weight: .bold, maxScale: 1.5)
                         }
                         .frame(width: 12, height: 12)
                         .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
@@ -116,8 +116,9 @@ struct WorkoutSourceChip: View {
                     }
                 }
                 Text(name)
-                    .font(.system(size: 10, weight: .bold, design: .rounded))
+                    .madFont(size: 11, weight: .bold, design: .rounded)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.75)
             }
             .padding(.horizontal, 7)
             .padding(.vertical, 3)
@@ -150,10 +151,10 @@ struct DuplicateNoticeView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
                 Image(systemName: "exclamationmark.triangle.fill")
-                    .font(.system(size: 11, weight: .bold))
+                    .madFont(size: 11, weight: .bold, maxScale: 1.5)
                     .foregroundStyle(MADTheme.Colors.warning)
                 Text("Not counted toward your miles")
-                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .madFont(size: 12, weight: .bold, design: .rounded)
                     .foregroundStyle(MADTheme.Colors.madWhite)
                 Spacer(minLength: 0)
             }
@@ -162,7 +163,7 @@ struct DuplicateNoticeView: View {
                 "\(sourceLabel) recorded this at the same time as another walk, "
                     + "so it looks like the same one written twice. We're counting it once."
             )
-            .font(.system(size: 11, weight: .medium, design: .rounded))
+            .madFont(size: 11, weight: .medium, design: .rounded)
             .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.65))
             .fixedSize(horizontal: false, vertical: true)
 
@@ -172,7 +173,7 @@ struct DuplicateNoticeView: View {
                         ProgressView().tint(MADTheme.Colors.madWhite)
                     } else {
                         Text("This was a separate walk — count it")
-                            .font(.system(size: 12, weight: .bold, design: .rounded))
+                            .madFont(size: 12, weight: .bold, design: .rounded)
                     }
                 }
                 .frame(maxWidth: .infinity)

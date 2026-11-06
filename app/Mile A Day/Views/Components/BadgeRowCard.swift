@@ -30,27 +30,30 @@ struct BadgeRowCard: View {
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text(badge.name)
-                        .font(MADTheme.Typography.body)
+                        .madFont(size: 17, design: .rounded)
                         .fontWeight(.medium)
                         .foregroundColor(badge.isLocked ? .secondary : .primary)
                         .lineLimit(1)
+                        .minimumScaleFactor(0.75)
 
                     if let progress {
                         HStack(spacing: 8) {
                             MedalProgressBar(fraction: progress.fraction, tint: badge.rarity.color)
                                 .frame(maxWidth: 90)
                             Text(progress.label)
-                                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                                .madFont(size: 11, weight: .semibold, design: .rounded)
                                 .monospacedDigit()
                                 .foregroundColor(.secondary)
                                 .lineLimit(1)
+                                .minimumScaleFactor(0.75)
                         }
                     } else {
                         Text(subtitle)
-                            .font(.system(size: 10, weight: .bold, design: .rounded))
+                            .madFont(size: 11, weight: .bold, design: .rounded)
                             .tracking(0.6)
                             .foregroundColor(badge.isLocked ? .secondary.opacity(0.6) : badge.rarity.color)
                             .lineLimit(1)
+                            .minimumScaleFactor(0.75)
                     }
                 }
 
@@ -58,12 +61,12 @@ struct BadgeRowCard: View {
 
                 if badge.isLocked {
                     Image(systemName: "chevron.right")
-                        .font(.system(size: 12, weight: .medium))
+                        .madFont(size: 12, weight: .medium, maxScale: 1.5)
                         .foregroundColor(.secondary.opacity(0.5))
                         .accessibilityHidden(true)
                 } else {
                     Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 18))
+                        .madFont(size: 18, maxScale: 1.5)
                         .foregroundColor(badge.rarity.color)
                         .accessibilityLabel("Earned")
                 }

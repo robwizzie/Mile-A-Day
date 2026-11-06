@@ -252,12 +252,12 @@ extension CompetitionDetailView {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
-                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .madFont(size: 13, weight: .bold, design: .rounded)
                     .foregroundColor(.white)
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
                 Text(subtitle)
-                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .madFont(size: 11, weight: .medium, design: .rounded)
                     .foregroundColor(.white.opacity(0.55))
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
@@ -298,9 +298,10 @@ extension CompetitionDetailView {
                 } label: {
                     VStack(spacing: 7) {
                         Text(tab.label)
-                            .font(.system(size: 14, weight: .bold, design: .rounded))
+                            .madFont(size: 14, weight: .bold, design: .rounded)
                             .foregroundColor(isOn ? CompeteDesign.ink : CompeteDesign.inkFaint)
                             .lineLimit(1)
+                            .minimumScaleFactor(0.75)
 
                         Rectangle()
                             .fill(isOn ? CompeteDesign.accent(competition.type) : Color.clear)
@@ -401,7 +402,7 @@ extension CompetitionDetailView {
 
         return VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
             Text("Today's Status")
-                .font(CompeteDesign.eyebrow)
+                .competeFont(CompeteDesign.eyebrow)
                 .tracking(CompeteDesign.eyebrowTracking)
                 .textCase(.uppercase)
                 .foregroundColor(CompeteDesign.inkFaint)
@@ -415,7 +416,7 @@ extension CompetitionDetailView {
 
                     HStack(spacing: MADTheme.Spacing.md) {
                         Image(systemName: hitGoal ? "flame.fill" : (isEliminated ? "xmark.circle.fill" : "circle"))
-                            .font(.system(size: 16))
+                            .madFont(size: 16, maxScale: 1.5)
                             .foregroundColor(hitGoal ? .orange : (isEliminated ? .red.opacity(0.5) : .white.opacity(0.25)))
                             .frame(width: 24)
 
@@ -424,22 +425,24 @@ extension CompetitionDetailView {
 
                         VStack(alignment: .leading, spacing: 2) {
                             Text(user.displayName)
-                                .font(MADTheme.Typography.callout)
+                                .madFont(size: 16, design: .rounded)
                                 .foregroundColor(.white.opacity(isEliminated ? 0.4 : 1.0))
                             if isEliminated {
                                 Text("OUT")
-                                    .font(.system(size: 9, weight: .heavy, design: .rounded))
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.6)
+                                    .madFont(size: 11, weight: .heavy, design: .rounded)
                                     .foregroundColor(.red.opacity(0.8))
                             } else if hitGoal {
                                 Text("Streak safe")
-                                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                                    .madFont(size: 11, weight: .semibold, design: .rounded)
                                     .foregroundColor(.green.opacity(0.8))
                             } else {
                                 Text(String(format: "%.2f / %@ %@",
                                             distance,
                                             competition.options.goalFormatted,
                                             competition.options.unit.shortDisplayName))
-                                    .font(.system(size: 10, weight: .medium, design: .rounded))
+                                    .madFont(size: 10, weight: .medium, design: .rounded)
                                     .foregroundColor(.white.opacity(0.5))
                             }
                         }
@@ -450,7 +453,7 @@ extension CompetitionDetailView {
                             HStack(spacing: 2) {
                                 ForEach(0..<min(competition.streakLives, 6), id: \.self) { i in
                                     Image(systemName: i < lives ? "heart.fill" : "heart")
-                                        .font(.system(size: 8))
+                                        .madFont(size: 8, maxScale: 1.5)
                                         .foregroundColor(i < lives ? .red : .white.opacity(0.15))
                                 }
                             }

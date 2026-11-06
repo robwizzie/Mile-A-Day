@@ -331,7 +331,7 @@ struct UnifiedStatsGrid: View {
         }
         .padding()
         .frame(maxWidth: .infinity, alignment: .leading)
-        .frame(height: 100)
+        .frame(minHeight: 100)
         .background(
             RoundedRectangle(cornerRadius: 12)
                 .fill(iconColor.opacity(0.1))

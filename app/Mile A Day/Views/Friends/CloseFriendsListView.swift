@@ -64,10 +64,10 @@ struct CloseFriendsListView: View {
 	private var privacyNote: some View {
 		HStack(alignment: .top, spacing: MADTheme.Spacing.sm) {
 			Image(systemName: "lock.fill")
-				.font(.system(size: 13, weight: .bold))
+				.madFont(size: 13, weight: .bold, maxScale: 1.5)
 				.foregroundColor(.yellow)
 			Text("Your close friends list is private. People are never told when you add or remove them. Use it to share activity with a smaller circle.")
-				.font(.system(size: 12, weight: .medium, design: .rounded))
+				.madFont(size: 12, weight: .medium, design: .rounded)
 				.foregroundColor(.white.opacity(0.6))
 				.fixedSize(horizontal: false, vertical: true)
 		}
@@ -118,14 +118,14 @@ struct CloseFriendsListView: View {
 
 			VStack(alignment: .leading, spacing: 2) {
 				Text(friend.username ?? friend.displayName)
-					.font(.system(size: 14, weight: .semibold))
+					.madFont(size: 14, weight: .semibold)
 					.foregroundColor(.white)
-					.lineLimit(1)
+					.madNameLines()
 				if friend.displayName != (friend.username ?? "") {
 					Text(friend.displayName)
-						.font(.system(size: 12, weight: .regular))
+						.madFont(size: 12, weight: .regular)
 						.foregroundColor(.white.opacity(0.5))
-						.lineLimit(1)
+						.madNameLines()
 				}
 			}
 
@@ -139,7 +139,7 @@ struct CloseFriendsListView: View {
 						ProgressView().scaleEffect(0.6).tint(.yellow)
 					} else {
 						Image(systemName: isClose ? "star.fill" : "star")
-							.font(.system(size: 16, weight: .bold))
+							.madFont(size: 16, weight: .bold, maxScale: 1.5)
 							.foregroundColor(isClose ? .yellow : .white.opacity(0.4))
 					}
 				}
@@ -161,21 +161,21 @@ struct CloseFriendsListView: View {
 	private func sectionHeader(_ title: String, count: Int) -> some View {
 		HStack {
 			Text(title)
-				.font(.system(size: 11, weight: .heavy, design: .rounded))
+				.madFont(size: 11, weight: .heavy, design: .rounded)
 				.tracking(1.0)
 				.foregroundColor(.white.opacity(0.5))
 			Spacer()
 			Text("\(count)")
-				.font(.system(size: 11, weight: .bold, design: .rounded))
-				.foregroundColor(.white.opacity(0.4))
+				.madFont(size: 11, weight: .bold, design: .rounded)
+				.foregroundColor(.white.opacity(0.6))
 		}
 		.padding(.horizontal, 4)
 	}
 
 	private func emptyRow(_ message: String) -> some View {
 		Text(message)
-			.font(.system(size: 13, weight: .medium, design: .rounded))
-			.foregroundColor(.white.opacity(0.4))
+			.madFont(size: 13, weight: .medium, design: .rounded)
+			.foregroundColor(.white.opacity(0.6))
 			.frame(maxWidth: .infinity, alignment: .leading)
 			.padding(MADTheme.Spacing.md)
 	}
@@ -184,7 +184,7 @@ struct CloseFriendsListView: View {
 		VStack(spacing: MADTheme.Spacing.md) {
 			ProgressView().tint(MADTheme.Colors.madRed)
 			Text("Loading…")
-				.font(.system(size: 13, weight: .medium, design: .rounded))
+				.madFont(size: 13, weight: .medium, design: .rounded)
 				.foregroundColor(.white.opacity(0.5))
 		}
 		.frame(maxWidth: .infinity)

@@ -17,7 +17,7 @@ struct CompactTypeButton: View {
                     .foregroundColor(isSelected ? iconColor : .white.opacity(0.6))
 
                 Text(label)
-                    .font(MADTheme.Typography.callout)
+                    .madFont(size: 16, design: .rounded)
                     .fontWeight(isSelected ? .semibold : .regular)
                     .foregroundColor(isSelected ? .white : .white.opacity(0.7))
             }
@@ -57,12 +57,12 @@ struct FriendSelectRow: View {
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(friend.displayName)
-                        .font(MADTheme.Typography.headline)
+                        .madFont(size: 17, weight: .semibold, design: .rounded, maxScale: 1.3)
                         .foregroundColor(.white)
 
                     if let username = friend.username {
                         Text("@\(username)")
-                            .font(MADTheme.Typography.caption)
+                            .madFont(size: 12, design: .rounded)
                             .foregroundColor(.white.opacity(0.6))
                     }
                 }
@@ -131,7 +131,7 @@ struct DurationPreset: View {
                     .foregroundColor(isSelected ? MADTheme.Colors.primary : .white.opacity(0.6))
 
                 Text(title)
-                    .font(MADTheme.Typography.callout)
+                    .madFont(size: 16, design: .rounded)
                     .fontWeight(isSelected ? .semibold : .regular)
                     .foregroundColor(.white)
             }
@@ -171,7 +171,7 @@ struct EndModeOption: View {
                     .foregroundColor(isSelected ? MADTheme.Colors.primary : .white.opacity(0.6))
 
                 Text(title)
-                    .font(MADTheme.Typography.callout)
+                    .madFont(size: 16, design: .rounded)
                     .fontWeight(isSelected ? .semibold : .regular)
                     .foregroundColor(.white)
             }
@@ -219,7 +219,7 @@ struct IntervalOptionButton: View {
                     .foregroundColor(isSelected ? MADTheme.Colors.primary : .white.opacity(0.6))
 
                 Text(interval.displayName)
-                    .font(MADTheme.Typography.callout)
+                    .madFont(size: 16, design: .rounded)
                     .fontWeight(isSelected ? .semibold : .regular)
                     .foregroundColor(.white)
             }

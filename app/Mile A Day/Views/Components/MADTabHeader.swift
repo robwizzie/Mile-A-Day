@@ -60,14 +60,14 @@ struct MADTabHeader: View {
         HStack(alignment: .center) {
             VStack(alignment: .leading, spacing: 1) {
                 Text(title)
-                    .font(.system(size: 26, weight: .heavy, design: .rounded))
+                    .madFont(size: 26, weight: .heavy, design: .rounded)
                     .foregroundColor(.white)
                     .lineLimit(1)
                     .minimumScaleFactor(0.65)
 
                 if let subtitle {
                     highlightedSubtitle(subtitle)
-                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .madFont(size: 12, weight: .semibold, design: .rounded)
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
                 }
@@ -155,7 +155,7 @@ struct MADTabHeader: View {
                     // "9+" past nine: a badge says "something's waiting", and
                     // "31" made an inbox read like a backlog to clear.
                     Text(count > 9 ? "9+" : "\(count)")
-                        .font(.system(size: 9, weight: .heavy, design: .rounded))
+                        .madFont(size: 11, weight: .heavy, design: .rounded)
                         .foregroundColor(.white)
                         .padding(.horizontal, 5)
                         .padding(.vertical, 1.5)
@@ -176,18 +176,18 @@ struct MADTabHeader: View {
         Button(action: action.action) {
             HStack(spacing: 5) {
                 Image(systemName: action.systemImage)
-                    .font(.system(size: 12, weight: .bold))
+                    .madFont(size: 12, weight: .bold, maxScale: 1.5)
                     .foregroundStyle(
                         LinearGradient(colors: [.yellow, .orange], startPoint: .top, endPoint: .bottom)
                     )
                 if count > 0 {
                     Text("\(count)")
-                        .font(.system(size: 12, weight: .heavy, design: .rounded))
+                        .madFont(size: 12, weight: .heavy, design: .rounded)
                         .foregroundColor(.white)
                 }
             }
             .padding(.horizontal, 11)
-            .frame(height: 38)
+            .frame(minHeight: 38)
             .background(
                 Capsule()
                     .fill(
@@ -275,10 +275,10 @@ struct MADPillPicker<Tag: Hashable>: View {
             HStack(spacing: 6) {
                 if let icon = option.systemImage {
                     Image(systemName: icon)
-                        .font(.system(size: 11, weight: .bold))
+                        .madFont(size: 11, weight: .bold, maxScale: 1.5)
                 }
                 Text(option.title)
-                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .madFont(size: 13, weight: .bold, design: .rounded)
                     // Scale the label down rather than wrapping char-by-char
                     // (e.g. "Leaderboa rd") when many pills share a narrow row
                     // or the device uses Display Zoom / large text.
@@ -286,7 +286,7 @@ struct MADPillPicker<Tag: Hashable>: View {
                     .minimumScaleFactor(0.6)
                 if option.badgeCount > 0 {
                     Text("\(option.badgeCount)")
-                        .font(.system(size: 10, weight: .heavy, design: .rounded))
+                        .madFont(size: 11, weight: .heavy, design: .rounded)
                         .padding(.horizontal, 5)
                         .padding(.vertical, 1)
                         .background(

@@ -242,22 +242,22 @@ struct DashboardQuietCard: View {
         HStack(alignment: .firstTextBaseline, spacing: MADTheme.Spacing.sm) {
             // The glyph alone, tinted: no disc behind it.
             Image(systemName: icon)
-                .font(.system(size: 15, weight: .bold))
+                .madFont(size: 15, weight: .bold, maxScale: 1.5)
                 .foregroundColor(tint)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
-                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                    .madFont(size: 15, weight: .bold, design: .rounded)
                     .foregroundColor(.white)
                 Text(subtitle)
-                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .madFont(size: 12, weight: .medium, design: .rounded)
                     .foregroundColor(.white.opacity(0.5))
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer()
             if chevron {
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 12, weight: .bold))
+                    .madFont(size: 12, weight: .bold, maxScale: 1.5)
                     .foregroundColor(.white.opacity(0.35))
             }
         }
@@ -308,17 +308,17 @@ struct DashboardCustomizeRow: View {
         } label: {
             HStack(spacing: 10) {
                 Image(systemName: "slider.horizontal.3")
-                    .font(.system(size: 13, weight: .bold))
+                    .madFont(size: 13, weight: .bold, maxScale: 1.5)
                     .foregroundColor(.white.opacity(0.55))
                 Text("Customize dashboard")
-                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .madFont(size: 13, weight: .semibold, design: .rounded)
                     .foregroundColor(.white.opacity(0.7))
                 Spacer()
                 Text(count == 1 ? "1 card" : "\(count) cards")
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .madFont(size: 12, weight: .semibold, design: .rounded)
                     .foregroundColor(.white.opacity(0.45))
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 11, weight: .bold))
+                    .madFont(size: 11, weight: .bold, maxScale: 1.5)
                     .foregroundColor(.white.opacity(0.35))
             }
             .padding(.horizontal, DashboardCardSurface.padding)
@@ -349,14 +349,14 @@ struct DashboardInsightsRow: View {
         } label: {
             HStack(spacing: 10) {
                 Image(systemName: "chart.line.uptrend.xyaxis")
-                    .font(.system(size: 13, weight: .bold))
+                    .madFont(size: 13, weight: .bold, maxScale: 1.5)
                     .foregroundColor(.white.opacity(0.55))
                 Text("Insights")
-                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .madFont(size: 13, weight: .semibold, design: .rounded)
                     .foregroundColor(.white.opacity(0.7))
                 Spacer()
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 11, weight: .bold))
+                    .madFont(size: 11, weight: .bold, maxScale: 1.5)
                     .foregroundColor(.white.opacity(0.35))
             }
             .padding(.horizontal, DashboardCardSurface.padding)
@@ -444,7 +444,7 @@ struct DashboardCustomizeView: View {
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
-                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .madFont(size: 15, weight: .bold, design: .rounded)
                         .foregroundColor(.white)
                 }
             }
@@ -497,7 +497,7 @@ struct DashboardCustomizeView: View {
 
     private func cardRow(text: String, position: RowPosition) -> some View {
         Text(text)
-            .font(.system(size: 13, design: .rounded))
+            .madFont(size: 13, design: .rounded)
             .foregroundColor(.white.opacity(0.5))
             .frame(maxWidth: .infinity, alignment: .leading)
             .listRowBackground(groupBackground(position))
@@ -507,7 +507,7 @@ struct DashboardCustomizeView: View {
 
     private func header(_ text: String) -> some View {
         Text(text.uppercased())
-            .font(.system(size: 11, weight: .bold, design: .rounded))
+            .madFont(size: 11, weight: .bold, design: .rounded)
             .tracking(1.2)
             .foregroundColor(.white.opacity(0.5))
             .padding(.top, 6)
@@ -515,8 +515,8 @@ struct DashboardCustomizeView: View {
 
     private func footnote(_ text: String) -> some View {
         Text(text)
-            .font(.system(size: 11, design: .rounded))
-            .foregroundColor(.white.opacity(0.35))
+            .madFont(size: 11, design: .rounded)
+            .foregroundColor(.white.opacity(0.6))
             .fixedSize(horizontal: false, vertical: true)
     }
 
@@ -561,14 +561,14 @@ struct DashboardCustomizeView: View {
                 }
                 HStack(spacing: 6) {
                     Image(systemName: selected ? "checkmark.circle.fill" : "circle")
-                        .font(.system(size: 14))
+                        .madFont(size: 14, maxScale: 1.5)
                         .foregroundColor(selected ? MADTheme.Colors.madRed : .white.opacity(0.3))
                     Text(option.title)
-                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .madFont(size: 15, weight: .bold, design: .rounded)
                         .foregroundColor(.white)
                 }
                 Text(option.subtitle)
-                    .font(.system(size: 11, design: .rounded))
+                    .madFont(size: 11, design: .rounded)
                     .foregroundColor(.white.opacity(0.5))
                     .lineLimit(2)
                     .multilineTextAlignment(.center)
@@ -604,10 +604,10 @@ struct DashboardCustomizeView: View {
             }
             VStack(alignment: .leading, spacing: 3) {
                 Text(card.title)
-                    .font(MADTheme.Typography.bodyBold)
+                    .madFont(size: 17, weight: .semibold, design: .rounded)
                     .foregroundColor(.white)
                 Text(card.subtitle)
-                    .font(.system(size: 12, design: .rounded))
+                    .madFont(size: 12, design: .rounded)
                     .foregroundColor(.white.opacity(0.5))
                     .fixedSize(horizontal: false, vertical: true)
             }

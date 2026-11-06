@@ -45,7 +45,7 @@ struct UserFriendsListView: View {
                     let rows = shownFriends
                     if rows.isEmpty {
                         Text("No friends match “\(query)”")
-                            .font(.system(size: 14, weight: .medium, design: .rounded))
+                            .madFont(size: 14, weight: .medium, design: .rounded)
                             .foregroundColor(.white.opacity(0.5))
                             .padding(.top, MADTheme.Spacing.xl)
                     } else {
@@ -90,14 +90,14 @@ struct UserFriendsListView: View {
                     AvatarView(name: user.displayName, imageURL: user.profile_image_url, size: 40)
                     VStack(alignment: .leading, spacing: 1) {
                         Text(user.username.map { "@\($0)" } ?? user.displayName)
-                            .font(.system(size: 15, weight: .bold, design: .rounded))
+                            .madFont(size: 15, weight: .bold, design: .rounded)
                             .foregroundColor(.white)
-                            .lineLimit(1)
+                            .madNameLines()
                         if let username = user.username, user.displayName != username {
                             Text(user.displayName)
-                                .font(.system(size: 12, weight: .medium, design: .rounded))
+                                .madFont(size: 12, weight: .medium, design: .rounded)
                                 .foregroundColor(.white.opacity(0.55))
-                                .lineLimit(1)
+                                .madNameLines()
                         }
                     }
                     Spacer(minLength: 4)
@@ -129,11 +129,11 @@ struct UserFriendsListView: View {
     private var emptyState: some View {
         VStack(spacing: MADTheme.Spacing.sm) {
             Image(systemName: "person.2.slash")
-                .font(.system(size: 32))
+                .madFont(size: 32, maxScale: 1.5)
                 .foregroundColor(.white.opacity(0.25))
                 .accessibilityHidden(true)
             Text(loadFailed ? "Couldn't load friends" : "\(ownerName) has no friends yet")
-                .font(.system(size: 14, weight: .medium, design: .rounded))
+                .madFont(size: 14, weight: .medium, design: .rounded)
                 .foregroundColor(.white.opacity(0.5))
                 .multilineTextAlignment(.center)
         }

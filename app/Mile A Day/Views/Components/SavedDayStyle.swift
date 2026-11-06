@@ -104,9 +104,9 @@ enum SavedDayStyle {
     static func todayChip(for day: CoveredDate) -> some View {
         HStack(spacing: 3) {
             Image(systemName: icon(for: day.kind))
-                .font(.system(size: 8, weight: .black))
+                .madFont(size: 8, weight: .black, maxScale: 1.5)
             Text(day.kind == "streak_assist" ? "ASSIST HELD" : "SAVED TODAY")
-                .font(.system(size: 9, weight: .black, design: .rounded))
+                .madFont(size: 11, weight: .black, design: .rounded)
                 .tracking(0.6)
         }
         .foregroundColor(.black.opacity(0.88))
@@ -165,9 +165,9 @@ enum SavedDayStyle {
     static func chip(for kind: String) -> some View {
         HStack(spacing: 3) {
             Image(systemName: icon(for: kind))
-                .font(.system(size: 8, weight: .bold))
+                .madFont(size: 8, weight: .bold, maxScale: 1.5)
             Text(shortLabel(for: kind).uppercased())
-                .font(.system(size: 9, weight: .black, design: .rounded))
+                .madFont(size: 11, weight: .black, design: .rounded)
                 .tracking(0.6)
         }
         .foregroundColor(tint)
@@ -251,7 +251,7 @@ struct SavedTodayBanner: View {
         // rimless surface; the saved-day blue lives in the glyph and text.
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: SavedDayStyle.icon(for: day.kind))
-                .font(.system(size: 16, weight: .bold))
+                .madFont(size: 16, weight: .bold, maxScale: 1.5)
                 .foregroundColor(SavedDayStyle.tint)
                 .padding(.top, 1)
                 .accessibilityHidden(true)
@@ -259,20 +259,20 @@ struct SavedTodayBanner: View {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
                     Text(SavedDayStyle.todayHeadline(for: day))
-                        .font(.system(size: 15, weight: .heavy, design: .rounded))
+                        .madFont(size: 15, weight: .heavy, design: .rounded)
                         .foregroundColor(.white)
                     SavedDayStyle.chip(for: day.kind)
                 }
                 Text(SavedDayStyle.credit(for: day))
-                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .madFont(size: 12, weight: .bold, design: .rounded)
                     .foregroundColor(SavedDayStyle.tint)
                 Text(SavedDayStyle.todayDetail(for: day, isSelf: isSelf))
-                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .madFont(size: 12, weight: .medium, design: .rounded)
                     .foregroundColor(.white.opacity(0.62))
                     .fixedSize(horizontal: false, vertical: true)
                 if onLearnMore != nil {
                     Text("How tokens work")
-                        .font(.system(size: 11, weight: .heavy, design: .rounded))
+                        .madFont(size: 11, weight: .heavy, design: .rounded)
                         .foregroundColor(SavedDayStyle.tint)
                         .padding(.top, 2)
                 }
@@ -282,7 +282,7 @@ struct SavedTodayBanner: View {
 
             if onLearnMore != nil {
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 11, weight: .bold))
+                    .madFont(size: 11, weight: .bold, maxScale: 1.5)
                     .foregroundColor(.white.opacity(0.3))
                     .padding(.top, 3)
             }

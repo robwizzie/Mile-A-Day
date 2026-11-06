@@ -76,30 +76,30 @@ extension CompetitionDetailView {
         return VStack(spacing: 10) {
             HStack(spacing: 8) {
                 Image(systemName: "flame.fill")
-                    .font(.system(size: 28))
+                    .madFont(size: 28, maxScale: 1.5)
                     .foregroundColor(.orange)
                     .shadow(color: .orange.opacity(0.4), radius: 6)
 
                 CountingText(value: heroAnimated ? Double(streak) : 0, format: "%.0f", suffix: "")
-                    .font(.system(size: 40, weight: .bold, design: .rounded))
+                    .madFont(size: 40, weight: .bold, design: .rounded)
                     .foregroundColor(.white)
 
                 Text("day streak")
-                    .font(.system(size: 13, weight: .medium, design: .rounded))
-                    .foregroundColor(.white.opacity(0.4))
+                    .madFont(size: 13, weight: .medium, design: .rounded)
+                    .foregroundColor(.white.opacity(0.6))
                     .padding(.top, 14)
             }
 
             if completed {
                 Label("Done \u{2014} \(competition.options.formatQuantityWithUnit(todayDistance))", systemImage: "checkmark.circle.fill")
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .madFont(size: 12, weight: .semibold, design: .rounded)
                     .foregroundColor(.green)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 5)
                     .background(Capsule().fill(Color.green.opacity(0.12)))
             } else {
                 Label("\(competition.options.formatQuantityWithUnit(remaining)) to go", systemImage: "figure.run")
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .madFont(size: 12, weight: .semibold, design: .rounded)
                     .foregroundColor(.orange)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 5)
@@ -111,13 +111,13 @@ extension CompetitionDetailView {
                 HStack(spacing: 4) {
                     ForEach(0..<min(totalLives, 6), id: \.self) { i in
                         Image(systemName: i < lives ? "heart.fill" : "heart")
-                            .font(.system(size: 12))
+                            .madFont(size: 12, maxScale: 1.5)
                             .foregroundColor(i < lives ? .red : .white.opacity(0.15))
                     }
                     if totalLives > 6 {
                         Text("+\(totalLives - 6)")
-                            .font(.system(size: 9, weight: .semibold, design: .rounded))
-                            .foregroundColor(.white.opacity(0.3))
+                            .madFont(size: 11, weight: .semibold, design: .rounded)
+                            .foregroundColor(.white.opacity(0.6))
                     }
                 }
             }
@@ -134,16 +134,16 @@ extension CompetitionDetailView {
         return VStack(spacing: 10) {
             HStack(spacing: 8) {
                 Image(systemName: "bolt.fill")
-                    .font(.system(size: 28))
+                    .madFont(size: 28, maxScale: 1.5)
                     .foregroundStyle(LinearGradient(colors: gradientColors, startPoint: .top, endPoint: .bottom))
 
                 CountingText(value: heroAnimated ? Double(points) : 0, format: "%.0f", suffix: "")
-                    .font(.system(size: 40, weight: .bold, design: .rounded))
+                    .madFont(size: 40, weight: .bold, design: .rounded)
                     .foregroundColor(.white)
 
                 Text(points == 1 ? "win" : "wins")
-                    .font(.system(size: 13, weight: .medium, design: .rounded))
-                    .foregroundColor(.white.opacity(0.4))
+                    .madFont(size: 13, weight: .medium, design: .rounded)
+                    .foregroundColor(.white.opacity(0.6))
                     .padding(.top, 14)
             }
 
@@ -151,21 +151,21 @@ extension CompetitionDetailView {
                 let diff = myDistance - bestOpponentDistance
                 if isLeading && diff > 0 {
                     Label("Leading by \(competition.options.formatQuantityWithUnit(diff))", systemImage: "crown.fill")
-                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .madFont(size: 12, weight: .semibold, design: .rounded)
                         .foregroundColor(.green)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 5)
                         .background(Capsule().fill(Color.green.opacity(0.12)))
                 } else if diff < 0 {
                     Label("Behind by \(competition.options.formatQuantityWithUnit(abs(diff)))", systemImage: "arrow.up")
-                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .madFont(size: 12, weight: .semibold, design: .rounded)
                         .foregroundColor(.orange)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 5)
                         .background(Capsule().fill(Color.orange.opacity(0.12)))
                 } else {
                     Label("Tied at \(competition.options.formatQuantityWithUnit(myDistance))", systemImage: "equal")
-                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .madFont(size: 12, weight: .semibold, design: .rounded)
                         .foregroundColor(.white.opacity(0.7))
                         .padding(.horizontal, 12)
                         .padding(.vertical, 5)
@@ -173,7 +173,7 @@ extension CompetitionDetailView {
                 }
             } else {
                 Label("No activity yet today", systemImage: "figure.run")
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .madFont(size: 12, weight: .semibold, design: .rounded)
                     .foregroundColor(.white.opacity(0.5))
                     .padding(.horizontal, 12)
                     .padding(.vertical, 5)
@@ -190,23 +190,23 @@ extension CompetitionDetailView {
         return VStack(spacing: 10) {
             HStack(spacing: 8) {
                 Image(systemName: "arrow.up.circle.fill")
-                    .font(.system(size: 28))
+                    .madFont(size: 28, maxScale: 1.5)
                     .foregroundStyle(LinearGradient(colors: gradientColors, startPoint: .top, endPoint: .bottom))
 
                 CountingText(value: heroAnimated ? totalScore : 0, format: "%.1f", suffix: "", formatter: competition.options.formatQuantity)
-                    .font(.system(size: 40, weight: .bold, design: .rounded))
+                    .madFont(size: 40, weight: .bold, design: .rounded)
                     .foregroundColor(.white)
 
                 Text(competition.options.unit.shortDisplayName)
-                    .font(.system(size: 13, weight: .medium, design: .rounded))
-                    .foregroundColor(.white.opacity(0.4))
+                    .madFont(size: 13, weight: .medium, design: .rounded)
+                    .foregroundColor(.white.opacity(0.6))
                     .padding(.top, 14)
             }
 
             HStack(spacing: MADTheme.Spacing.sm) {
                 if myRank > 0 {
                     Label(rankOrdinal(myRank) + " of \(acceptedUsers.count)", systemImage: "trophy")
-                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .madFont(size: 12, weight: .semibold, design: .rounded)
                         .foregroundColor(myRank == 1 ? .yellow : .white.opacity(0.7))
                         .padding(.horizontal, 12)
                         .padding(.vertical, 5)
@@ -215,7 +215,7 @@ extension CompetitionDetailView {
 
                 if todayDistance > 0 {
                     Label("+\(competition.options.formatQuantity(todayDistance)) today", systemImage: "figure.run")
-                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .madFont(size: 12, weight: .medium, design: .rounded)
                         .foregroundColor(.green.opacity(0.8))
                         .padding(.horizontal, 12)
                         .padding(.vertical, 5)
@@ -233,16 +233,16 @@ extension CompetitionDetailView {
         return VStack(spacing: 10) {
             HStack(spacing: 8) {
                 Image(systemName: "target")
-                    .font(.system(size: 28))
+                    .madFont(size: 28, maxScale: 1.5)
                     .foregroundStyle(LinearGradient(colors: gradientColors, startPoint: .top, endPoint: .bottom))
 
                 CountingText(value: heroAnimated ? Double(points) : 0, format: "%.0f", suffix: "")
-                    .font(.system(size: 40, weight: .bold, design: .rounded))
+                    .madFont(size: 40, weight: .bold, design: .rounded)
                     .foregroundColor(.white)
 
                 Text(points == 1 ? "point" : "points")
-                    .font(.system(size: 13, weight: .medium, design: .rounded))
-                    .foregroundColor(.white.opacity(0.4))
+                    .madFont(size: 13, weight: .medium, design: .rounded)
+                    .foregroundColor(.white.opacity(0.6))
                     .padding(.top, 14)
             }
 
@@ -266,11 +266,11 @@ extension CompetitionDetailView {
                 HStack {
                     if completed {
                         Label("Target hit!", systemImage: "checkmark.circle.fill")
-                            .font(.system(size: 12, weight: .semibold, design: .rounded))
+                            .madFont(size: 12, weight: .semibold, design: .rounded)
                             .foregroundColor(.green)
                     } else {
                         Text("\(competition.options.formatQuantity(todayDistance))/\(competition.options.goalFormatted) \(competition.options.unit.shortDisplayName)")
-                            .font(.system(size: 12, weight: .medium, design: .rounded))
+                            .madFont(size: 12, weight: .medium, design: .rounded)
                             .foregroundColor(.white.opacity(0.5))
                     }
                     Spacer()
@@ -289,16 +289,16 @@ extension CompetitionDetailView {
         return VStack(spacing: 10) {
             HStack(spacing: 8) {
                 Image(systemName: "flag.fill")
-                    .font(.system(size: 28))
+                    .madFont(size: 28, maxScale: 1.5)
                     .foregroundStyle(LinearGradient(colors: gradientColors, startPoint: .top, endPoint: .bottom))
 
                 CountingText(value: heroAnimated ? Double(percent) : 0, format: "%.0f", suffix: "%")
-                    .font(.system(size: 40, weight: .bold, design: .rounded))
+                    .madFont(size: 40, weight: .bold, design: .rounded)
                     .foregroundColor(.white)
 
                 Text("complete")
-                    .font(.system(size: 13, weight: .medium, design: .rounded))
-                    .foregroundColor(.white.opacity(0.4))
+                    .madFont(size: 13, weight: .medium, design: .rounded)
+                    .foregroundColor(.white.opacity(0.6))
                     .padding(.top, 14)
             }
 
@@ -319,12 +319,12 @@ extension CompetitionDetailView {
 
                 HStack {
                     Text("\(competition.options.formatQuantity(totalDistance))/\(competition.options.goalFormatted) \(competition.options.unit.shortDisplayName)")
-                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .madFont(size: 12, weight: .medium, design: .rounded)
                         .foregroundColor(.white.opacity(0.5))
                     Spacer()
                     if myRank > 0 {
                         Text(rankOrdinal(myRank) + " place")
-                            .font(.system(size: 12, weight: .semibold, design: .rounded))
+                            .madFont(size: 12, weight: .semibold, design: .rounded)
                             .foregroundColor(myRank == 1 ? .yellow : .white.opacity(0.6))
                     }
                 }
@@ -377,10 +377,10 @@ extension CompetitionDetailView {
                 VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
                     HStack(spacing: MADTheme.Spacing.xs) {
                         Image(systemName: "hand.raised.fill")
-                            .font(.system(size: 13))
+                            .madFont(size: 13, maxScale: 1.5)
                             .foregroundColor(typeColor)
                         Text("Flex on opponents")
-                            .font(.system(size: 13, weight: .semibold, design: .rounded))
+                            .madFont(size: 13, weight: .semibold, design: .rounded)
                             .foregroundColor(.white.opacity(0.6))
                     }
                     .padding(.horizontal, MADTheme.Spacing.sm)
@@ -400,14 +400,14 @@ extension CompetitionDetailView {
                 // Already flexed on everyone
                 HStack(spacing: MADTheme.Spacing.sm) {
                     Image(systemName: "hand.raised.fill")
-                        .font(.system(size: 12))
+                        .madFont(size: 12, maxScale: 1.5)
                         .foregroundColor(.green.opacity(0.5))
                     Text("Flexed on \(alreadyFlexed.count) \(alreadyFlexed.count == 1 ? "opponent" : "opponents") today")
-                        .font(.system(size: 11, weight: .medium, design: .rounded))
-                        .foregroundColor(.white.opacity(0.3))
+                        .madFont(size: 11, weight: .medium, design: .rounded)
+                        .foregroundColor(.white.opacity(0.6))
                     Spacer()
                     Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 11))
+                        .madFont(size: 11, maxScale: 1.5)
                         .foregroundColor(.green.opacity(0.35))
                 }
                 .padding(MADTheme.Spacing.md)
@@ -419,22 +419,22 @@ extension CompetitionDetailView {
                 // Not leading — show motivational teaser
                 HStack(spacing: MADTheme.Spacing.sm) {
                     Image(systemName: "hand.raised.fill")
-                        .font(.system(size: 14))
+                        .madFont(size: 14, maxScale: 1.5)
                         .foregroundColor(typeColor.opacity(0.4))
 
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Flex")
-                            .font(.system(size: 13, weight: .semibold, design: .rounded))
-                            .foregroundColor(.white.opacity(0.35))
+                            .madFont(size: 13, weight: .semibold, design: .rounded)
+                            .foregroundColor(.white.opacity(0.6))
                         Text(flexMotivationalMessages[messageIndex])
-                            .font(.system(size: 11, weight: .medium, design: .rounded))
-                            .foregroundColor(.white.opacity(0.25))
+                            .madFont(size: 11, weight: .medium, design: .rounded)
+                            .foregroundColor(.white.opacity(0.6))
                     }
 
                     Spacer()
 
                     Image(systemName: "lock.fill")
-                        .font(.system(size: 10))
+                        .madFont(size: 10, maxScale: 1.5)
                         .foregroundColor(.white.opacity(0.15))
                 }
                 .padding(MADTheme.Spacing.md)
@@ -488,9 +488,9 @@ extension CompetitionDetailView {
     func feedbackBanner(_ feedback: ActionFeedback) -> some View {
         HStack(spacing: 6) {
             Image(systemName: feedback.icon)
-                .font(.system(size: 12))
+                .madFont(size: 12, maxScale: 1.5)
             Text(feedback.message)
-                .font(.system(size: 12, weight: .medium, design: .rounded))
+                .madFont(size: 12, weight: .medium, design: .rounded)
         }
         .foregroundColor(feedback.isError ? .red : .green)
         .padding(.horizontal, 14)

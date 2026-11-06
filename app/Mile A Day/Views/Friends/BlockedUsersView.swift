@@ -80,13 +80,14 @@ struct BlockedUsersView: View {
             AvatarView(name: user.displayName, imageURL: user.profileImageUrl, size: 40)
             VStack(alignment: .leading, spacing: 2) {
                 Text(user.displayName)
-                    .font(MADTheme.Typography.bodyBold)
-                    .lineLimit(1)
+                    .madFont(size: 17, weight: .semibold, design: .rounded)
+                    .madNameLines()
                 if let subtitle = subtitle(user) {
                     Text(subtitle)
-                        .font(MADTheme.Typography.caption)
+                        .madFont(size: 12, design: .rounded)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
+                        .minimumScaleFactor(0.75)
                 }
             }
             Spacer(minLength: 0)
@@ -101,7 +102,7 @@ struct BlockedUsersView: View {
                         Text("Unblock")
                     }
                 }
-                .font(MADTheme.Typography.smallBold)
+                .madFont(size: 14, weight: .semibold, design: .rounded)
                 .frame(minWidth: 76, minHeight: 32)
                 .background(Capsule().fill(Color.white.opacity(0.12)))
             }
@@ -127,14 +128,14 @@ struct BlockedUsersView: View {
     ) -> some View {
         VStack(spacing: MADTheme.Spacing.md) {
             Image(systemName: icon)
-                .font(.system(size: 34, weight: .semibold))
+                .madFont(size: 34, weight: .semibold, maxScale: 1.5)
                 .foregroundStyle(.secondary)
                 .accessibilityHidden(true)
             Text(title)
-                .font(MADTheme.Typography.headline)
+                .madFont(size: 17, weight: .semibold, design: .rounded)
                 .multilineTextAlignment(.center)
             Text(detail)
-                .font(MADTheme.Typography.caption)
+                .madFont(size: 12, design: .rounded)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
             action()

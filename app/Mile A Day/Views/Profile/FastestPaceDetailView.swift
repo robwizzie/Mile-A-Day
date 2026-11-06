@@ -75,9 +75,9 @@ struct FastestPaceDetailView: View {
         VStack(spacing: MADTheme.Spacing.md) {
             HStack(spacing: MADTheme.Spacing.sm) {
                 Image(systemName: "hare.fill")
-                    .font(.system(size: 14, weight: .semibold))
+                    .madFont(size: 14, weight: .semibold, maxScale: 1.5)
                 Text("Personal Record")
-                    .font(MADTheme.Typography.smallBold)
+                    .madFont(size: 14, weight: .semibold, design: .rounded)
             }
             .foregroundColor(MADTheme.Colors.success)
             .padding(.horizontal, MADTheme.Spacing.md)
@@ -88,11 +88,11 @@ struct FastestPaceDetailView: View {
             )
 
             Text(formattedPace)
-                .font(.system(size: 52, weight: .bold, design: .rounded))
+                .madFont(size: 52, weight: .bold, design: .rounded)
                 .foregroundColor(.primary)
 
             Text("Fastest Mile Pace")
-                .font(MADTheme.Typography.body)
+                .madFont(size: 17, design: .rounded)
                 .foregroundColor(.secondary)
         }
         .padding(MADTheme.Spacing.lg)
@@ -133,10 +133,10 @@ struct FastestPaceDetailView: View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
             HStack(spacing: MADTheme.Spacing.sm) {
                 Image(systemName: "chart.line.uptrend.xyaxis")
-                    .font(.system(size: 14, weight: .semibold))
+                    .madFont(size: 14, weight: .semibold, maxScale: 1.5)
                     .foregroundStyle(MADTheme.Colors.redGradient)
                 Text("Performance Category")
-                    .font(MADTheme.Typography.headline)
+                    .madFont(size: 17, weight: .semibold, design: .rounded)
                     .foregroundColor(.primary)
             }
 
@@ -185,10 +185,10 @@ struct FastestPaceDetailView: View {
             VStack(spacing: MADTheme.Spacing.md) {
                 HStack(spacing: MADTheme.Spacing.sm) {
                     Image(systemName: "flag.checkered")
-                        .font(.system(size: 14, weight: .semibold))
+                        .madFont(size: 14, weight: .semibold, maxScale: 1.5)
                         .foregroundStyle(MADTheme.Colors.redGradient)
                     Text("Fastest Mile Workouts")
-                        .font(MADTheme.Typography.headline)
+                        .madFont(size: 17, weight: .semibold, design: .rounded)
                         .foregroundColor(.primary)
                     Spacer()
                 }
@@ -197,7 +197,7 @@ struct FastestPaceDetailView: View {
                         .tint(.secondary)
                         .scaleEffect(0.8)
                     Text("Loading workouts...")
-                        .font(MADTheme.Typography.caption)
+                        .madFont(size: 12, design: .rounded)
                         .foregroundColor(.secondary)
                 }
             }
@@ -207,10 +207,10 @@ struct FastestPaceDetailView: View {
             VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
                 HStack(spacing: MADTheme.Spacing.sm) {
                     Image(systemName: "flag.checkered")
-                        .font(.system(size: 14, weight: .semibold))
+                        .madFont(size: 14, weight: .semibold, maxScale: 1.5)
                         .foregroundStyle(MADTheme.Colors.redGradient)
                     Text("Fastest Mile Workouts")
-                        .font(MADTheme.Typography.headline)
+                        .madFont(size: 17, weight: .semibold, design: .rounded)
                         .foregroundColor(.primary)
                 }
                 ForEach(dayWorkouts, id: \.uuid) { workout in
@@ -331,14 +331,14 @@ struct PerformanceCategoryRow: View {
             }
 
             Text(category)
-                .font(MADTheme.Typography.body)
+                .madFont(size: 17, design: .rounded)
                 .fontWeight(isActive ? .semibold : .regular)
                 .foregroundColor(isActive ? .primary : .secondary)
 
             Spacer()
 
             Text(paceRange)
-                .font(MADTheme.Typography.callout)
+                .madFont(size: 16, design: .rounded)
                 .foregroundColor(.secondary)
         }
         .padding(.vertical, MADTheme.Spacing.xs)

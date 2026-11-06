@@ -355,7 +355,7 @@ struct FriendFlameyCard: View {
             // their day ("Mile done today"), but the goal ring at the top of
             // the profile owns today, and his face already shows the mood.
             Text(facts.title)
-                .font(.system(size: 18, weight: .heavy, design: .rounded))
+                .madFont(size: 18, weight: .heavy, design: .rounded)
                 .foregroundColor(.white)
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
@@ -363,7 +363,7 @@ struct FriendFlameyCard: View {
             // him rather than in a bubble over his head.
             if let pokeQuip {
                 Text("“\(pokeQuip)”")
-                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                    .madFont(size: 14, weight: .bold, design: .rounded)
                     .foregroundColor(Color(red: 1.0, green: 0.72, blue: 0.35))
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
@@ -372,10 +372,10 @@ struct FriendFlameyCard: View {
             wearingChip(look: look)
             HStack(spacing: 5) {
                 Image(systemName: "hand.tap.fill")
-                    .font(.system(size: 10, weight: .bold))
+                    .madFont(size: 10, weight: .bold, maxScale: 1.5)
                     .accessibilityHidden(true)
                 Text(hint)
-                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .madFont(size: 11, weight: .semibold, design: .rounded)
                     .lineLimit(1)
                     .minimumScaleFactor(0.85)
             }
@@ -399,20 +399,21 @@ struct FriendFlameyCard: View {
             HStack(spacing: 5) {
                 if let item = facts.headlineItem(in: look) {
                     Text(item.flairEmoji)
-                        .font(.system(size: 12))
+                        .madFont(size: 12)
                     Text(item.captionName)
-                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                        .madFont(size: 12, weight: .bold, design: .rounded)
                         .lineLimit(1)
                         .minimumScaleFactor(0.85)
                 } else {
                     Text("✨")
-                        .font(.system(size: 12))
+                        .madFont(size: 12)
                     Text(unlockedCount == 0 ? "No gear yet" : "Wardrobe")
-                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                        .madFont(size: 12, weight: .bold, design: .rounded)
                         .lineLimit(1)
+                        .minimumScaleFactor(0.75)
                 }
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 9, weight: .heavy))
+                    .madFont(size: 9, weight: .heavy, maxScale: 1.5)
                     .foregroundColor(.white.opacity(0.4))
                     .accessibilityHidden(true)
             }
@@ -594,20 +595,20 @@ struct FriendFlameyWardrobeSheet: View {
             VStack(spacing: 6) {
                 stage(look: look)
                 Text(facts.title)
-                    .font(.system(size: 22, weight: .heavy, design: .rounded))
+                    .madFont(size: 22, weight: .heavy, design: .rounded)
                     .foregroundColor(.white)
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
                 Text(worn.isEmpty ? "Keeping it basic"
                                   : "Wearing \(worn.count) \(worn.count == 1 ? "piece" : "pieces")")
-                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .madFont(size: 13, weight: .semibold, design: .rounded)
                     .foregroundColor(.white.opacity(0.55))
             }
             .padding(.top, 8)
 
             if worn.isEmpty {
                 Text("\(facts.mascotName) isn't wearing anything right now — just his own flame.")
-                    .font(.system(size: 14, weight: .medium, design: .rounded))
+                    .madFont(size: 14, weight: .medium, design: .rounded)
                     .foregroundColor(.white.opacity(0.6))
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 24)
@@ -664,15 +665,15 @@ struct FriendFlameyWardrobeSheet: View {
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 3) {
                 Text(item.slot.closetLabel.uppercased())
-                    .font(.system(size: 10, weight: .black, design: .rounded))
+                    .madFont(size: 11, weight: .black, design: .rounded)
                     .tracking(0.8)
                     .foregroundColor(.white.opacity(0.45))
                     .lineLimit(1)
+                    .minimumScaleFactor(0.75)
                 Text(item.displayName)
-                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                    .madFont(size: 15, weight: .bold, design: .rounded)
                     .foregroundColor(.white)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.85)
+                    .madNameLines()
                 medalLine(item, medal: medal)
             }
             Spacer(minLength: 0)
@@ -700,7 +701,7 @@ struct FriendFlameyWardrobeSheet: View {
                 FlameyMedalDisc(medal: medal, size: 18, showsLock: false)
                 Text([medal.name.map { "\($0) medal" }, medal.earnedAt.map { Self.dateFormatter.string(from: $0) }]
                         .compactMap { $0 }.joined(separator: " · "))
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .madFont(size: 12, weight: .semibold, design: .rounded)
                     .foregroundColor(.white.opacity(0.7))
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
@@ -709,7 +710,7 @@ struct FriendFlameyWardrobeSheet: View {
             Text(item.isHolidayOutfit && medal != nil ? "Holiday outfit — worn on the day"
                  : medal == nil ? "A starter piece — no medal needed"
                  : "Unlocked: \(FlameyClosetCopy.lowercasedFirst(item.unlockCopy))")
-                .font(.system(size: 12, weight: .medium, design: .rounded))
+                .madFont(size: 12, weight: .medium, design: .rounded)
                 .foregroundColor(.white.opacity(0.5))
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)

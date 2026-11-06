@@ -165,6 +165,12 @@ try {
     );
   }
   await db.query(`UPDATE users SET goal_miles = 2 WHERE user_id = $1`, [GOAL2]);
+  // The holiday walks below are dated 2025. A user created after
+  // FOUNDING_CUTOFF without Plus has a one-year history floor, and the upload
+  // path drops older walks, so on any run a year past those dates the medals
+  // never award. These users are testing holiday medals, not Plus: pin them
+  // as Founding Runners (no floor) so the check doesn't depend on today's date.
+  await db.query(`UPDATE users SET created_at = '2025-01-01T12:00:00Z' WHERE user_id = ANY($1)`, [[WALKER, GOAL2]]);
   await befriend(FUN_A, FUN_B);
   await befriend(FUN_A, MODERN);
   await befriend(FUN_A, LEGACY);

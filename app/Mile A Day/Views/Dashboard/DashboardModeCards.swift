@@ -1101,7 +1101,7 @@ private struct DailyGoalBars: View {
                 )
                 Text("or")
                     .madFont(size: 12, weight: .semibold, design: .rounded)
-                    .foregroundColor(.white.opacity(0.4))
+                    .foregroundColor(.white.opacity(0.6))
                     .padding(.horizontal, 2)
                     .fixedSize()
                     .padding(.bottom, 1)
@@ -1267,7 +1267,8 @@ private struct NextMedalCard: View {
                     Text(info.next == nil ? "Medals" : "Next medal · \(info.earned) of \(info.total)")
                         .madFont(size: 12, weight: .semibold, design: .rounded, monospacedDigit: true)
                         .foregroundColor(.white.opacity(0.5))
-                        .lineLimit(1)
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.75)
                     if let next = info.next, let progress = info.progress {
                         Text(next.name)
                             .madFont(size: 16, weight: .heavy, design: .rounded)

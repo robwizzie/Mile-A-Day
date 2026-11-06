@@ -35,7 +35,7 @@ struct StreakAssistOfferSheet: View {
                     }
                     if let errorText {
                         Text(errorText)
-                            .font(.system(size: 12, weight: .semibold, design: .rounded))
+                            .madFont(size: 12, weight: .semibold, design: .rounded)
                             .foregroundColor(.orange)
                             .multilineTextAlignment(.center)
                             .padding(.horizontal, 20)
@@ -67,11 +67,11 @@ struct StreakAssistOfferSheet: View {
                 )
                 VStack(alignment: .leading, spacing: 3) {
                     Text(headline(offer))
-                        .font(.system(size: 15, weight: .heavy, design: .rounded))
+                        .madFont(size: 15, weight: .heavy, design: .rounded)
                         .foregroundColor(.white)
                         .fixedSize(horizontal: false, vertical: true)
                     Text(SaveFriendStreakView.dayLabel(offer.target_date))
-                        .font(.system(size: 11, weight: .bold, design: .rounded))
+                        .madFont(size: 11, weight: .bold, design: .rounded)
                         .foregroundColor(.white.opacity(0.5))
                 }
                 Spacer(minLength: 0)
@@ -79,7 +79,7 @@ struct StreakAssistOfferSheet: View {
             }
 
             Text(explanation(offer))
-                .font(.system(size: 13, weight: .medium, design: .rounded))
+                .madFont(size: 13, weight: .medium, design: .rounded)
                 .foregroundColor(.white.opacity(0.72))
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .fixedSize(horizontal: false, vertical: true)
@@ -89,7 +89,7 @@ struct StreakAssistOfferSheet: View {
                     respond(offer, accept: false)
                 } label: {
                     Text("No thanks")
-                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                        .madFont(size: 13, weight: .bold, design: .rounded)
                         .foregroundColor(.white.opacity(0.65))
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 11)
@@ -109,7 +109,7 @@ struct StreakAssistOfferSheet: View {
                             ProgressView().tint(.white).scaleEffect(0.7)
                         } else {
                             Text(offer.isIncomingMile ? "Use My Assist" : "Donate My Mile")
-                                .font(.system(size: 13, weight: .heavy, design: .rounded))
+                                .madFont(size: 13, weight: .heavy, design: .rounded)
                                 .foregroundColor(.white)
                         }
                     }
@@ -212,11 +212,11 @@ struct DonateMileSheet: View {
         VStack(spacing: 6) {
             TokenMedallion(kind: .assist, held: true, size: 52)
             Text(headline)
-                .font(.system(size: 17, weight: .heavy, design: .rounded))
+                .madFont(size: 17, weight: .heavy, design: .rounded)
                 .foregroundColor(.white)
                 .multilineTextAlignment(.center)
             Text("A friend holding a Streak Assist can't spend it without someone's spare mile. Every mile past your own goal today covers one friend.")
-                .font(.system(size: 13, weight: .medium, design: .rounded))
+                .madFont(size: 13, weight: .medium, design: .rounded)
                 .foregroundColor(.white.opacity(0.65))
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
@@ -238,13 +238,13 @@ struct DonateMileSheet: View {
     private var emptyState: some View {
         VStack(spacing: 8) {
             Image(systemName: "figure.run.circle")
-                .font(.system(size: 34, weight: .light))
+                .madFont(size: 34, weight: .light, maxScale: 1.5)
                 .foregroundColor(.white.opacity(0.25))
             Text("No friends need a mile right now")
-                .font(.system(size: 14, weight: .bold, design: .rounded))
+                .madFont(size: 14, weight: .bold, design: .rounded)
                 .foregroundColor(.white.opacity(0.7))
             Text("They'll show up here when they're holding a Streak Assist and have a day to save.")
-                .font(.system(size: 12, weight: .medium, design: .rounded))
+                .madFont(size: 12, weight: .medium, design: .rounded)
                 .foregroundColor(.white.opacity(0.45))
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
@@ -261,9 +261,9 @@ struct DonateMileSheet: View {
             )
             VStack(alignment: .leading, spacing: 2) {
                 Text(friend.displayName)
-                    .font(.system(size: 14, weight: .heavy, design: .rounded))
+                    .madFont(size: 14, weight: .heavy, design: .rounded)
                     .foregroundColor(.white)
-                    .lineLimit(1)
+                    .madNameLines()
                 // "Hasn't run today" and "missed yesterday" are very different
                 // asks — one is a heads-up, the other is a rescue.
                 Text(
@@ -271,7 +271,7 @@ struct DonateMileSheet: View {
                         ? "Hasn't run today · streak stays at \(friend.streakAfterSave)"
                         : "Missed \(SaveFriendStreakView.dayLabel(friend.target_date)) · back to \(friend.streakAfterSave)"
                 )
-                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                .madFont(size: 11, weight: .semibold, design: .rounded)
                 .foregroundColor(.white.opacity(0.55))
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
@@ -341,7 +341,7 @@ struct AskForMileSheet: View {
                             .padding(.top, 30)
                     } else if friendService.friends.isEmpty {
                         Text("Add a friend first — an Assist always takes two people.")
-                            .font(.system(size: 13, weight: .medium, design: .rounded))
+                            .madFont(size: 13, weight: .medium, design: .rounded)
                             .foregroundColor(.white.opacity(0.5))
                             .multilineTextAlignment(.center)
                             .padding(.top, 30)
@@ -354,7 +354,7 @@ struct AskForMileSheet: View {
                     }
                     if let errorText {
                         Text(errorText)
-                            .font(.system(size: 12, weight: .semibold, design: .rounded))
+                            .madFont(size: 12, weight: .semibold, design: .rounded)
                             .foregroundColor(.orange)
                             .multilineTextAlignment(.center)
                     }
@@ -388,11 +388,11 @@ struct AskForMileSheet: View {
                     ? "Keep your \(savableDay.restored_streak)-day streak"
                     : "Get back to \(savableDay.restored_streak) days"
             )
-            .font(.system(size: 17, weight: .heavy, design: .rounded))
+            .madFont(size: 17, weight: .heavy, design: .rounded)
             .foregroundColor(.white)
             .multilineTextAlignment(.center)
             Text("You're holding a Streak Assist, but spending it takes a mile a friend ran past their own goal. Ask as many as you like — the first to say yes covers \(SaveFriendStreakView.dayLabel(savableDay.local_date)).")
-                .font(.system(size: 13, weight: .medium, design: .rounded))
+                .madFont(size: 13, weight: .medium, design: .rounded)
                 .foregroundColor(.white.opacity(0.65))
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
@@ -407,16 +407,16 @@ struct AskForMileSheet: View {
                 size: 42
             )
             Text(friend.username ?? friend.displayName)
-                .font(.system(size: 14, weight: .heavy, design: .rounded))
+                .madFont(size: 14, weight: .heavy, design: .rounded)
                 .foregroundColor(.white)
-                .lineLimit(1)
+                .madNameLines()
             Spacer(minLength: 6)
             if askedIds.contains(friend.user_id) {
                 HStack(spacing: 4) {
                     Image(systemName: "checkmark")
-                        .font(.system(size: 11, weight: .bold))
+                        .madFont(size: 11, weight: .bold, maxScale: 1.5)
                     Text("Asked")
-                        .font(.system(size: 12, weight: .heavy, design: .rounded))
+                        .madFont(size: 12, weight: .heavy, design: .rounded)
                 }
                 .foregroundColor(.green)
                 .padding(.horizontal, 12)
@@ -431,7 +431,7 @@ struct AskForMileSheet: View {
                             ProgressView().tint(.white).scaleEffect(0.6)
                         } else {
                             Text("Ask")
-                                .font(.system(size: 12, weight: .heavy, design: .rounded))
+                                .madFont(size: 12, weight: .heavy, design: .rounded)
                                 .foregroundColor(.white)
                         }
                     }

@@ -379,19 +379,17 @@ struct ProfileIdentityBlock: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
-            HStack(alignment: .center, spacing: 8) {
+            MADInlineStack(spacing: 8) {
                 if let username, !username.isEmpty {
                     Text("@\(username)")
-                        .font(.system(size: 22, weight: .black, design: .rounded))
+                        .madFont(size: 22, weight: .black, design: .rounded)
                         .foregroundColor(.white)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.7)
+                        .madNameLines()
                 } else if let displayName, !displayName.isEmpty {
                     Text(displayName)
-                        .font(.system(size: 22, weight: .black, design: .rounded))
+                        .madFont(size: 22, weight: .black, design: .rounded)
                         .foregroundColor(.white)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.7)
+                        .madNameLines()
                 }
                 if showsPureFlame {
                     Button {
@@ -405,15 +403,14 @@ struct ProfileIdentityBlock: View {
                 if let username, !username.isEmpty,
                    let displayName, !displayName.isEmpty, displayName != username {
                     Text(displayName)
-                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+                        .madFont(size: 13, weight: .semibold, design: .rounded)
                         .foregroundColor(.white.opacity(0.55))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
+                        .madNameLines()
                 }
             }
             if let bio, !bio.isEmpty {
                 Text(bio)
-                    .font(.system(size: 14, weight: .medium, design: .rounded))
+                    .madFont(size: 14, weight: .medium, design: .rounded)
                     .foregroundColor(.white.opacity(0.8))
                     .multilineTextAlignment(.leading)
                     .fixedSize(horizontal: false, vertical: true)
@@ -461,6 +458,7 @@ struct ProfileStatTiles<FriendsDestination: View>: View {
             }
             .buttonStyle(.plain)
         }
+        .fixedSize(horizontal: false, vertical: true)
         .animation(.easeInOut(duration: 0.2), value: friendCount)
     }
 
@@ -472,13 +470,13 @@ struct ProfileStatTiles<FriendsDestination: View>: View {
     ) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(label)
-                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .madFont(size: 12, weight: .semibold, design: .rounded)
                 .foregroundColor(labelColor)
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
             HStack(spacing: 4) {
                 Text(value)
-                    .font(.system(size: 24, weight: .black, design: .rounded))
+                    .madFont(size: 24, weight: .black, design: .rounded)
                     .foregroundColor(.white)
                     .monospacedDigit()
                     .contentTransition(.numericText())
@@ -487,12 +485,12 @@ struct ProfileStatTiles<FriendsDestination: View>: View {
                 if chevron {
                     Spacer(minLength: 0)
                     Image(systemName: "chevron.right")
-                        .font(.system(size: 10, weight: .bold))
+                        .madFont(size: 10, weight: .bold, maxScale: 1.5)
                         .foregroundColor(.white.opacity(0.35))
                 }
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
         .background(DashboardCardSurface(style: .fun))
@@ -542,9 +540,10 @@ struct ProfileTabBar<Tag: Hashable>: View {
                 } label: {
                     VStack(spacing: 8) {
                         Text(item.title)
-                            .font(.system(size: 15, weight: .heavy, design: .rounded))
+                            .madFont(size: 15, weight: .heavy, design: .rounded, maxScale: 1.35)
                             .foregroundColor(selected ? .white : .white.opacity(0.45))
                             .lineLimit(1)
+                            .minimumScaleFactor(0.7)
                         ZStack {
                             Capsule()
                                 .fill(Color.clear)
@@ -596,7 +595,7 @@ struct ProfileCardLabel: View {
 
     var body: some View {
         Text(text)
-            .font(.system(size: 13, weight: .semibold, design: .rounded))
+            .madFont(size: 13, weight: .semibold, design: .rounded)
             .foregroundColor(.white.opacity(0.6))
     }
 }
@@ -686,7 +685,7 @@ struct ProfileStatsCard: View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(alignment: .firstTextBaseline, spacing: 3) {
                 Text(stat.value)
-                    .font(.system(size: 22, weight: .black, design: .rounded))
+                    .madFont(size: 22, weight: .black, design: .rounded)
                     .foregroundColor(.white)
                     .monospacedDigit()
                     .lineLimit(1)
@@ -694,20 +693,21 @@ struct ProfileStatsCard: View {
                     .layoutPriority(1)
                 if let unit = stat.unit {
                     Text(unit)
-                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .madFont(size: 12, weight: .semibold, design: .rounded)
                         .foregroundColor(.white.opacity(0.5))
                         .lineLimit(1)
+                        .minimumScaleFactor(0.75)
                 }
             }
             HStack(spacing: 3) {
                 Text(stat.label)
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .madFont(size: 12, weight: .semibold, design: .rounded)
                     .foregroundColor(.white.opacity(0.55))
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
                 if tappable {
                     Image(systemName: "chevron.right")
-                        .font(.system(size: 9, weight: .bold))
+                        .madFont(size: 9, weight: .bold, maxScale: 1.5)
                         .foregroundColor(.white.opacity(0.35))
                         .accessibilityHidden(true)
                 }

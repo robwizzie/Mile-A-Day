@@ -33,6 +33,19 @@ import SwiftUI
 //   * A number beside a name needs `lineLimit(1)`, or SwiftUI wraps its digits.
 //   * Every `repeatForever` is guarded by Reduce Motion.
 
+/// A Compete type token. Drawn with `competeFont`, so every token follows the
+/// system text size through `madFont`.
+struct CompeteType {
+    let size: CGFloat
+    let weight: Font.Weight
+}
+
+extension View {
+    func competeFont(_ type: CompeteType, maxScale: CGFloat = 2) -> some View {
+        madFont(size: type.size, weight: type.weight, design: .rounded, maxScale: maxScale)
+    }
+}
+
 enum CompeteDesign {
 
     // MARK: Surface
@@ -57,7 +70,7 @@ enum CompeteDesign {
     /// Secondary — a score that isn't the leader's, a supporting label.
     static let inkMuted = Color.white.opacity(0.62)
     /// Tertiary — eyebrows, units, counts, the rank number outside the top 3.
-    static let inkFaint = Color.white.opacity(0.38)
+    static let inkFaint = Color.white.opacity(0.55)
     /// Quaternary — the rule-adjacent, the disabled, the eliminated.
     static let inkGhost = Color.white.opacity(0.22)
 
@@ -65,17 +78,17 @@ enum CompeteDesign {
 
     /// The uppercase tracked label above a group. Small, wide, quiet — it is a
     /// signpost, not a headline.
-    static let eyebrow = Font.system(size: 11, weight: .bold, design: .rounded)
+    static let eyebrow = CompeteType(size: 11, weight: .bold)
     static let eyebrowTracking: CGFloat = 1.4
 
-    static let title = Font.system(size: 22, weight: .bold, design: .rounded)
-    static let name = Font.system(size: 16, weight: .semibold, design: .rounded)
-    static let nameSmall = Font.system(size: 14, weight: .semibold, design: .rounded)
+    static let title = CompeteType(size: 22, weight: .bold)
+    static let name = CompeteType(size: 16, weight: .semibold)
+    static let nameSmall = CompeteType(size: 14, weight: .semibold)
     /// A competitor's score on a row.
-    static let score = Font.system(size: 17, weight: .heavy, design: .rounded)
+    static let score = CompeteType(size: 17, weight: .heavy)
     /// The supporting figure under a name (miles covered, contribution).
-    static let detail = Font.system(size: 12, weight: .medium, design: .rounded)
-    static let caption = Font.system(size: 11, weight: .medium, design: .rounded)
+    static let detail = CompeteType(size: 12, weight: .medium)
+    static let caption = CompeteType(size: 11, weight: .medium)
 
     // MARK: Medals
 
@@ -147,14 +160,14 @@ struct CompeteHeader<Actions: View>: View {
         HStack(alignment: .firstTextBaseline, spacing: MADTheme.Spacing.sm) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(eyebrow.uppercased())
-                    .font(CompeteDesign.eyebrow)
+                    .competeFont(CompeteDesign.eyebrow)
                     .tracking(CompeteDesign.eyebrowTracking)
                     .foregroundColor(CompeteDesign.inkFaint)
                     .lineLimit(1)
 
                 if let title {
                     Text(title)
-                        .font(CompeteDesign.title)
+                        .competeFont(CompeteDesign.title)
                         .foregroundColor(CompeteDesign.ink)
                         .lineLimit(2)
                         .minimumScaleFactor(0.85)
@@ -164,7 +177,7 @@ struct CompeteHeader<Actions: View>: View {
 
             if let trailingText {
                 Text(trailingText)
-                    .font(CompeteDesign.caption)
+                    .competeFont(CompeteDesign.caption)
                     .foregroundColor(CompeteDesign.inkFaint)
                     .lineLimit(1)
                     .fixedSize()
@@ -197,7 +210,7 @@ struct CompeteRankBadge: View {
                     // level for 1st otherwise drew two identical gold chips
                     // and the board looked like it had two winners by mistake.
                     Text(isTied ? "T\(place)" : "\(place)")
-                        .font(.system(size: size * (isTied ? 0.40 : 0.48), weight: .heavy, design: .rounded))
+                        .madFont(size: size * (isTied ? 0.40 : 0.48), weight: .heavy, design: .rounded, maxScale: 1.3)
                         .foregroundColor(medal)
                         .monospacedDigit()
                         .lineLimit(1)
@@ -206,10 +219,11 @@ struct CompeteRankBadge: View {
                 .frame(width: size, height: size)
             } else {
                 Text(isTied ? "T\(place)" : "\(place)")
-                    .font(.system(size: size * 0.46, weight: .bold, design: .rounded))
+                    .madFont(size: size * 0.46, weight: .bold, design: .rounded, maxScale: 1.3)
                     .foregroundColor(CompeteDesign.inkFaint)
                     .monospacedDigit()
                     .lineLimit(1)
+                    .minimumScaleFactor(0.75)
                     .frame(width: size, height: size)
             }
         }
@@ -274,10 +288,11 @@ struct CompeteTag: View {
 
     var body: some View {
         Text(text)
-            .font(.system(size: 9, weight: .heavy, design: .rounded))
+            .madFont(size: 11, weight: .heavy, design: .rounded, maxScale: 1.2)
             .tracking(0.4)
             .foregroundColor(filled ? .white : color)
             .lineLimit(1)
+            .minimumScaleFactor(0.75)
             .padding(.horizontal, 5)
             .padding(.vertical, 2)
             .background(
@@ -304,9 +319,10 @@ struct CompeteSegmented<Value: Hashable>: View {
                     }
                 } label: {
                     Text(option.label)
-                        .font(.system(size: 11, weight: .bold, design: .rounded))
+                        .madFont(size: 11, weight: .bold, design: .rounded)
                         .foregroundColor(isOn ? .black : CompeteDesign.inkMuted)
                         .lineLimit(1)
+                        .minimumScaleFactor(0.75)
                         .padding(.horizontal, 11)
                         .padding(.vertical, 6)
                         .background(
@@ -335,16 +351,17 @@ struct CompeteStat: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(value)
-                .font(.system(size: 19, weight: .heavy, design: .rounded))
+                .madFont(size: 19, weight: .heavy, design: .rounded)
                 .foregroundColor(tint)
                 .monospacedDigit()
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
             Text(label.uppercased())
-                .font(.system(size: 9, weight: .bold, design: .rounded))
+                .madFont(size: 11, weight: .bold, design: .rounded)
                 .tracking(0.8)
                 .foregroundColor(CompeteDesign.inkFaint)
                 .lineLimit(1)
+                .minimumScaleFactor(0.75)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }

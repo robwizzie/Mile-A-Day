@@ -571,13 +571,13 @@ struct PostCardView: View {
             )
             VStack(spacing: 10) {
                 Image(systemName: "lock.fill")
-                    .font(.system(size: 32, weight: .bold))
+                    .madFont(size: 32, weight: .bold, maxScale: 1.5)
                     .foregroundColor(.white)
                 Text("Finish your mile to unlock")
-                    .font(.system(size: 15, weight: .heavy, design: .rounded))
+                    .madFont(size: 15, weight: .heavy, design: .rounded)
                     .foregroundColor(.white)
                 Text("Today's photos open up once you complete your own mile.")
-                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .madFont(size: 12, weight: .medium, design: .rounded)
                     .foregroundColor(.white.opacity(0.8))
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 28)
@@ -1129,24 +1129,25 @@ struct PostCardView: View {
         } label: {
             HStack(spacing: 5) {
                 Image(systemName: selected ? "scope" : "hand.tap.fill")
-                    .font(.system(size: 10, weight: .bold))
+                    .madFont(size: 10, weight: .bold, maxScale: 1.5)
                     .foregroundColor(.white.opacity(dimmed ? 0.35 : 0.8))
                 Capsule()
                     .fill(color)
                     .frame(width: selected ? 18 : 14, height: 4)
                 Text(name)
-                    .font(.system(size: 12, weight: selected ? .heavy : .semibold, design: .rounded))
+                    .madFont(size: 12, weight: selected ? .heavy : .semibold, design: .rounded)
                     .foregroundColor(.white.opacity(dimmed ? 0.4 : (selected ? 0.95 : 0.75)))
                     .lineLimit(1)
+                    .minimumScaleFactor(0.75)
                 if let miles, miles > 0 {
                     Text(miles.distanceFormatted)
-                        .font(.system(size: 11, weight: .bold, design: .rounded))
+                        .madFont(size: 11, weight: .bold, design: .rounded)
                         .monospacedDigit()
                         .foregroundColor(.white.opacity(dimmed ? 0.3 : 0.55))
                 }
                 if selected {
                     Image(systemName: "checkmark")
-                        .font(.system(size: 9, weight: .black))
+                        .madFont(size: 9, weight: .black, maxScale: 1.5)
                         .foregroundColor(color)
                 }
             }
@@ -1618,7 +1619,7 @@ struct PostCardView: View {
         line += AttributedString(" ")
         line += MentionText.attributed(text, size: captionSize)
         return Text(line)
-            .font(.system(size: captionSize, weight: .medium, design: .rounded))
+            .madFont(size: captionSize, weight: .medium, design: .rounded)
             .foregroundColor(.white.opacity(0.9))
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -1780,9 +1781,9 @@ struct ZoomablePhotoSlide: View {
             if let badge {
                 HStack(spacing: 5) {
                     Image(systemName: badge.icon)
-                        .font(.system(size: 11, weight: .bold))
+                        .madFont(size: 11, weight: .bold, maxScale: 1.5)
                     Text(badge.text)
-                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                        .madFont(size: 12, weight: .bold, design: .rounded)
                 }
                 .foregroundColor(.white)
                 .padding(.horizontal, 10)
@@ -1857,11 +1858,12 @@ struct PostCrewSheet: View {
                 AvatarView(name: name, imageURL: imageURL, size: 44)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(name)
-                        .font(MADTheme.Typography.smallBold)
+                        .madFont(size: 14, weight: .semibold, design: .rounded)
                         .foregroundStyle(MADTheme.Colors.madWhite)
                         .lineLimit(1)
+                        .minimumScaleFactor(0.75)
                     Text(role)
-                        .font(MADTheme.Typography.caption)
+                        .madFont(size: 12, design: .rounded)
                         .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.55))
                 }
                 Spacer(minLength: MADTheme.Spacing.xs)

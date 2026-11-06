@@ -98,9 +98,9 @@ struct BuddyWalksSection: View {
                     HStack(spacing: 3) {
                         Text("See all")
                         Image(systemName: "chevron.right")
-                            .font(.system(size: 11, weight: .bold))
+                            .madFont(size: 11, weight: .bold, maxScale: 1.5)
                     }
-                    .font(MADTheme.Typography.caption)
+                    .madFont(size: 12, design: .rounded)
                     .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.6))
                 }
                 .buttonStyle(.plain)
@@ -160,10 +160,10 @@ struct BuddyWalksSection: View {
                     // A walk with a map but no picture wears the map glyph, so
                     // the tile promises what the tap delivers.
                     Image(systemName: walk.hasAnyRoute ? "map.fill" : walk.mode.icon)
-                        .font(.system(size: 18, weight: .semibold))
+                        .madFont(size: 18, weight: .semibold, maxScale: 1.5)
                         .foregroundStyle(walk.accentColor)
                     Text("\(walk.groupDistanceMiles.milesText) mi")
-                        .font(.system(size: 11, weight: .bold, design: .rounded))
+                        .madFont(size: 11, weight: .bold, design: .rounded)
                         .monospacedDigit()
                         .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.75))
                 }
@@ -174,7 +174,7 @@ struct BuddyWalksSection: View {
             // More pictures inside than the one on the tile.
             if walk.photos.count > 1 {
                 Text("\(walk.photos.count)")
-                    .font(.system(size: 9, weight: .heavy, design: .rounded))
+                    .madFont(size: 11, weight: .heavy, design: .rounded)
                     .monospacedDigit()
                     .foregroundStyle(MADTheme.Colors.madWhite)
                     .padding(.horizontal, 5)
@@ -217,13 +217,13 @@ struct BuddyWalksSection: View {
         }
         return HStack(spacing: MADTheme.Spacing.sm) {
             Text(parts.joined(separator: " · "))
-                .font(MADTheme.Typography.smallBold)
+                .madFont(size: 14, weight: .semibold, design: .rounded)
                 .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.85))
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
             Spacer(minLength: 0)
             Image(systemName: "chevron.right")
-                .font(.system(size: 12, weight: .bold))
+                .madFont(size: 12, weight: .bold, maxScale: 1.5)
                 .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.35))
         }
     }
@@ -244,16 +244,16 @@ struct BuddyWalksSection: View {
                 }
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Walk with a friend")
-                        .font(MADTheme.Typography.smallBold)
+                        .madFont(size: 14, weight: .semibold, design: .rounded)
                         .foregroundStyle(MADTheme.Colors.madWhite)
                     Text("Move at the same time, see each other's miles — it all lands here")
-                        .font(MADTheme.Typography.caption)
+                        .madFont(size: 12, design: .rounded)
                         .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.55))
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer(minLength: 0)
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 12, weight: .bold))
+                    .madFont(size: 12, weight: .bold, maxScale: 1.5)
                     .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.35))
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -354,19 +354,21 @@ struct BuddyWalksTogetherRow: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
-                    .font(MADTheme.Typography.smallBold)
+                    .madFont(size: 14, weight: .semibold, design: .rounded)
                     .foregroundStyle(MADTheme.Colors.madWhite)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.75)
                 Text(subtitle)
-                    .font(MADTheme.Typography.caption)
+                    .madFont(size: 12, design: .rounded)
                     .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.55))
-                    .lineLimit(1)
+                    .lineLimit(3)
+                    .minimumScaleFactor(0.75)
             }
 
             Spacer(minLength: 0)
 
             Image(systemName: "chevron.right")
-                .font(.system(size: 12, weight: .bold))
+                .madFont(size: 12, weight: .bold, maxScale: 1.5)
                 .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.35))
         }
         .padding(MADTheme.Spacing.md)

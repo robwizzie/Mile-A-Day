@@ -69,10 +69,10 @@ struct HypeButton: View {
                     let small = style == .smallPill
                     let pill = HStack(spacing: small ? 4 : 5) {
                         Image(systemName: isHyped ? "hands.clap.fill" : "hands.clap")
-                            .font(.system(size: small ? 13 : 17, weight: .bold))
+                            .madFont(size: small ? 13 : 17, weight: .bold, maxScale: 1.5)
                             .scaleEffect(pop ? 1.2 : 1)
                         Text(isHyped ? "Hyped" : "Hype")
-                            .font(.system(size: small ? 12 : 14, weight: .heavy, design: .rounded))
+                            .madFont(size: small ? 12 : 14, weight: .heavy, design: .rounded)
                     }
                     .padding(.horizontal, small ? 11 : 15)
                     .padding(.vertical, small ? 6 : 9)
@@ -137,16 +137,16 @@ struct HypeTally: View {
     var body: some View {
         HStack(spacing: showsLabel ? 5 : 3) {
             Image(systemName: "hands.clap.fill")
-                .font(.system(size: showsLabel ? 18 : 13, weight: .semibold))
+                .madFont(size: showsLabel ? 18 : 13, weight: .semibold, maxScale: 1.5)
                 .foregroundColor(.orange)
             if showsLabel {
                 Text("\(count) hype\(count == 1 ? "" : "s")")
-                    .font(.system(size: 15, weight: .heavy, design: .rounded))
+                    .madFont(size: 15, weight: .heavy, design: .rounded)
                     .monospacedDigit()
                     .foregroundColor(.white.opacity(0.9))
             } else {
                 Text("\(count)")
-                    .font(.system(size: 12, weight: .heavy, design: .rounded))
+                    .madFont(size: 12, weight: .heavy, design: .rounded)
                     .monospacedDigit()
                     .foregroundColor(.orange)
             }

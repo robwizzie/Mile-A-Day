@@ -81,9 +81,9 @@ struct CompetitionLobbyTeamsSection: View {
                     .font(.title3)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Set Up Teams")
-                        .font(MADTheme.Typography.headline)
+                        .madFont(size: 17, weight: .semibold, design: .rounded)
                     Text("Split the lobby into teams — scores combine")
-                        .font(MADTheme.Typography.caption)
+                        .madFont(size: 12, design: .rounded)
                         .foregroundColor(.white.opacity(0.7))
                 }
                 Spacer()
@@ -110,7 +110,7 @@ struct CompetitionLobbyTeamsSection: View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
             HStack(spacing: MADTheme.Spacing.sm) {
                 Text("Teams")
-                    .font(CompeteDesign.eyebrow)
+                    .competeFont(CompeteDesign.eyebrow)
                     .tracking(CompeteDesign.eyebrowTracking)
                     .textCase(.uppercase)
                     .foregroundColor(CompeteDesign.inkFaint)
@@ -123,7 +123,7 @@ struct CompetitionLobbyTeamsSection: View {
                 ownerToolbar
             } else if memberPick, iAmAccepted {
                 Text("Pick your team before the comp starts")
-                    .font(MADTheme.Typography.caption)
+                    .madFont(size: 12, design: .rounded)
                     .foregroundColor(.white.opacity(0.5))
                     .padding(.horizontal, MADTheme.Spacing.sm)
             }
@@ -178,13 +178,13 @@ struct CompetitionLobbyTeamsSection: View {
         Button(action: action) {
             HStack(spacing: 6) {
                 Image(systemName: icon)
-                    .font(.system(size: 12, weight: .semibold))
+                    .madFont(size: 12, weight: .semibold, maxScale: 1.5)
                 Text(title)
-                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .madFont(size: 13, weight: .semibold, design: .rounded)
             }
             .foregroundColor(tint)
             .frame(maxWidth: .infinity)
-            .frame(height: 36)
+            .frame(minHeight: 36)
             .background(
                 RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
                     .fill(tint.opacity(0.12))
@@ -209,9 +209,9 @@ struct CompetitionLobbyTeamsSection: View {
                 Circle().fill(color).frame(width: 10, height: 10)
 
                 Text(team.name)
-                    .font(.system(size: 15, weight: .semibold, design: .rounded))
+                    .madFont(size: 15, weight: .semibold, design: .rounded, maxScale: 1.3)
                     .foregroundColor(.white)
-                    .lineLimit(1)
+                    .madNameLines()
 
                 if isOwner {
                     Button {
@@ -219,7 +219,7 @@ struct CompetitionLobbyTeamsSection: View {
                         renameTarget = team
                     } label: {
                         Image(systemName: "pencil")
-                            .font(.system(size: 11))
+                            .madFont(size: 11, maxScale: 1.5)
                             .foregroundColor(.white.opacity(0.35))
                     }
                     .disabled(isWorking)
@@ -227,7 +227,9 @@ struct CompetitionLobbyTeamsSection: View {
 
                 if isMine {
                     Text("YOUR TEAM")
-                        .font(.system(size: 8, weight: .heavy, design: .rounded))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.6)
+                        .madFont(size: 11, weight: .heavy, design: .rounded)
                         .tracking(0.5)
                         .foregroundColor(.white)
                         .padding(.horizontal, 6)
@@ -244,7 +246,7 @@ struct CompetitionLobbyTeamsSection: View {
                         ) }
                     } label: {
                         Text(myTeamId == nil ? "Join" : "Switch")
-                            .font(.system(size: 12, weight: .bold, design: .rounded))
+                            .madFont(size: 12, weight: .bold, design: .rounded)
                             .foregroundColor(.white)
                             .padding(.horizontal, 12)
                             .padding(.vertical, 5)
@@ -258,7 +260,7 @@ struct CompetitionLobbyTeamsSection: View {
                         ) }
                     } label: {
                         Text("Leave")
-                            .font(.system(size: 12, weight: .semibold, design: .rounded))
+                            .madFont(size: 12, weight: .semibold, design: .rounded)
                             .foregroundColor(.white.opacity(0.6))
                             .padding(.horizontal, 10)
                             .padding(.vertical, 5)
@@ -268,14 +270,14 @@ struct CompetitionLobbyTeamsSection: View {
                 }
 
                 Text("\(members.count)")
-                    .font(.system(size: 11, weight: .medium, design: .rounded))
-                    .foregroundColor(.white.opacity(0.35))
+                    .madFont(size: 11, weight: .medium, design: .rounded)
+                    .foregroundColor(.white.opacity(0.6))
             }
 
             if members.isEmpty {
                 Text("No members yet")
-                    .font(.system(size: 12, weight: .medium, design: .rounded))
-                    .foregroundColor(.white.opacity(0.35))
+                    .madFont(size: 12, weight: .medium, design: .rounded)
+                    .foregroundColor(.white.opacity(0.6))
                     .padding(.leading, 20)
             } else {
                 VStack(spacing: 6) {
@@ -299,9 +301,9 @@ struct CompetitionLobbyTeamsSection: View {
     private func unassignedCard(_ users: [CompetitionUser]) -> some View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
             Text("UNASSIGNED (\(users.count))")
-                .font(.system(size: 10, weight: .heavy, design: .rounded))
+                .madFont(size: 11, weight: .heavy, design: .rounded)
                 .tracking(1.0)
-                .foregroundColor(.white.opacity(0.4))
+                .foregroundColor(.white.opacity(0.6))
 
             VStack(spacing: 6) {
                 ForEach(users) { member in
@@ -323,13 +325,13 @@ struct CompetitionLobbyTeamsSection: View {
             AvatarView(name: member.displayName, imageURL: member.profile_image_url, size: 28)
 
             Text(member.displayName)
-                .font(.system(size: 13, weight: .medium, design: .rounded))
+                .madFont(size: 13, weight: .medium, design: .rounded)
                 .foregroundColor(.white.opacity(0.9))
-                .lineLimit(1)
+                .madNameLines()
 
             if member.user_id == competition.owner {
                 Image(systemName: "crown.fill")
-                    .font(.system(size: 9))
+                    .madFont(size: 9, maxScale: 1.5)
                     .foregroundColor(.yellow.opacity(0.8))
             }
 
@@ -337,7 +339,7 @@ struct CompetitionLobbyTeamsSection: View {
 
             if let label = statLabel(for: member.user_id) {
                 Text(label)
-                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .madFont(size: 11, weight: .semibold, design: .rounded)
                     .foregroundColor(.green)
                     .padding(.horizontal, 7)
                     .padding(.vertical, 3)
@@ -346,7 +348,7 @@ struct CompetitionLobbyTeamsSection: View {
 
             if isOwner {
                 Image(systemName: "chevron.up.chevron.down")
-                    .font(.system(size: 9, weight: .semibold))
+                    .madFont(size: 9, weight: .semibold, maxScale: 1.5)
                     .foregroundColor(.white.opacity(0.3))
             }
         }
@@ -377,11 +379,11 @@ struct CompetitionLobbyTeamsSection: View {
         )) {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Members pick their own team")
-                    .font(.system(size: 13, weight: .medium, design: .rounded))
+                    .madFont(size: 13, weight: .medium, design: .rounded)
                     .foregroundColor(.white.opacity(0.9))
                 Text(memberPick ? "Anyone can join or switch teams" : "Only you can assign teams")
-                    .font(.system(size: 10, weight: .medium, design: .rounded))
-                    .foregroundColor(.white.opacity(0.4))
+                    .madFont(size: 11, weight: .medium, design: .rounded)
+                    .foregroundColor(.white.opacity(0.6))
             }
         }
         .tint(MADTheme.Colors.madRed)

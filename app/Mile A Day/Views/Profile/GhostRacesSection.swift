@@ -79,10 +79,10 @@ struct GhostRacesSection: View {
                         HStack(spacing: 4) {
                             Text("See all \(races.count) races")
                             Image(systemName: "chevron.right")
-                                .font(.system(size: 10, weight: .bold))
+                                .madFont(size: 10, weight: .bold, maxScale: 1.5)
                                 .accessibilityHidden(true)
                         }
-                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                        .madFont(size: 13, weight: .bold, design: .rounded)
                         .foregroundColor(MADTheme.Colors.madRed)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .contentShape(Rectangle())
@@ -107,12 +107,12 @@ struct GhostRacesSection: View {
         HStack(spacing: MADTheme.Spacing.sm) {
             GhostSprite(size: 18, color: MADTheme.Colors.madWhite, floats: false)
             Text("Ghost Races")
-                .font(MADTheme.Typography.headline)
+                .madFont(size: 17, weight: .semibold, design: .rounded)
                 .foregroundStyle(MADTheme.Colors.madWhite)
             Spacer()
             if !races.isEmpty {
                 Text("\(wins)–\(races.count - wins)")
-                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                    .madFont(size: 14, weight: .bold, design: .rounded)
                     .monospacedDigit()
                     .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.6))
             }
@@ -125,7 +125,7 @@ struct GhostRacesSection: View {
                 ? "Couldn't load your races."
                 : "No races yet. Pick Ghost Race when you start a mile."
         )
-        .font(MADTheme.Typography.caption)
+        .madFont(size: 12, design: .rounded)
         .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.6))
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, MADTheme.Spacing.sm)
@@ -155,24 +155,25 @@ struct GhostRaceRow: View {
     var body: some View {
         HStack(spacing: MADTheme.Spacing.md) {
             Image(systemName: race.won ? "trophy.fill" : "flag.checkered")
-                .font(.system(size: 14, weight: .semibold))
+                .madFont(size: 14, weight: .semibold, maxScale: 1.5)
                 .foregroundStyle(race.won ? Color.green : Color.orange)
                 .frame(width: 22)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(race.resultText)
-                    .font(MADTheme.Typography.smallBold)
+                    .madFont(size: 14, weight: .semibold, design: .rounded)
                     .foregroundStyle(MADTheme.Colors.madWhite)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.75)
                 Text(race.local_date)
-                    .font(MADTheme.Typography.caption)
+                    .madFont(size: 12, design: .rounded)
                     .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.5))
             }
 
             Spacer(minLength: MADTheme.Spacing.sm)
 
             Text(BestEffortStore.formatSeconds(race.yourSeconds))
-                .font(.system(size: 16, weight: .bold, design: .rounded))
+                .madFont(size: 16, weight: .bold, design: .rounded)
                 .monospacedDigit()
                 .foregroundStyle(MADTheme.Colors.madWhite)
         }

@@ -18,10 +18,10 @@ struct InjuryStatusChip: View {
     var body: some View {
         HStack(spacing: compact ? 2 : 3) {
             Image(systemName: "pause.fill")
-                .font(.system(size: compact ? 7 : 8, weight: .black))
+                .madFont(size: compact ? 7 : 8, weight: .black, maxScale: 1.5)
             if !compact {
                 Text("INJURED")
-                    .font(.system(size: 9.5, weight: .bold, design: .rounded))
+                    .madFont(size: 11, weight: .bold, design: .rounded)
                     .tracking(0.3)
             }
         }

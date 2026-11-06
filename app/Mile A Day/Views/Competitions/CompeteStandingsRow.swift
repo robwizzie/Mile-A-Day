@@ -131,11 +131,11 @@ struct CompeteStandingsRow: View {
                 )
 
             VStack(alignment: .leading, spacing: 7) {
-                HStack(spacing: 5) {
+                MADInlineStack {
                     Text(user.displayName)
-                        .font(CompeteDesign.name)
+                        .competeFont(CompeteDesign.name)
                         .foregroundColor(isEliminated ? CompeteDesign.inkGhost : CompeteDesign.ink)
-                        .lineLimit(1)
+                        .madNameLines()
                         .truncationMode(.tail)
 
                     if isCurrentUser { CompeteTag(text: "YOU", color: accent) }
@@ -165,7 +165,7 @@ struct CompeteStandingsRow: View {
 
                     if showsDistance {
                         Text(distanceText)
-                            .font(CompeteDesign.detail)
+                            .competeFont(CompeteDesign.detail)
                             .foregroundColor(CompeteDesign.inkFaint)
                             .monospacedDigit()
                             .lineLimit(1)
@@ -189,7 +189,7 @@ struct CompeteStandingsRow: View {
             .frame(maxWidth: .infinity, alignment: .leading)
 
             Text(scoreText)
-                .font(CompeteDesign.score)
+                .competeFont(CompeteDesign.score)
                 .foregroundColor(
                     isEliminated ? CompeteDesign.inkGhost
                         : (place == 1 ? (CompeteDesign.medal(1) ?? .white) : CompeteDesign.ink)
@@ -214,13 +214,13 @@ struct CompeteStandingsRow: View {
         HStack(spacing: 2) {
             ForEach(0..<min(competition.streakLives, 6), id: \.self) { index in
                 Image(systemName: index < lives ? "heart.fill" : "heart")
-                    .font(.system(size: 8))
+                    .madFont(size: 8, maxScale: 1.5)
                     .foregroundColor(index < lives ? .red.opacity(0.85) : CompeteDesign.inkGhost)
             }
             if competition.streakLives > 6 {
                 Text("+\(competition.streakLives - 6)")
-                    .font(.system(size: 8, weight: .bold, design: .rounded))
-                    .foregroundColor(CompeteDesign.inkGhost)
+                    .madFont(size: 11, weight: .bold, design: .rounded)
+                    .foregroundColor(CompeteDesign.inkFaint)
             }
         }
         .accessibilityElement(children: .ignore)

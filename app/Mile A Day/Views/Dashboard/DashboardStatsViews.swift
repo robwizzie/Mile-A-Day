@@ -183,7 +183,7 @@ struct RecentWorkoutsView: View {
                         }
                     } label: {
                         Text("Load More")
-                            .font(MADTheme.Typography.subheadline)
+                            .madFont(size: 15, design: .rounded)
                             .foregroundColor(MADTheme.Colors.primary)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, MADTheme.Spacing.sm)
@@ -356,7 +356,7 @@ struct RecentWorkoutsPreviewCard: View {
     private var header: some View {
         HStack(spacing: 14) {
             Text("Recent workouts")
-                .font(.system(size: 16, weight: .heavy, design: .rounded))
+                .madFont(size: 16, weight: .heavy, design: .rounded)
                 .foregroundColor(.primary)
                 .accessibilityAddTraits(.isHeader)
             Spacer(minLength: 4)
@@ -376,9 +376,9 @@ struct RecentWorkoutsPreviewCard: View {
         Button(action: action) {
             HStack(spacing: 3) {
                 Text(title)
-                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .madFont(size: 13, weight: .bold, design: .rounded)
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 10, weight: .bold))
+                    .madFont(size: 10, weight: .bold, maxScale: 1.5)
                     .accessibilityHidden(true)
             }
             .foregroundColor(.white.opacity(0.6))
@@ -394,7 +394,7 @@ struct RecentWorkoutsPreviewCard: View {
             if healthManager.hasLoadedRecentWorkoutsOnce {
                 // A successful query genuinely returned nothing.
                 Text("No recent workouts yet — log a run to see it here.")
-                    .font(.system(size: 13, weight: .medium, design: .rounded))
+                    .madFont(size: 13, weight: .medium, design: .rounded)
                     .foregroundColor(.secondary)
                     .padding(.vertical, MADTheme.Spacing.sm)
             } else {
@@ -404,7 +404,7 @@ struct RecentWorkoutsPreviewCard: View {
                 HStack(spacing: 8) {
                     ProgressView().controlSize(.small)
                     Text("Loading recent workouts…")
-                        .font(.system(size: 13, weight: .medium, design: .rounded))
+                        .madFont(size: 13, weight: .medium, design: .rounded)
                         .foregroundColor(.secondary)
                 }
                 .padding(.vertical, MADTheme.Spacing.sm)
@@ -420,9 +420,9 @@ struct RecentWorkoutsPreviewCard: View {
                     } label: {
                         HStack(spacing: 4) {
                             Text(moreThisWeek == 1 ? "1 more this week" : "\(moreThisWeek) more this week")
-                                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                                .madFont(size: 13, weight: .semibold, design: .rounded)
                             Image(systemName: "chevron.right")
-                                .font(.system(size: 10, weight: .bold))
+                                .madFont(size: 10, weight: .bold, maxScale: 1.5)
                                 .accessibilityHidden(true)
                         }
                         .foregroundColor(.white.opacity(0.55))
