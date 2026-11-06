@@ -49,6 +49,7 @@ Details: docs/conventions/backend.md § Backend Conventions
 - Monthly Flames: a month's form is owned once that calendar month was PERFECT (every day done by the streak's union: miles, `stepGoalDaysSql`, `streak_coverage`) in any year — derived at read (`perfectMonths`), never a badge row; ids in `MONTHLY_FLAMES` = catalog `month:N`. Check: `monthly-flames-check`.
 - Flamey names go through `parseDisplayName`; `earned_detail` is one query per badge FAMILY reusing evaluator rules. Check: `flamey-profile-check`.
 - Medals judge WHOLE history; `recalibrateBadges` is award-only; > `BADGE_PUSH_BURST_LIMIT` ⇒ one summary push. Check: `badge-recalibrate-check`.
+- User rows in lists read by someone else (friends, close friends, requests) use `FRIEND_SAFE_USER_COLUMNS`, never `u.*`; keep `'' AS email`. Check: `close-friends-fields-check`.
 - Rate limits key on `clientIp()`, never `req.ip`; `TRUST_PROXY_HOPS`, never `true`; unknown IP ⇒ skip. Check: `rate-limit-check`.
 - Shoes are OWNER-ONLY (only `shoeService` reads them); one rule `shoeActivitySql` (iOS `ShoeActivity.of`); mileage derived. Check: `shoes-check`.
 - `/public/users/:username` comes only from `publicProfileService.getPublicProfile`: streak via `effectiveStreakSql` (also `getPublicPostPreview`); `total_miles`/`friend_count`/`medals` null for `workout_visibility = 'private'`. Check: `public-profile-check`.

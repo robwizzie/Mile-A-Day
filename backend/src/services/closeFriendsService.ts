@@ -1,5 +1,5 @@
 import { PostgresService } from './DbService.js';
-import { areFriends } from './friendshipService.js';
+import { areFriends, FRIEND_SAFE_USER_COLUMNS } from './friendshipService.js';
 import { User } from '../types/user.js';
 
 const db = PostgresService.getInstance();
@@ -7,9 +7,12 @@ const db = PostgresService.getInstance();
 type ErrorReturn = { error: string };
 type MessageReturn = { message: string };
 
+// The app reads a row's id, username, names and avatar (CloseFriendsListView),
+// all covered by the shared friend-list columns, including the `email` key
+// older builds require. A list of other people, so never a star select.
 export async function getCloseFriends(userId: string): Promise<User[]> {
 	const rows = await db.query<User>(
-		`SELECT u.*
+		`SELECT ${FRIEND_SAFE_USER_COLUMNS}
 		FROM close_friends cf
 		JOIN users u ON u.user_id = cf.close_friend_id
 		JOIN friendships f ON f.user_id = cf.user_id AND f.friend_id = cf.close_friend_id AND f.status = 'accepted'
