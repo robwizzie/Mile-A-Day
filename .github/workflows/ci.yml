@@ -390,6 +390,12 @@ jobs:
       # progress. A form that never unlocks is reported by nobody.
       - name: Monthly Flames check
         run: node scripts/monthly-flames-check.mjs
+      # Account deletion: Apple tokens are stored encrypted and revoked, Apple
+      # being down or unconfigured never fails a sign-in or a deletion, a failed
+      # revocation queues and the sweep finishes it, and the logs that have no
+      # FK to users are cleared (by Apple id and email too, not only user id).
+      - name: Apple revocation check
+        run: node scripts/apple-revocation-check.mjs
       # MCP database connector: the full OAuth sign-in through the MCP SDK's own
       # client, every sign-in attack (no cookie, wrong nonce, forged token,
       # not allowlisted, replay), and the database guards — read role can't

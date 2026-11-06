@@ -11,6 +11,7 @@ import {
 } from '../services/refreshTokenService.js';
 import { AuthenticatedRequest } from '../middleware/auth.js';
 import { logError } from '../services/errorLogService.js';
+import { captureAppleRefreshToken } from '../services/appleSignInTokenService.js';
 
 export async function signIn(req: Request, res: Response) {
 	if (!hasRequiredKeys(['user_id', 'identity_token', 'authorization_code'], req, res)) return;
@@ -44,6 +45,12 @@ export async function signIn(req: Request, res: Response) {
 			deviceInfo: req.body.device_info
 		});
 
+		// Not awaited: account deletion needs this token, but sign-in doesn't,
+		// so a slow Apple must not hold the user at the door.
+		if (user.user_id && typeof req.body.authorization_code === 'string') {
+			void captureAppleRefreshToken(user.user_id, req.body.authorization_code, appleSub);
+		}
+
 		const expiresAt = Date.now() + 30 * 24 * 60 * 60 * 1000;
 
 		return res.json({ user, accessToken, refreshToken, expiresIn: '30d', expiresAt });
@@ -52,7 +59,7 @@ export async function signIn(req: Request, res: Response) {
 		logError('auth', 'Apple sign-in failed', {
 			userId: (req.body?.user_id as string) ?? null,
 			context: {
-				email: req.body?.email ?? null,
+				has_email: Boolean(req.body?.email),
 				reason: err instanceof Error ? err.message : String(err)
 			}
 		});

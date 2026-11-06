@@ -1357,7 +1357,7 @@ export const dailyChallenges = pgTable(
  * hype → un-hype → re-hype produced a second push, and a few rounds of it
  * produced a few. Instagram treats a like notification as a fact about a
  * PAIR (this person liked this post), not about the event, so re-liking is
- * never news; this table is that fact, and nothing deletes from it.
+ * never news; this table is that fact, and only account deletion removes rows.
  *
  * Rows are cheap and append-only. `context_id` is never null here: a
  * context-less hype has nothing to be idempotent about and keeps its old
@@ -4021,3 +4021,38 @@ export const plusGifts = pgTable(
     index("idx_plus_gifts_redeemed_by").on(table.redeemedBy),
   ],
 );
+
+// Sign in with Apple refresh token per account, kept only so account deletion
+// can revoke it (appleSignInTokenService). Never a `users` column:
+// GET /users/:id serves SELECT *. AES-256-GCM, and RLS with no policy hides the
+// table from the MCP read roles, like the mcp_* tables.
+export const appleSignInTokens = pgTable("apple_sign_in_tokens", {
+  userId: text("user_id")
+    .primaryKey()
+    .notNull()
+    .references(() => users.userId, { onDelete: "cascade" }),
+  encryptedRefreshToken: text("encrypted_refresh_token").notNull(),
+  clientId: text("client_id").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" })
+    .defaultNow()
+    .notNull(),
+}).enableRLS();
+
+// Tokens of deleted accounts, waiting on Apple. No user id: the account is gone
+// and a row is removed as soon as Apple answers, or after the last retry.
+export const appleTokenRevocations = pgTable(
+  "apple_token_revocations",
+  {
+    id: uuid().primaryKey().notNull(),
+    encryptedRefreshToken: text("encrypted_refresh_token").notNull(),
+    clientId: text("client_id").notNull(),
+    attempts: integer().default(0).notNull(),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [index("idx_apple_token_revocations_due").on(table.nextAttemptAt)],
+).enableRLS();

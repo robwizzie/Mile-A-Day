@@ -6,6 +6,11 @@ import path from 'path';
 import sharp from 'sharp';
 import hasRequiredKeys from '../utils/hasRequiredKeys.js';
 import {
+	appleRevocationStatements,
+	captureAppleRefreshToken,
+	revokeQueuedToken
+} from '../services/appleSignInTokenService.js';
+import {
 	updateUsername,
 	checkUsernameAvailability,
 	updateBio,
@@ -281,6 +286,19 @@ export async function deleteUser(req: Request, res: Response) {
 	// (in_app_notifications), so they MUST be deleted here or the final DELETE FROM users
 	// either leaves orphaned rows or fails outright. competitions.owner/winner are
 	// ON DELETE SET NULL, so the user's competitions survive with a null owner.
+	//
+	// Deliberately kept: plus_purchases and plus_gifts (the purchase ledger) and
+	// mcp_audit_log (the admin connector's audit trail outlives the account).
+
+	// A client that just re-authenticated can send a fresh code, which is the only
+	// way to reach an account that has no stored Apple token. Optional: shipped
+	// clients send no body. Apple failing here doesn't stop the deletion.
+	const authorizationCode = req.body?.authorization_code;
+	if (typeof authorizationCode === 'string' && authorizationCode) {
+		await captureAppleRefreshToken(userId, authorizationCode, results[0].apple_sub);
+	}
+	const appleRevocationId = crypto.randomUUID();
+
 	const p = [userId];
 	const shoeImages = await db.query<{ image_url: string }>(
 		'SELECT image_url FROM shoes WHERE user_id = $1 AND image_url IS NOT NULL',
@@ -340,6 +358,36 @@ export async function deleteUser(req: Request, res: Response) {
 		{ query: 'DELETE FROM workout_shoes WHERE user_id = $1', params: p },
 		{ query: 'DELETE FROM shoes WHERE user_id = $1', params: p },
 		{ query: 'DELETE FROM client_diagnostics WHERE user_id = $1', params: p },
+		{ query: 'DELETE FROM feature_events WHERE user_id = $1', params: p },
+		{ query: 'DELETE FROM weekly_recap_log WHERE user_id = $1', params: p },
+		{ query: 'DELETE FROM pending_friend_notifications WHERE user_id = $1', params: p },
+		{ query: 'DELETE FROM notification_audience_settings WHERE user_id = $1', params: p },
+		{ query: 'DELETE FROM mcp_oauth_codes WHERE user_id = $1', params: p },
+		{
+			query: 'DELETE FROM close_friends WHERE user_id = $1 OR close_friend_id = $1',
+			params: p
+		},
+		{
+			query: 'DELETE FROM friend_request_log WHERE sender_id = $1 OR target_id = $1',
+			params: p
+		},
+		{
+			query: 'DELETE FROM photo_ask_log WHERE sender_id = $1 OR target_id = $1',
+			params: p
+		},
+		{
+			query: 'DELETE FROM hype_notify_log WHERE sender_id = $1 OR recipient_id = $1',
+			params: p
+		},
+		{
+			// A failed sign-in has no account to log against: it recorded the client's
+			// Apple user id, and older rows the raw email in context.
+			query: `DELETE FROM error_log
+			        WHERE user_id = ANY($1::text[])
+			           OR (category = 'auth' AND context->>'email' = NULLIF($2, ''))`,
+			params: [[userId, results[0].apple_sub], results[0].email ?? '']
+		},
+		...appleRevocationStatements(userId, appleRevocationId),
 		{ query: 'DELETE FROM users WHERE user_id = $1', params: p }
 	]);
 
@@ -349,8 +397,10 @@ export async function deleteUser(req: Request, res: Response) {
 	unlinkUploadQuietly(results[0].profile_banner_url);
 	for (const shoe of shoeImages) unlinkUploadQuietly(shoe.image_url);
 
+	// Strings only: shipped clients decode this response as [String: String].
 	res.json({
-		message: `Successfully deleted user ${userId}`
+		message: `Successfully deleted user ${userId}`,
+		apple_revocation: await revokeQueuedToken(appleRevocationId)
 	});
 }
 

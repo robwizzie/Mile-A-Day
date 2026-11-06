@@ -93,7 +93,7 @@ export async function verifyAppleWeb(req: Request, res: Response) {
     if (!user || user.role !== "admin") {
       logError("auth", "Admin sign-in denied (not an admin)", {
         userId: user?.user_id ?? null,
-        context: { email: (payload.email as string) ?? user?.email ?? null },
+        context: { has_email: Boolean(payload.email ?? user?.email) },
       });
       return res.status(403).json({ error: "Not authorized" });
     }

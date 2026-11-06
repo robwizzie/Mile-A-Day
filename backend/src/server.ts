@@ -56,6 +56,7 @@ import { startStreakFeaturesCron } from "./cron/streakFeaturesCron.js";
 import { startDeskPushCron } from "./cron/deskPushCron.js";
 import { startLastCallCron } from "./cron/lastCallCron.js";
 import { startDiagnosticsCron } from "./cron/diagnosticsCron.js";
+import { startAppleRevocationCron } from "./cron/appleRevocationCron.js";
 import { healUncomputedStreaks } from "./services/streakFeatureCore.js";
 import { seedExtraBadges } from "./services/badgeService.js";
 import { seedExtraChallenges } from "./services/dailyChallengeService.js";
@@ -485,6 +486,7 @@ function startCrons() {
   startWeeklyChallengeCron();
   startLastCallCron();
   startDiagnosticsCron();
+  startAppleRevocationCron();
   // Idempotently ensure the v2 social/app-function badges exist in the catalog.
   seedExtraBadges();
   // Idempotently ensure the v2 daily challenges (5K/10K/social) exist.
