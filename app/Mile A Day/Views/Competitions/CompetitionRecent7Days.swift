@@ -24,6 +24,7 @@ struct CompetitionDayDetailSheet: View {
     let interval: CompetitionInterval
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     private var accepted: [CompetitionUser] {
         competition.users.filter { $0.invite_status == .accepted }
@@ -121,18 +122,33 @@ struct CompetitionDayDetailSheet: View {
         .padding(.bottom, 14)
     }
 
-    private var summaryRow: some View {
-        HStack(spacing: 16) {
-            summaryStat(label: "Total miles", value: String(format: "%.1f mi", totalMiles))
-            Divider().background(Color.white.opacity(0.1)).frame(height: 28)
-            summaryStat(label: "Competitors", value: "\(accepted.count)")
-            Divider().background(Color.white.opacity(0.1)).frame(height: 28)
-            if let winnerId, let w = accepted.first(where: { $0.user_id == winnerId }) {
-                summaryStat(label: winnerLabel, value: w.displayName)
-            } else {
-                summaryStat(label: winnerLabel, value: "—")
+    private var winnerValue: String {
+        guard let winnerId, let w = accepted.first(where: { $0.user_id == winnerId }) else { return "—" }
+        return w.displayName
+    }
+
+    /// Three columns normally; stacked at accessibility sizes, where a third of
+    /// the sheet can't hold "COMPETITORS".
+    @ViewBuilder private var summaryStats: some View {
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: 8) {
+                summaryStat(label: "Total miles", value: String(format: "%.1f mi", totalMiles))
+                summaryStat(label: "Competitors", value: "\(accepted.count)")
+                summaryStat(label: winnerLabel, value: winnerValue)
+            }
+        } else {
+            HStack(spacing: 16) {
+                summaryStat(label: "Total miles", value: String(format: "%.1f mi", totalMiles))
+                Divider().background(Color.white.opacity(0.1)).frame(height: 28)
+                summaryStat(label: "Competitors", value: "\(accepted.count)")
+                Divider().background(Color.white.opacity(0.1)).frame(height: 28)
+                summaryStat(label: winnerLabel, value: winnerValue)
             }
         }
+    }
+
+    private var summaryRow: some View {
+        summaryStats
         .padding(12)
         .background(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
@@ -197,7 +213,7 @@ struct CompetitionDayDetailSheet: View {
             AvatarView(name: user.displayName, imageURL: user.profile_image_url, size: 32)
 
             VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 5) {
+                MADInlineStack {
                     Text(user.displayName)
                         .madFont(size: 14, weight: .semibold, design: .rounded)
                         .foregroundColor(.white)
@@ -206,7 +222,7 @@ struct CompetitionDayDetailSheet: View {
                         Text("YOU")
                             .lineLimit(1)
                             .minimumScaleFactor(0.6)
-                            .madFont(size: 11, weight: .bold)
+                            .madFont(size: 11, weight: .bold, maxScale: 1.3)
                             .foregroundColor(.white)
                             .padding(.horizontal, 4)
                             .padding(.vertical, 1)

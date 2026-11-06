@@ -1260,6 +1260,8 @@ struct DailyActivityCalendar: View {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(formattedTotalDistance)
                         .madFont(size: 18, weight: .black, design: .rounded)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.55)
                         .foregroundColor(.white)
                     Text("\(competition.options.unit.shortDisplayName.uppercased()) TOTAL")
                         .lineLimit(1)

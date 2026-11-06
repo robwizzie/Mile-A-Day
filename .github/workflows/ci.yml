@@ -159,6 +159,10 @@ jobs:
       # blocked you.
       - name: Blocked accounts check
         run: node scripts/blocks-check.mjs
+      # `GET /friends/close`: exactly the friend-list columns, whole key set,
+      # including the `email` key shipped decoders require.
+      - name: Close friends fields check
+        run: node scripts/close-friends-fields-check.mjs
       # Desk display feed: only a live display key opens it, the response is
       # an exact whitelist, friends/alerts obey presence + blocks, and key
       # management is admin-only and never returns the stored hash.
@@ -369,6 +373,10 @@ jobs:
       # and no sensitive column rides along. Both leak or lie in public.
       - name: Public profile check
         run: node scripts/public-profile-check.mjs
+      # `GET /users/:id` by viewer: the owner's full record, the allowlisted
+      # profile fields for anyone else, and the keys shipped decoders require.
+      - name: User profile fields check
+        run: node scripts/user-profile-fields-check.mjs
       # Onboarding's example photos are served to signed-out devices: only the
       # allowlisted posts, in order, dropped once deleted or off the feed,
       # with signed urls and no extra columns.

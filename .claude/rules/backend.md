@@ -49,11 +49,13 @@ Details: docs/conventions/backend.md § Backend Conventions
 - Monthly Flames: a month's form is owned once that calendar month was PERFECT (every day done by the streak's union: miles, `stepGoalDaysSql`, `streak_coverage`) in any year — derived at read (`perfectMonths`), never a badge row; ids in `MONTHLY_FLAMES` = catalog `month:N`. Check: `monthly-flames-check`.
 - Flamey names go through `parseDisplayName`; `earned_detail` is one query per badge FAMILY reusing evaluator rules. Check: `flamey-profile-check`.
 - Medals judge WHOLE history; `recalibrateBadges` is award-only; > `BADGE_PUSH_BURST_LIMIT` ⇒ one summary push. Check: `badge-recalibrate-check`.
+- User rows in lists read by someone else (friends, close friends, requests) use `FRIEND_SAFE_USER_COLUMNS`, never `u.*`; keep `'' AS email`. Check: `close-friends-fields-check`.
 - Rate limits key on `clientIp()`, never `req.ip`; `TRUST_PROXY_HOPS`, never `true`; unknown IP ⇒ skip. Check: `rate-limit-check`.
 - Shoes are OWNER-ONLY (only `shoeService` reads them); one rule `shoeActivitySql` (iOS `ShoeActivity.of`); mileage derived. Check: `shoes-check`.
 - `/public/users/:username` comes only from `publicProfileService.getPublicProfile`: streak via `effectiveStreakSql` (also `getPublicPostPreview`); `total_miles`/`friend_count`/`medals` null for `workout_visibility = 'private'`. Check: `public-profile-check`.
 - A new user-scoped table with no FK cascade gets a `DELETE` in `deleteUser` (`error_log` also by `apple_sub` + email); never log raw email in `context`. Keep `DELETE /users/:id` response all strings. Check: `apple-revocation-check`.
 - Apple refresh tokens live only in `apple_sign_in_tokens` (encrypted, RLS), never on `users`; deletion moves them via `appleRevocationStatements` in its transaction; Apple never blocks sign-in or deletion. Check: `apple-revocation-check`.
+- `GET /users/:id` reads via `getUserProfileRow`: full row for the owner only, `OTHER_VIEWER_PROFILE_COLUMNS` for everyone else; list a field there only if shipped clients need it, keep `'' AS email`. Check: `user-profile-fields-check`.
 - `/public/showcase` (onboarding photos, signed-out) serves ONLY the `showcasePostIds()` allowlist (`SHOWCASE_POST_IDS` env, empty = off) via `getShowcasePhotos`: signed urls, deleted/off-feed dropped, never a feed query. Check: `showcase-check`.
 
 ## Architecture: Routes -> Controllers -> Services

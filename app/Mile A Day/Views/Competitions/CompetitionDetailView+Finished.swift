@@ -131,23 +131,21 @@ extension CompetitionDetailView {
 
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(winnerName)
-                                    .madFont(size: 27, weight: .heavy, design: .rounded)
+                                    .madFont(size: 27, weight: .heavy, design: .rounded, maxScale: 1.4)
                                     .foregroundColor(CompeteDesign.ink)
-                                    .lineLimit(2)
-                                    .minimumScaleFactor(0.7)
+                                    .lineLimit(3)
+                                    .minimumScaleFactor(0.6)
                                 Text(winningTeam == nil ? "Winner" : "Winning team")
                                     .competeFont(CompeteDesign.caption)
                                     .foregroundColor(CompeteDesign.inkFaint)
+                                if dynamicTypeSize.isAccessibilitySize, let winnerScore {
+                                    winnerScoreLabel(winnerScore)
+                                }
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
 
-                            if let winnerScore {
-                                Text(winnerScore)
-                                    .madFont(size: 20, weight: .heavy, design: .rounded)
-                                    .foregroundColor(CompeteDesign.medal(1) ?? .yellow)
-                                    .monospacedDigit()
-                                    .lineLimit(1)
-                                    .fixedSize()
+                            if !dynamicTypeSize.isAccessibilitySize, let winnerScore {
+                                winnerScoreLabel(winnerScore)
                             }
                         }
                     }
@@ -185,6 +183,15 @@ extension CompetitionDetailView {
                     Circle().strokeBorder(CompeteDesign.medal(1) ?? .yellow, lineWidth: 2)
                 )
         }
+    }
+
+    private func winnerScoreLabel(_ score: String) -> some View {
+        Text(score)
+            .madFont(size: 20, weight: .heavy, design: .rounded)
+            .foregroundColor(CompeteDesign.medal(1) ?? .yellow)
+            .monospacedDigit()
+            .lineLimit(1)
+            .fixedSize()
     }
 
     /// "You finished 4th of 6." — said once, in the banner, in words.

@@ -558,6 +558,8 @@ struct LeaderboardSection: View {
                     .madFont(size: isFirst ? 13 : 11, weight: .bold, design: .rounded)
                     .foregroundColor(.white)
                     .madNameLines()
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
                 if entry.is_current_user {
                     youLabel
                 }
@@ -575,7 +577,9 @@ struct LeaderboardSection: View {
             }
         }
         .frame(maxWidth: .infinity)
-        .frame(height: height, alignment: .bottom)
+        // A minimum: the podium steps stay at ordinary sizes, and a slot can
+        // grow so a long handle wraps at accessibility sizes.
+        .frame(minHeight: height, alignment: .bottom)
         .padding(.vertical, 8)
         .background(DashboardCardSurface(style: .fun))
     }

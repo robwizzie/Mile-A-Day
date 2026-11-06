@@ -19,6 +19,7 @@ import {
 	updateOnboardingInfo,
 	getUserCount,
 	getPublicStreak,
+	getUserProfileRow,
 	searchUsers as searchUsersByName
 } from '../services/userService.js';
 import {
@@ -43,9 +44,10 @@ const db = PostgresService.getInstance();
 export async function getUser(req: Request, res: Response) {
 	if (!hasRequiredKeys(['userId'], req, res)) return;
 
-	const results = await db.query('SELECT * FROM users WHERE user_id = $1', [req.params.userId]);
+	const viewerId = (req as AuthenticatedRequest).userId;
+	const row = await getUserProfileRow(req.params.userId, viewerId);
 
-	if (!results.length) {
+	if (!row) {
 		return res.status(404).json({
 			error: 'User not found'
 		});
@@ -54,7 +56,7 @@ export async function getUser(req: Request, res: Response) {
 	// Additive: a friend's Flamey (Fun dashboard only). `{enabled:false}` for
 	// everyone else, including strangers — see flameyBlockFor. Never fails the
 	// profile read: a broken block degrades to "no Flamey".
-	const flamey = await flameyBlockFor((req as AuthenticatedRequest).userId, req.params.userId).catch(
+	const flamey = await flameyBlockFor(viewerId, req.params.userId).catch(
 		(err: any): FlameyBlock => {
 			console.error('[flamey] block failed:', err?.message ?? err);
 			return { enabled: false };
@@ -64,7 +66,7 @@ export async function getUser(req: Request, res: Response) {
 	// The raw closet column never rides the row: it is served only inside the
 	// friends-only `flamey` block, re-validated for ownership.
 	// Same for Flamey's name: friends-only, inside the block.
-	const { flamey_look: _rawLook, flamey_name: _rawName, ...user } = results[0];
+	const { flamey_look: _rawLook, flamey_name: _rawName, ...user } = row;
 	res.json({ ...user, flamey });
 }
 

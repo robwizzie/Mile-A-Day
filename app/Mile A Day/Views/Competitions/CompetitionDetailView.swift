@@ -5,6 +5,7 @@ struct CompetitionDetailView: View {
     @State var competition: Competition
     @ObservedObject var competitionService: CompetitionService
     @Environment(\.dismiss) var dismiss
+    @Environment(\.dynamicTypeSize) var dynamicTypeSize
     @StateObject private var friendService = FriendService()
 
     @State var showingInviteFriend = false
