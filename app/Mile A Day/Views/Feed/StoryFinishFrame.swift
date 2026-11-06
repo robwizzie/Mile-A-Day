@@ -467,12 +467,14 @@ struct AddFinishStorySheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var isPosting = false
     @State private var errorText: String?
-    /// The walk's own trace, for the preview (friends get the server's copy,
-    /// trimmed by their privacy settings).
+    /// What friends will get: the uploaded points, trimmed the way the server
+    /// trims them. Nil draws Flamey, which is exactly what they'd see.
     @State private var coordinates: [CLLocationCoordinate2D]?
     /// "running"/"walking" for the preview's noun; the posted frame reads the
     /// type from the server's workout row.
     @State private var workoutType: String?
+    /// Why friends will see something different from this preview, if they will.
+    @State private var friendsNote: String?
     @State private var style = FinishFrameStyle.lastUsed
     @State private var contentHeight: CGFloat = 640
 
@@ -531,6 +533,13 @@ struct AddFinishStorySheet: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(.horizontal, 20)
+
+            if let friendsNote {
+                Label(friendsNote, systemImage: "eye")
+                    .madFont(size: 13, weight: .medium, design: .rounded)
+                    .foregroundColor(.white.opacity(0.7))
+                    .padding(.horizontal, 24)
+            }
 
             if let errorText {
                 Text(errorText)
@@ -641,9 +650,31 @@ struct AddFinishStorySheet: View {
               let workout = HealthKitManager.shared.cachedWorkouts.first(where: { $0.uuid.uuidString == id })
         else { return }
         workoutType = workout.workoutActivityType == .running ? "running" : "walking"
-        await WorkoutRouteCache.shared.loadTraces(for: [workout], using: HealthKitManager.shared) { _, coords in
-            coordinates = coords
+        // A stealth route never leaves the phone, so even your own posted story
+        // has no map. The preview shows that instead of promising one.
+        if StealthModeStore.shared.isStealth(workout) {
+            friendsNote = "Stealth walk: friends won't see a route. They'll see Flamey and your stats, like this."
+            return
         }
+        let full = await WorkoutSyncService.shared.uploadableRoute(for: workout)
+        coordinates = RoutePrivacyTrim.friendsView(full, workoutId: id)
+        friendsNote = noteForFriends(full: full, friendsLine: coordinates)
+    }
+
+    private func noteForFriends(
+        full: [CLLocationCoordinate2D]?,
+        friendsLine: [CLLocationCoordinate2D]?
+    ) -> String? {
+        guard let full, full.count >= 2 else { return nil }
+        if !NotificationPreferences.load().shareRouteMaps {
+            return "Show route maps is off, so friends won't see a route. They'll see Flamey and your stats, like this."
+        }
+        guard let friendsLine else {
+            return "Friends won't see a route. This walk stays too close to its start and end to keep them hidden, so they'll see Flamey and your stats, like this."
+        }
+        return friendsLine.count < full.count
+            ? "This is what friends will see, with your start and end hidden."
+            : "This is what friends will see."
     }
 
     private func add() async {

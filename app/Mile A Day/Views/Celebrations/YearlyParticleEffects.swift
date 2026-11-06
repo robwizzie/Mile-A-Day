@@ -438,9 +438,11 @@ struct YearNumberShimmer: ViewModifier {
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 )
+                // The light moves, the digits don't: offsetting after the mask
+                // slid a ghost copy of the number across the screen.
+                .offset(x: phase * 300)
                 .blendMode(.screen)
                 .mask(content)
-                .offset(x: phase * 300)
                 .opacity(active ? 1 : 0)
             )
             .onChange(of: active) { _, newValue in

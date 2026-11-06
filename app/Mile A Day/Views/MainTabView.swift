@@ -78,19 +78,31 @@ struct MainTabView: View {
     /// Streak-token state, for the two Assist sheets hosted at this root.
     @ObservedObject private var tokensState = StreakTokensState.shared
 
+    @Environment(\.duoSpread) private var duoSpread
+
+    /// How far a floating banner sits above the bottom edge. A Duo's tabs live
+    /// in the side rail, so its bottom edge is free and 52pt only lifted the
+    /// banner onto Start.
+    private var bottomBarClearance: CGFloat {
+        DuoDevice.isDuo ? 12 : 52
+    }
+
     var body: some View {
         ZStack(alignment: .bottom) {
         TabView(selection: $selectedTab) {
             NavigationStack {
-                DashboardView(
-                    healthManager: healthManager,
-                    userManager: userManager,
-                    unreadNotificationCount: $unreadNotificationCount,
-                    showNotificationInbox: $showNotificationInbox
-                )
-                    .environmentObject(notificationService)
-                    .environmentObject(competitionService)
-                    .environmentObject(friendService)
+                DuoHomeSplit(friendService: friendService) {
+                    DashboardView(
+                        healthManager: healthManager,
+                        userManager: userManager,
+                        unreadNotificationCount: $unreadNotificationCount,
+                        showNotificationInbox: $showNotificationInbox
+                    )
+                        .environmentObject(notificationService)
+                        .environmentObject(competitionService)
+                        .environmentObject(friendService)
+                }
+                .duoPageMargins()
             }
             .tabItem {
                 Label("Dashboard", systemImage: "house.fill")
@@ -99,6 +111,7 @@ struct MainTabView: View {
 
             NavigationStack {
                 CompetitionsView(competitionService: competitionService)
+                    .duoPageMargins()
             }
             .tabItem {
                 Label("Compete", systemImage: "trophy.fill")
@@ -111,6 +124,7 @@ struct MainTabView: View {
                 // TabView keeps it alive, so its own .task can't (same reason
                 // Compete/Friends refresh in the onChange below).
                 SocialFeedView(isActiveTab: selectedTab == 2)
+                    .duoPageMargins()
             }
             .tabItem {
                 Label("Feed", systemImage: "square.stack.fill")
@@ -119,6 +133,7 @@ struct MainTabView: View {
 
             NavigationStack {
                 FriendsListView(friendService: friendService)
+                    .duoPageMargins()
             }
             .tabItem {
                 Label("Friends", systemImage: "person.2.fill")
@@ -408,10 +423,26 @@ struct MainTabView: View {
             WidgetDataStore.save(todayMiles: newDistance, goal: userManager.currentUser.goalMiles)
         }
 
+            if DuoDevice.isDuo {
+                DuoFlameyMomentsHost(
+                    dayDone: ProgressCalculator.isDayComplete(
+                        miles: healthManager.todaysDistance,
+                        goal: userManager.currentUser.goalMiles,
+                        stepGoalMet: StepGoalDayStore.isTodayMet()
+                    ),
+                    isTracking: isTracking
+                )
+            }
+
             // Sync status floats above the tab bar for the same reason as the
             // workout banner below, and above that banner when both show.
             SyncStatusBanner()
-                .padding(.bottom, isTracking && selectedTab != 0 && activeWorkoutForBanner != nil ? 122 : 52)
+                // On the wide inner screen it keeps to the first page: stretched
+                // across both it read as a bar through the middle of Home.
+                .frame(maxWidth: duoSpread ? 440 : nil)
+                .frame(maxWidth: .infinity, alignment: duoSpread ? .leading : .center)
+                .padding(.bottom, isTracking && selectedTab != 0 && activeWorkoutForBanner != nil
+                    ? bottomBarClearance + 70 : bottomBarClearance)
                 .ignoresSafeArea(.keyboard, edges: .bottom)
 
             // Floating in-app workout banner — sits ABOVE the tab bar instead of
@@ -429,7 +460,7 @@ struct MainTabView: View {
                     )
                 }
                 .padding(.horizontal, 16)
-                .padding(.bottom, 52)
+                .padding(.bottom, bottomBarClearance)
                 // Anchored to the TAB BAR, never to the keyboard. This banner
                 // is bottom-aligned inside the root ZStack, so its position is
                 // the ZStack's bottom edge — and SwiftUI moves that edge up by

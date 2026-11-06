@@ -2716,7 +2716,9 @@ await updateNotificationPreferences(BOB, { workout_visibility: "friends" });
 
   // 2. A workout uploaded WITH a route inside the window: stamped, no row.
   const W1 = "ci-workout-stealth-1";
-  const w1End = new Date().toISOString();
+  // A second ahead: the window starts at NOW() in microseconds and this has
+  // only milliseconds, so ending in the same millisecond could land before it.
+  const w1End = new Date(Date.now() + 1000).toISOString();
   await uploadWorkouts(SAM, [walk(W1, w1End)]);
   assert.equal(await stampOf(W1), true, "workout inside the window is stamped");
   assert.equal(await routeRows(W1), 0, "…and its route was never stored");

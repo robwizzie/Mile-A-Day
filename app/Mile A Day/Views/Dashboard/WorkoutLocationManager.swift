@@ -68,6 +68,10 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
     /// Anchor fix for distance accrual. Deliberately NOT advanced on sub-noise
     /// displacements — see accrueDistance.
     private var lastLocation: CLLocation?
+    /// This walk's line for the buddy-walk map (`LiveRouteMap`). Stays on this
+    /// phone unless the walker turns on route sharing for the walk, and then
+    /// only through `LiveRouteRelease`, which holds back both ends.
+    private(set) var liveTrail: [CLLocationCoordinate2D] = []
     /// Last fix ACCEPTED into the route trace (stricter bar than distance).
     private var lastRoutePoint: CLLocation?
     private(set) var isUsingPedometer = false
@@ -505,6 +509,7 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
         automotiveVerdictAt = nil
         lastLocation = nil
         lastRoutePoint = nil
+        liveTrail = []
         lastFixAt = nil
         isUsingPedometer = (locationType == .indoor)
         pedometerOffset = initialDistance
@@ -1148,6 +1153,10 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
         // `resume()` re-anchors from the first fix after the pause, which is
         // what stops the pause gap being counted as one long walked segment.
         guard !isPaused else { return }
+
+        if let coordinate = locations.last?.coordinate, liveTrail.count < 20_000 {
+            liveTrail.append(coordinate)
+        }
 
         // Process EVERY delivered fix in order — background delivery batches
         // several fixes per callback, and taking only the last one flattened

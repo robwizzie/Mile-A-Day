@@ -55,6 +55,11 @@ struct ShareStudioView: View {
     /// available.
     var initialTemplate: ShareTemplate? = nil
 
+    @Environment(\.duoSpread) private var duoSpread
+    /// This view's own width: presented as a sheet it can be far narrower
+    /// than the window `duoSpread` measures.
+    @State private var ownWidth: CGFloat = 0
+    private var usesTwoPages: Bool { duoSpread && ownWidth >= DuoDevice.spreadMinWidth }
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -130,26 +135,26 @@ struct ShareStudioView: View {
 
             VStack(spacing: 0) {
                 header
-                if families.count > 1 {
-                    familyChips
-                        .padding(.top, 2)
-                }
-                carousel
-                    .padding(.top, 10)
-                pageCaption
-                    .padding(.top, 10)
-                options
-                    .padding(.horizontal, 20)
-                    .padding(.top, 12)
-                destinations
-                    .padding(.horizontal, 20)
-                    .padding(.top, 14)
-                    .padding(.bottom, 8)
-                    // Its own node: two presentations on one view race.
-                    .sheet(item: $messageItem) { item in
-                        MessageComposeSheet(image: item.image, link: link) { messageItem = nil }
-                            .ignoresSafeArea()
+                    .padding(.top, usesTwoPages ? 12 : 0)
+                if usesTwoPages {
+                    twoPageBody
+                } else {
+                    if families.count > 1 {
+                        familyChips
+                            .padding(.top, 2)
                     }
+                    carousel
+                        .padding(.top, 10)
+                    pageCaption
+                        .padding(.top, 10)
+                    options
+                        .padding(.horizontal, 20)
+                        .padding(.top, 12)
+                    destinationsNode
+                        .padding(.horizontal, 20)
+                        .padding(.top, 14)
+                        .padding(.bottom, 8)
+                }
             }
 
             if let toast {
@@ -168,6 +173,13 @@ struct ShareStudioView: View {
                 .allowsHitTesting(false)
             }
         }
+        .background(
+            GeometryReader { geo in
+                Color.clear
+                    .onAppear { ownWidth = geo.size.width }
+                    .onChange(of: geo.size.width) { _, width in ownWidth = width }
+            }
+        )
         .preferredColorScheme(.dark)
         .task { await resolveAssets() }
         .onChange(of: selection) { _, newValue in
@@ -180,6 +192,81 @@ struct ShareStudioView: View {
         .sheet(item: $shareItems) { items in
             ActivityViewController(activityItems: items.items)
         }
+    }
+
+    /// Its own node: two presentations on one view race.
+    /// iPhone Duo's inner display: the card alone on one page, everything you
+    /// can do to it on the other, with the ways to share it always in reach.
+    private var twoPageBody: some View {
+        HStack(spacing: 0) {
+            VStack(spacing: 10) {
+                carousel
+                pageCaption
+            }
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity)
+
+            VStack(spacing: 0) {
+                ScrollView(showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 22) {
+                        if families.count > 1 {
+                            twoPageSection("Style") {
+                                FlowLayout(spacing: 8) {
+                                    ForEach(families) { familyChip($0) }
+                                }
+                            }
+                        }
+                        if current.formats.count > 1 {
+                            twoPageSection("Size") {
+                                optionRows(template: current, showsShape: true,
+                                           showsStats: false,
+                                           showsExplainer: effectiveFormat(current) == .sticker)
+                            }
+                        }
+                        if current.usesStatToggle, availableStats.count > 1 {
+                            twoPageSection("On the card") {
+                                FlowLayout(spacing: 8) {
+                                    ForEach(availableStats) { statChip($0) }
+                                }
+                            }
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(20)
+                }
+                Rectangle()
+                    .fill(Color.white.opacity(0.08))
+                    .frame(height: 1)
+                destinationsNode
+                    .padding(16)
+            }
+            .background(
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .fill(Color.white.opacity(0.05))
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .padding(.trailing, 16)
+            .padding(.bottom, 12)
+            .frame(maxWidth: .infinity)
+        }
+    }
+
+    private func twoPageSection<Content: View>(_ title: LocalizedStringKey,
+                                               @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title)
+                .font(.system(size: 13, weight: .heavy, design: .rounded))
+                .foregroundColor(.white.opacity(0.55))
+            content()
+        }
+    }
+
+    private var destinationsNode: some View {
+        destinations
+            .sheet(item: $messageItem) { item in
+                MessageComposeSheet(image: item.image, link: link) { messageItem = nil }
+                    .ignoresSafeArea()
+            }
     }
 
     // MARK: Header
@@ -221,34 +308,36 @@ struct ShareStudioView: View {
     private var familyChips: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
-                ForEach(families) { family in
-                    let selected = current.family == family
-                    Button {
-                        guard let first = templates.first(where: { $0.family == family }) else { return }
-                        withAnimation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.86)) {
-                            selection = first
-                        }
-                    } label: {
-                        HStack(spacing: 5) {
-                            Image(systemName: family.icon)
-                                .font(.system(size: 11, weight: .bold))
-                                .accessibilityHidden(true)
-                            Text(family.title)
-                                .font(.system(size: 13, weight: .bold, design: .rounded))
-                                .lineLimit(1)
-                                .fixedSize(horizontal: true, vertical: false)
-                        }
-                        .foregroundColor(selected ? .black : .white.opacity(0.75))
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 7)
-                        .background(Capsule().fill(selected ? Color.white : Color.white.opacity(0.1)))
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityAddTraits(selected ? .isSelected : [])
-                }
+                ForEach(families) { familyChip($0) }
             }
             .padding(.horizontal, 20)
         }
+    }
+
+    private func familyChip(_ family: ShareTemplateFamily) -> some View {
+        let selected = current.family == family
+        return Button {
+            guard let first = templates.first(where: { $0.family == family }) else { return }
+            withAnimation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.86)) {
+                selection = first
+            }
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: family.icon)
+                    .font(.system(size: 11, weight: .bold))
+                    .accessibilityHidden(true)
+                Text(family.title)
+                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
+            }
+            .foregroundColor(selected ? .black : .white.opacity(0.75))
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .background(Capsule().fill(selected ? Color.white : Color.white.opacity(0.1)))
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
     // MARK: Carousel

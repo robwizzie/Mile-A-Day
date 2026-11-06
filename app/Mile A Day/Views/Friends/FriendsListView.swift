@@ -15,6 +15,7 @@ private enum FriendsTabMode: String, CaseIterable, Identifiable {
 
 /// Main view for managing friends list
 struct FriendsListView: View {
+    @Environment(\.duoSpread) private var duoSpread
     @ObservedObject var friendService: FriendService
     @StateObject private var healthManager = HealthKitManager.shared
     /// Live presence for the "Out right now" section. Shared singleton, so the
@@ -60,16 +61,21 @@ struct FriendsListView: View {
             VStack(spacing: 0) {
                 friendsHeader
                     .tourAnchor("friends.header")
-                modePicker
+                if usesTwoPages {
+                    DuoTwoPages(leftTitle: "Today", rightTitle: "Leaderboard") {
+                        friendsHome
+                    } right: {
+                        leaderboard
+                    }
+                } else {
+                    modePicker
 
-                switch topMode {
-                case .leaderboard:
-                    LeaderboardSection(
-                        friendService: friendService,
-                        onAddFriends: { showingSearch = true }
-                    )
-                case .friends:
-                    friendsHome
+                    switch topMode {
+                    case .leaderboard:
+                        leaderboard
+                    case .friends:
+                        friendsHome
+                    }
                 }
             }
 
@@ -362,6 +368,16 @@ struct FriendsListView: View {
     // MARK: - Mode Picker (Friends vs Leaderboard)
     // Uses the shared MADPillPicker so this picker, the Compete sub-tabs,
     // and the Requests sheet picker all read with the same visual grammar.
+    /// With no friends yet there is only one thing to say: find some.
+    private var usesTwoPages: Bool { duoSpread && !friendService.friends.isEmpty }
+
+    private var leaderboard: some View {
+        LeaderboardSection(
+            friendService: friendService,
+            onAddFriends: { showingSearch = true }
+        )
+    }
+
     private var modePicker: some View {
         MADPillPicker(
             selection: $topMode,

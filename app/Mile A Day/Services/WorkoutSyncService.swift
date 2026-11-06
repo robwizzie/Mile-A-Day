@@ -426,6 +426,7 @@ class WorkoutSyncService: ObservableObject {
                 print("[WorkoutSyncService] ✅ No new workouts to sync")
                 // Still inside the isSyncing guard, so no other trigger can
                 // overlap the sweep.
+                await retryRecentRoutes()
                 await backfillMissingRoutes()
                 await backfillRouteClocks()
                 return
@@ -443,6 +444,7 @@ class WorkoutSyncService: ObservableObject {
 
             print("[WorkoutSyncService] ✅ Sync complete")
 
+            await retryRecentRoutes()
             await backfillMissingRoutes()
             await backfillRouteClocks()
 
@@ -639,6 +641,40 @@ class WorkoutSyncService: ObservableObject {
         )
     }
 
+    private let recentRouteSettledKey = "recentRouteSettledIdsV1"
+    /// Long enough for a late Watch route, and for a phone that was off.
+    private static let recentRouteWindow: TimeInterval = 72 * 3600
+    private static let maxRecentRoutes = 12
+
+    /// The sweep for walks that just happened. `backfillMissingRoutes` runs
+    /// once a process, usually seconds after the walk and before its route
+    /// exists, so a route that landed late waited for the next cold launch and
+    /// friends saw no map until then. This runs on every sync, and a walk only
+    /// counts as settled once its route has really gone up.
+    private func retryRecentRoutes() async {
+        var settled = UserDefaults.standard.stringArray(forKey: recentRouteSettledKey) ?? []
+        let known = Set(settled)
+        let since = Date().addingTimeInterval(-Self.recentRouteWindow)
+        guard let workouts = try? await fetchWorkoutsSince(since) else { return }
+        let candidates = workouts
+            .filter { !known.contains($0.uuid.uuidString) && !StealthModeStore.shared.isStealth($0) }
+            .prefix(Self.maxRecentRoutes)
+
+        for workout in candidates {
+            // Read errors and "no route yet" look alike here, so neither
+            // settles it: the next sync simply asks again.
+            guard await simplifiedRoute(for: workout) != nil else { continue }
+            do {
+                try await uploadBatchWithRetry([workout])
+                settled.append(workout.uuid.uuidString)
+            } catch {
+                print("[WorkoutSyncService] ⚠️ Recent route upload failed: \(error)")
+                break
+            }
+        }
+        UserDefaults.standard.set(Array(settled.suffix(500)), forKey: recentRouteSettledKey)
+    }
+
     private func backfillMissingRoutes() async {
         guard !hasRunRouteBackfillThisSession else { return }
         hasRunRouteBackfillThisSession = true
@@ -703,7 +739,11 @@ class WorkoutSyncService: ObservableObject {
             do {
                 // fullSync: false ⇒ routes are fetched (batch ≤ the cap).
                 try await uploadBatchWithRetry(batch)
-                completed.append(contentsOf: batch.map { $0.uuid.uuidString })
+                // Only what really carried a route: a failed read here marked
+                // the walk healed, and nothing ever looked at it again.
+                for workout in batch where await simplifiedRoute(for: workout) != nil {
+                    completed.append(workout.uuid.uuidString)
+                }
                 print("[WorkoutSyncService] ✅ Route backfill pushed \(batch.count) workout(s)")
             } catch {
                 print("[WorkoutSyncService] ⚠️ Route backfill failed: \(error)")
@@ -1145,7 +1185,11 @@ class WorkoutSyncService: ObservableObject {
 
     /// Upload workouts in batches
     private func uploadWorkoutsInBatches(_ workouts: [HKWorkout]) async throws {
-        let batches = workouts.chunked(into: batchSize)
+        // Routes only ride batches within the fetch cap, and a batch of 26-50
+        // was marked synced without them. A first import stays at full size:
+        // that's history, and the backfill sweep brings its routes.
+        let size = workouts.count <= Self.maxIncrementalWorkouts ? Self.maxRouteFetchBatch : batchSize
+        let batches = workouts.chunked(into: size)
 
         for (index, batch) in batches.enumerated() {
             print("[WorkoutSyncService] 📤 Uploading batch \(index + 1)/\(batches.count)")
@@ -1304,6 +1348,13 @@ class WorkoutSyncService: ObservableObject {
     /// Don't fetch routes for oversized batches — that's a backfill, not a
     /// fresh run, and per-workout route queries would drag the whole upload.
     private static let maxRouteFetchBatch = 25
+    /// Above this it's an import rather than a catch-up.
+    private static let maxIncrementalWorkouts = 200
+    /// The server's hide-start-and-end trim can only cut at a stored point, and
+    /// Douglas-Peucker reduces a straight road to one long step. A cut landing
+    /// inside that step overshoots, and an ordinary mile could lose its whole
+    /// route for friends, so long steps are filled to about this spacing.
+    private static let maxRouteStepMeters = 40.0
     /// How many unprobed candidates one backfill sweep examines — keeps the
     /// sweep's HealthKit burst bounded; the registry carries the rest to the
     /// next session.
@@ -1325,6 +1376,14 @@ class WorkoutSyncService: ObservableObject {
         let startedAt: Date
     }
 
+    /// The exact points this phone uploads. A "what friends will see" preview
+    /// trims these, so it matches the server's cut rather than approximating it.
+    func uploadableRoute(for workout: HKWorkout) async -> [CLLocationCoordinate2D]? {
+        await simplifiedRoute(for: workout)?.points.map {
+            CLLocationCoordinate2D(latitude: $0[0], longitude: $0[1])
+        }
+    }
+
     private func simplifiedRoute(for workout: HKWorkout) async -> SimplifiedRoute? {
         let locations = await HealthKitManager.shared.fetchAllRouteLocations(for: workout)
         guard locations.count >= 2 else { return nil }
@@ -1342,7 +1401,7 @@ class WorkoutSyncService: ObservableObject {
             times.append(t)
             previous = t
         }
-        let points: [[Double]] = sampled.map { location in
+        let basePoints: [[Double]] = sampled.map { location in
             var point = [
                 (location.coordinate.latitude * 100_000).rounded() / 100_000,
                 (location.coordinate.longitude * 100_000).rounded() / 100_000,
@@ -1358,7 +1417,44 @@ class WorkoutSyncService: ObservableObject {
             }
             return point
         }
-        return SimplifiedRoute(points: points, times: times, startedAt: first.timestamp)
+        let filled = Self.filledLongSteps(points: basePoints, times: times)
+        return SimplifiedRoute(points: filled.points, times: filled.times, startedAt: first.timestamp)
+    }
+
+    /// Adds points along steps longer than `maxRouteStepMeters`, staying within
+    /// `maxRoutePoints` by widening the spacing on a long walk. Points only ever
+    /// sit on a step the route already has, so the line doesn't change.
+    static func filledLongSteps(
+        points: [[Double]], times: [Double]
+    ) -> (points: [[Double]], times: [Double]) {
+        guard points.count >= 2, points.count == times.count else { return (points, times) }
+        func meters(_ a: [Double], _ b: [Double]) -> Double {
+            CLLocation(latitude: a[0], longitude: a[1])
+                .distance(from: CLLocation(latitude: b[0], longitude: b[1]))
+        }
+        let lengths = zip(points, points.dropFirst()).map { meters($0, $1) }
+        let total = lengths.reduce(0, +)
+        let spacing = max(maxRouteStepMeters, total / Double(maxRoutePoints - 1) * 1.5)
+
+        var filledPoints = [points[0]]
+        var filledTimes = [times[0]]
+        for index in lengths.indices {
+            let extra = Int((lengths[index] / spacing).rounded(.up)) - 1
+            let room = maxRoutePoints - filledPoints.count - (lengths.count - index)
+            for step in 0..<max(0, min(extra, room)) {
+                let t = Double(step + 1) / Double(min(extra, room) + 1)
+                let a = points[index]
+                let b = points[index + 1]
+                filledPoints.append([
+                    ((a[0] + (b[0] - a[0]) * t) * 100_000).rounded() / 100_000,
+                    ((a[1] + (b[1] - a[1]) * t) * 100_000).rounded() / 100_000,
+                ])
+                filledTimes.append(times[index] + (times[index + 1] - times[index]) * t)
+            }
+            filledPoints.append(points[index + 1])
+            filledTimes.append(times[index + 1])
+        }
+        return (filledPoints, filledTimes)
     }
 
     /// The HealthKit reads a single workout needs, gathered in one place so

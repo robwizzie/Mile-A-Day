@@ -6,6 +6,7 @@ import SwiftUI
 /// weekly challenge yet) says so quietly rather than rendering nothing — a
 /// switch the user just flipped must show SOMETHING.
 struct DashboardCardsBlock: View {
+    @Environment(\.duoHomeWide) private var duoHomeWide
     let style: DashboardStyle
     @ObservedObject var healthManager: HealthKitManager
     @ObservedObject var userManager: UserManager
@@ -33,8 +34,40 @@ struct DashboardCardsBlock: View {
         cards.first { $0 == .dailyChallenge || $0 == .weeklyChallenge }
     }
 
+    /// The cards that will actually draw something.
+    private var drawnCards: [DashboardCard] {
+        cards.filter { card in
+            switch card {
+            case .dailyChallenge, .weeklyChallenge: return !combinesChallenges || card == firstChallenge
+            case .routeMap: return !cards.contains(.recentWorkouts)
+            default: return true
+            }
+        }
+    }
+
     var body: some View {
-        ForEach(cards) { card in
+        // Two plain stacks, not a lazy grid: a card here declares a
+        // navigationDestination, which SwiftUI won't honour from a lazy cell.
+        if duoHomeWide, drawnCards.count > 1 {
+            let drawn = drawnCards
+            HStack(alignment: .top, spacing: 16) {
+                VStack(spacing: 16) {
+                    ForEach(drawn.enumerated().filter { $0.offset % 2 == 0 }.map { $0.element }) { cardView($0) }
+                }
+                .frame(maxWidth: .infinity)
+                VStack(spacing: 16) {
+                    ForEach(drawn.enumerated().filter { $0.offset % 2 == 1 }.map { $0.element }) { cardView($0) }
+                }
+                .frame(maxWidth: .infinity)
+            }
+        } else {
+            ForEach(cards) { cardView($0) }
+        }
+    }
+
+    @ViewBuilder
+    private func cardView(_ card: DashboardCard) -> some View {
+        Group {
             switch card {
             case .dailyChallenge where combinesChallenges, .weeklyChallenge where combinesChallenges:
                 if card == firstChallenge {

@@ -530,6 +530,7 @@ enum RunPostService {
     /// later photo story for the same walk replaces it in place.
     @MainActor
     static func addFinishCardToStory(stats: RunStatsInput, style: FinishFrameStyle = .init()) async throws {
+        await uploadRouteFirst(workoutId: stats.workoutId)
         _ = try await PostService.createPost(
             mediaUrl: nil,
             caption: nil,
@@ -539,6 +540,23 @@ enum RunPostService {
             stats: style.apply(to: stats.snapshot),
             isAuto: true
         )
+    }
+
+    /// Friends draw a post's route from the server, while the poster's preview
+    /// reads HealthKit, so a route that hadn't uploaded yet looked fine to them
+    /// and showed friends no map. The phone holds the route at this moment, so
+    /// send it now. Bounded: a bad connection mustn't hold up the post, and the
+    /// sync's retry still brings the route, which the post picks up at read.
+    /// Stealth walks are refused inside the upload as always.
+    @MainActor
+    static func uploadRouteFirst(workoutId: String?) async {
+        guard let workoutId, let id = UUID(uuidString: workoutId) else { return }
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask { await WorkoutSyncService.shared.uploadWorkout(withId: id) }
+            group.addTask { try? await Task.sleep(for: .seconds(8)) }
+            await group.next()
+            group.cancelAll()
+        }
     }
 
     private static func todayText() -> String {

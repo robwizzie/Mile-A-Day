@@ -208,11 +208,17 @@ async function main() {
   check("fixture: the stored out-and-back IS cut by the app",
     appBreaks(OUTBACK.points, OUTBACK.times).length, 2);
 
-  // The friend's copy of the real walk is null BEFORE and after: the trim
-  // works in whole stored points, and each end is one 700 m step. Pinned so
-  // this change is seen not to touch the privacy outcome.
-  check("straight, friend detail: still trimmed to nothing",
-    await getWorkoutRouteDetail(OWNER, STRAIGHT.id, FRIEND), null);
+  // Each end of this real walk is one 700 m step, and the trim works in whole
+  // stored points, so a friend gets the safe middle and neither end. It used to
+  // be nothing at all, which showed friends Flamey on an ordinary walk.
+  const friendCopy = await getWorkoutRouteDetail(OWNER, STRAIGHT.id, FRIEND);
+  check("straight, friend detail: serves the middle",
+    (friendCopy?.route?.length ?? 0) > 1, true);
+  const servedPoints = JSON.stringify(friendCopy?.route ?? []);
+  check("straight, friend detail: never the start",
+    servedPoints.includes(JSON.stringify(STRAIGHT.points[0].slice(0, 2)).slice(1, -1)), false);
+  check("straight, friend detail: never the end",
+    servedPoints.includes(JSON.stringify(STRAIGHT.points[STRAIGHT.points.length - 1].slice(0, 2)).slice(1, -1)), false);
 
   for (const [who, viewer, walk] of [
     ["owner", OWNER, STRAIGHT],

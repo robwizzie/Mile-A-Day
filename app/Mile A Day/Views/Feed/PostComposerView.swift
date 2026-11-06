@@ -1094,6 +1094,7 @@ final class PostComposerViewModel: ObservableObject {
                 }
                 return true
             }
+            await RunPostService.uploadRouteFirst(workoutId: stats.workoutId)
             _ = try await PostService.createPost(
                 mediaUrl: mediaUrl,
                 dualMediaUrl: dualMediaUrl,

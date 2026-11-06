@@ -43,6 +43,7 @@ struct FlameyClosetView: View {
     var previewCollapsed: Bool = false
     var previewScroll: CGFloat = 0
 
+    @Environment(\.duoSpread) private var duoSpread
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var typeSize
     @State private var lineClear: Task<Void, Never>?
@@ -57,35 +58,64 @@ struct FlameyClosetView: View {
     }
 
     private var columns: [GridItem] {
-        let count = typeSize >= .accessibility1 ? 3 : 4
+        // The dressing room's wardrobe is a narrower page: four columns there
+        // break names mid-word ("Lavende/r").
+        let count = typeSize >= .accessibility1 || showsDressingRoom ? 3 : 4
         return Array(repeating: GridItem(.flexible(), spacing: 8, alignment: .top), count: count)
     }
 
     private var isCollapsed: Bool { collapsed || previewCollapsed }
 
+    /// iPhone Duo's inner display: Flamey gets his own page, and the wardrobe
+    /// the other, so every outfit tries on with the whole of him in view.
+    private var showsDressingRoom: Bool { duoSpread && scrollable }
+
+    private var dressingRoomStage: some View {
+        VStack(spacing: 12) {
+            Spacer(minLength: 0)
+            stage(size: 170)
+            FlameyNamePlate(name: model.name) {
+                MADHaptics.tap()
+                sheet = .name
+            }
+            caption
+                .padding(.horizontal, 16)
+            VStack(spacing: 8) { actionButtons(compact: false) }
+                .padding(.horizontal, 16)
+            Spacer(minLength: 0)
+        }
+        // Fixed, so the wardrobe gets the rest: left to share the HStack, the
+        // stage's natural width squeezed the tiles.
+        .frame(width: 340)
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             topBar
+                .padding(.top, showsDressingRoom ? 12 : 0)
                 .sheet(item: $sheet) { which in
                     sheetView(which)
                 }
-            ScrollViewReader { proxy in
-                VStack(spacing: 0) {
-                    header { slot in
-                        withAnimation(reduceMotion ? nil : .snappy) {
-                            proxy.scrollTo(anchorId(slot), anchor: .top)
+            HStack(spacing: 0) {
+                if showsDressingRoom { dressingRoomStage }
+                ScrollViewReader { proxy in
+                    VStack(spacing: 0) {
+                        header { slot in
+                            withAnimation(reduceMotion ? nil : .snappy) {
+                                proxy.scrollTo(anchorId(slot), anchor: .top)
+                            }
                         }
+                        grid
                     }
-                    grid
-                }
-                .onChange(of: model.tab) { _, _ in
-                    proxy.scrollTo("closet-top", anchor: .top)
-                }
-                .onAppear {
-                    // Opened ON an item (a medal's "See it in Flamey's
-                    // Closet", the unlock card): land on its section.
-                    guard scrollable, let focus = model.focus else { return }
-                    DispatchQueue.main.async { proxy.scrollTo(anchorId(focus.slot), anchor: .top) }
+                    .onChange(of: model.tab) { _, _ in
+                        proxy.scrollTo("closet-top", anchor: .top)
+                    }
+                    .onAppear {
+                        // Opened ON an item (a medal's "See it in Flamey's
+                        // Closet", the unlock card): land on its section.
+                        guard scrollable, let focus = model.focus else { return }
+                        DispatchQueue.main.async { proxy.scrollTo(anchorId(focus.slot), anchor: .top) }
+                    }
                 }
             }
         }
@@ -266,7 +296,10 @@ struct FlameyClosetView: View {
 
     private func header(jump: @escaping (FlameySlot) -> Void) -> some View {
         VStack(spacing: 0) {
-            if isCollapsed {
+            if showsDressingRoom {
+                // The stage has its own page.
+                EmptyView()
+            } else if isCollapsed {
                 HStack(alignment: .center, spacing: 10) {
                     stage(size: 80)
                         .frame(width: 142)

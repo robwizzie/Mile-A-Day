@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct CompetitionDetailView: View {
+    @Environment(\.duoSpread) var duoSpread
     @State var competition: Competition
     @ObservedObject var competitionService: CompetitionService
     @Environment(\.dismiss) var dismiss
@@ -61,6 +62,9 @@ struct CompetitionDetailView: View {
                 .ignoresSafeArea(.all)
 
             GeometryReader { proxy in
+                if duoSpread, competition.status == .active {
+                    activeTwoPages
+                } else {
                 ScrollView(.vertical, showsIndicators: true) {
                     VStack(spacing: MADTheme.Spacing.lg) {
                         // Compact single-row info strip replaces the tall premium
@@ -94,6 +98,7 @@ struct CompetitionDetailView: View {
                     .frame(width: proxy.size.width)
                 }
                 .scrollBounceBehavior(.basedOnSize)
+                }
             }
         }
         .madTypeCap(.madCardCap)
@@ -150,7 +155,7 @@ struct CompetitionDetailView: View {
     /// Wraps the Timeline + Rules cards in a tap-to-expand container. Hidden by
     /// default since most returning users already know how the comp works; the
     /// compact info strip at the top covers the at-a-glance info.
-    private var collapsibleCompetitionDetails: some View {
+    var collapsibleCompetitionDetails: some View {
         VStack(spacing: 0) {
             Button {
                 withAnimation(.easeInOut(duration: 0.2)) {

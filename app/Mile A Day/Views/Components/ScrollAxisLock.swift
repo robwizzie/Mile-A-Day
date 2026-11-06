@@ -35,6 +35,21 @@ extension View {
     /// Apply to the CONTENT inside the ScrollView, outside its own padding —
     /// never to the ScrollView itself, which is already the right width.
     func lockedToScrollWidth() -> some View {
-        containerRelativeFrame(.horizontal)
+        modifier(ScrollWidthLock())
+    }
+}
+
+/// `containerRelativeFrame` measures the navigation column, not the frame
+/// around it, so a Duo page (`DuoTwoPages`) states its width instead. Measuring
+/// there hung the Feed in a layout loop.
+private struct ScrollWidthLock: ViewModifier {
+    @Environment(\.duoColumnWidth) private var pageWidth
+
+    func body(content: Content) -> some View {
+        if pageWidth.isFinite {
+            content.frame(width: pageWidth)
+        } else {
+            content.containerRelativeFrame(.horizontal)
+        }
     }
 }

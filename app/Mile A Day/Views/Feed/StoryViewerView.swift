@@ -460,8 +460,13 @@ private struct StoryGroupPlayerView: View {
                 if post.is_auto == true && post.photoURL == nil {
                     // A finish frame the author chose to add: drawn live,
                     // nothing to load, so the timer can run at once.
+                    // Your own story looks the way your friends see it, so what
+                    // you check is what they got.
                     StoryFinishFrame(stats: post.stats_snapshot,
-                                     coordinates: post.routeCoordinates,
+                                     coordinates: post.is_self == true
+                                        ? RoutePrivacyTrim.friendsView(post.routeCoordinates,
+                                                                       workoutId: post.workout_id)
+                                        : post.routeCoordinates,
                                      workoutType: post.workout_type,
                                      flameyLook: FeedCardFlamey.look(authorFlamey: post.author_flamey,
                                                                      isOwn: post.is_self))

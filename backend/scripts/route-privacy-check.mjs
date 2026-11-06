@@ -18,6 +18,7 @@
  *   3. The setting applies at READ: Off → full route; 1 mile on a 1-mile walk
  *      → null; back to default → trimmed again, same cut as before.
  *   4. A short walk → NO route for a friend (route/times/started_at null).
+ *      A walk with any safe middle → that middle, however short.
  *   5. A crew line is trimmed by its OWNER's setting, not the poster's; the
  *      crew member themselves gets their own line in full.
  *   6. share_route_maps off and a stealth (route-less) walk stay null.
@@ -482,6 +483,15 @@ async function main() {
     JSON.stringify(back) === reference,
     true,
   );
+
+  // ── 4a. Whatever is safe gets shown: 0.4 mi used to serve nothing ────────
+  const middle = (
+    await db.query(
+      `SELECT b.i_s, b.i_e FROM mad_route_trim_bounds($1::jsonb, 220, 220) b`,
+      [JSON.stringify(makeRoute(110, 6, 40.6, -74.2).points)],
+    )
+  )[0];
+  check("a 650m walk keeps its safe middle", middle.i_e > middle.i_s, true);
 
   // ── 4. A short walk: nothing for a friend, everything for the owner ──────
   const shortFriend = triple(

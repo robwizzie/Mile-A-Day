@@ -179,7 +179,7 @@ struct WorkoutDetailView: View {
                 .madFont(size: 12, weight: .semibold, design: .rounded)
                 .foregroundColor(.secondary)
         case .hidden:
-            Label("Too short to hide the start & end — friends see it without a map",
+            Label("Friends won't see this route: it stays too close to its start and end to keep them hidden",
                   systemImage: "eye.slash")
                 .madFont(size: 12, weight: .semibold, design: .rounded)
                 .foregroundColor(.secondary)

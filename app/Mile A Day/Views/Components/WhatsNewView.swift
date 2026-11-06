@@ -26,6 +26,37 @@ enum WhatsNewCatalog {
     /// Newest first. Edit copy freely — keep it user-facing (no internal
     /// names, no "beta"), one short line per feature.
     static let releases: [WhatsNewRelease] = [
+        WhatsNewRelease(
+            id: 8,
+            versionLabel: "Version 1.2.09",
+            headline: "See each other's routes",
+            features: [
+                WhatsNewFeature(
+                    icon: "map.fill",
+                    title: "Share your route on buddy walks",
+                    blurb: "Turn it on for a walk and see each other's lines on one map. Only people on that walk who also share can see yours, and your start and finish stay hidden.",
+                    tint: MADTheme.Colors.madRed
+                ),
+                WhatsNewFeature(
+                    icon: "point.topleft.down.to.point.bottomright.curvepath.fill",
+                    title: "Routes that show up",
+                    blurb: "Your routes now reach your friends more reliably, and before you post a story you'll see exactly what they'll see.",
+                    tint: .teal
+                ),
+                WhatsNewFeature(
+                    icon: "applewatch",
+                    title: "Routes from your Watch",
+                    blurb: "Outdoor walks and runs recorded in the Watch app now save their route.",
+                    tint: .orange
+                ),
+                WhatsNewFeature(
+                    icon: "iphone",
+                    title: "Made for iPhone Duo",
+                    blurb: "Two-page layouts for Home, Compete, Feed, Friends and Profile, and Flamey wakes up and tucks in with the fold.",
+                    tint: .pink
+                ),
+            ]
+        ),
         // id 7, not 6: the Halloween draft (6) never shipped to the App
         // Store but TestFlight saw it, and a new id shows this one again.
         WhatsNewRelease(

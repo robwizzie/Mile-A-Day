@@ -523,6 +523,9 @@ struct ProfileTabBar<Tag: Hashable>: View {
 
     @Binding var selection: Tag
     let items: [Item]
+    /// Shares the width between the tabs, each a full-height target, when the
+    /// bar is a page's own header (the Duo's right page), not a row in a list.
+    var fillsWidth = false
 
     @Namespace private var underline
 
@@ -553,6 +556,7 @@ struct ProfileTabBar<Tag: Hashable>: View {
                             }
                         }
                     }
+                    .frame(maxWidth: fillsWidth ? .infinity : nil, minHeight: fillsWidth ? 48 : nil, alignment: .bottom)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)

@@ -13,6 +13,9 @@ import {
   joinSessionController,
   leaveSessionController,
   mySessionsController,
+  liveRoutePointsController,
+  liveRouteSharingController,
+  liveRoutesController,
   progressController,
   readyController,
   recapController,
@@ -97,6 +100,10 @@ router.post(
   respondJoinRequestController,
 );
 router.post("/sessions/:sessionId/progress", progressController);
+// Opt-in, per walk, reciprocal. See buddyLiveRouteService.
+router.put("/sessions/:sessionId/live-route", liveRouteSharingController);
+router.post("/sessions/:sessionId/live-route/points", liveRoutePointsController);
+router.get("/sessions/:sessionId/live-route", liveRoutesController);
 router.post("/sessions/:sessionId/finish", finishController);
 
 // Standing walks ("us, 6pm, weekdays"). A TEMPLATE, not a session: the cron

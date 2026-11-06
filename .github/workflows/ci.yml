@@ -131,6 +131,11 @@ jobs:
       # would wipe other people's miles) and the per-viewer history hide.
       - name: Buddy live join/leave/cancel/hide check
         run: node scripts/buddy-live-check.mjs
+      # Live routes are the one place a position leaves the phone mid-walk. A
+      # hole here is a privacy bug nobody sees, so every door is pinned: the
+      # opt-in, reciprocity, blocks, stealth, maps-off, and deletion on finish.
+      - name: Buddy live route privacy check
+        run: node scripts/buddy-live-route-check.mjs
       # Lobby readiness. A guest is ready only once they've said walk/run and
       # indoor/outdoor; the host is told exactly once on that transition, and
       # a running walk's 'active' row is never rewritten by a late answer.

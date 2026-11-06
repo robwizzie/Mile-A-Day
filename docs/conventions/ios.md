@@ -270,6 +270,30 @@ What the pass taught: `lineLimit(1)` names beside a score leave a few characters
 
 Known gap: not migrated are `Views/Challenges`, `Views/Celebrations`, most of `Views/Components`, and Feed outside `PostCardView` (much of it is baked into images: `IndoorWorkoutCard`, `IndoorTrackCard`, `RunStatsStickerView`, `PostStickers`, `StoryFinishFrame`). Share cards keep fixed sizes on purpose.
 
+### Duo-only features (Nov 2026)
+
+`Views/Duo/` holds the iPhone Duo experiences: Tuck Flamey in (`DuoFlameyMomentsHost`, hinge open/close, each once a day and never mid-workout), Home at a glance (`DuoHomeSplit`), the Closet dressing room (`showsDressingRoom`), Duel view (`DuoDuelCard`, exactly two accepted people and no teams, since there is no head-to-head type), Share Studio's two columns, Flyover cinema (`DuoFlyoverSplitsPanel`) and the buddy command center (`DuoBuddyPanel`).
+
+The gate is two tests: a hinged model AND a window at least `spreadMinWidth` wide. Folded, or narrowed in Split View, the app is the ordinary iPhone app. `.duoSpreadHost()` sits on `RootView` because the Closet's cover is presented from above the tab bar: a host on the `TabView` left it out. `DuoFlameyMomentsHost` must keep a real view (`Color.clear`): an empty body gets no lifecycle, so the hinge observer never attaches.
+
+The inner display is landscape, about 951×669pt, with a right rail for the camera, status and tabs (about 860pt of content). Earlier portrait 669×951 numbers were wrong: a true Duo simulator capture is 2853×2007. Tuning only on an iPad stand-in hid this, so check `iPhone19,4` itself.
+
+Every tab root is a real two-page layout on the spread, because a centred phone column leaves the extra width empty: Home (hero and day cards side by side with no friends, dashboard and Friends today with them), Compete (Right now, History), Feed (Today board, Posts), Friends (Today, Leaderboard; one page with no friends) and Profile (you, then the four sections). A running competition opens as a full-screen cover with its own two pages, since a sheet floats a centred panel.
+
+Two layout traps cost real time. `NavigationStack` keeps the rail's inset however it is laid out from outside: beside the friends page the dashboard lost about 90pt in an HStack, and `.ignoresSafeArea` did nothing, while `.safeAreaInset` let it run under the panel. Putting the split inside the stack fixed both, and pushed screens get the whole display. `containerRelativeFrame` also measures the navigation column rather than the frame around it, which overflowed a narrowed page and then hung the Feed at 99% CPU, so a Duo page states its width through `\.duoColumnWidth`.
+
+Keep Apple's rail. `toolbarVerticalBehavior(.disabled)` (iOS 27.1) gives a labelled bottom bar, but on the inner screen it floats over Start and moves the status into a band across the top, and folded it covers Start too. With the rail the bottom edge is free, so floating banners sit 12pt up rather than 52pt.
+
+The inner display has no status bar above the content, so `.duoPageMargins()` moves tab titles clear of the rounded corner. Profile is the exception: its banner runs full bleed. `ProfileTabBar(fillsWidth:)` gives the right page full-width, 48pt tab targets.
+
+Routes for friends. The trim in `mad_route_trim_bounds` can only cut at a stored point, and Douglas-Peucker reduces a straight road to one long step, so a cut landing inside that step overshoots. A straight mile stored as 4 points returned no bounds at all, so friends saw a Flamey card while the owner, exempt from the trim, saw the route. The same mile with points every 40m returns bounds. `filledLongSteps` fixes new uploads; older stored routes stay sparse. Migration 0103 then dropped the old minimum (300m and 40% of the walk), because the cuts are the privacy rule and that minimum only hid safe middles; a line under 30m is still dropped. Tight laps near the start still return nothing, deliberately, and `AddFinishStorySheet` shows that outcome: its preview is `friendsView` of `uploadableRoute`, the same points the server trims, so it matches what friends get. Swift and SQL were compared on straight, short, lap and out-and-back routes and gave identical bounds.
+
+Route delivery had three other holes: the upload ran once per process (often before the route existed), batches of 26-50 were marked synced without routes, and a failed HealthKit read counted as healed. The MAD Watch app also recorded no route at all before `HKWorkoutRouteBuilder` was added.
+
+App Store set: `docs/duo-screenshots/app-store/` mirrors the iPhone 01–09 set in copy, order and colours. `-MADDuoDemo milestone` opens the real celebration. A running test walk reopens at launch, so end it before capturing anything else, and use `simctl status_bar <udid> override --time 9:41`.
+
+Testing: use the real Duo simulator (`simctl io <udid> screenshot --display=3` for the inner screen; unfolding is only in Device Hub). Debug builds also take `-MADDuoPreview` on a wide simulator, with `TARGETED_DEVICE_FAMILY=1,2` on the xcodebuild command line only, plus `-MADDuoMoment stretch|tuck` and `-MADDuoDemo flyover|share`. `simctl location` drives the buddy route. Screenshots in `docs/duo-screenshots/` came from that iPad stand-in. If a test backend will not bind, check `lsof -iTCP:<port>`: another session's server on that port answers with its own database, which shows up as "No user found" and a 0-day streak.
+
 ## Performance
 
 The app felt slow and the console showed "Gesture: System gesture gate timed out" (the main thread was busy when a touch began). An audit found:

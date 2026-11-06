@@ -53,7 +53,7 @@
 	<key>NSHealthUpdateUsageDescription</key>
 	<string>Mile A Day saves completed runs and walks (workouts, distance, and active energy) back to Health so your fitness records stay in sync with the rest of your apps.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Mile A Day uses your location while a workout is in progress to measure your route and distance accurately. Location is only collected during an active workout.</string>
+	<string>Mile A Day uses your location while a workout is in progress to measure your route and distance accurately. Location is only collected during an active workout. If you choose to share your route on a buddy walk, people on that walk who also share can see it.</string>
 	<key>NSMotionUsageDescription</key>
 	<string>Mile A Day uses motion and step data from the pedometer to measure distance during indoor workouts when GPS isn't available.</string>
 	<key>NSSupportsLiveActivities</key>

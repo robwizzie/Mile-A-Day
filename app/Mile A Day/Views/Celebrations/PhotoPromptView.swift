@@ -1053,10 +1053,10 @@ struct PhotoPromptView: View {
               let workout = HealthKitManager.shared.todaysWorkouts
                 .first(where: { $0.uuid.uuidString == workoutId }),
               !StealthModeStore.shared.isStealth(workout) else { return }
-        let locations = await HealthKitManager.shared.fetchAllRouteLocations(for: workout)
-        guard locations.count >= 2 else { return }
+        let full = await WorkoutSyncService.shared.uploadableRoute(for: workout)
+        guard let line = RoutePrivacyTrim.friendsView(full, workoutId: workoutId) else { return }
         withAnimation(.easeInOut(duration: 0.3)) {
-            routeCoords = locations.map(\.coordinate)
+            routeCoords = line
         }
     }
 

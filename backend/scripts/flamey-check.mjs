@@ -259,6 +259,13 @@ try {
   check("signup_date in the user's own timezone", r.json?.flamey?.signup_date, "2025-06-12");
 
   // ── 4. Holiday medals through the real upload path.
+  // These walks sit on fixed 2025 dates, so the walkers must be founders: a
+  // user created after FOUNDING_CUTOFF only has the year before they signed up
+  // (plusService), which made this fail the day the cutoff passed.
+  await db.query(
+    `UPDATE users SET created_at = '2025-06-01T12:00:00Z' WHERE user_id = ANY($1::text[])`,
+    [[WALKER, GOAL2]],
+  );
   const walkerPushesBefore = await inboxCount(WALKER, "badge_earned");
   r = await call("POST", `/workouts/${WALKER}/upload`, WALKER, [workout("fl-w-hallo", "2025-10-31", 1.0)]);
   check("upload 200", r.status, 200);
