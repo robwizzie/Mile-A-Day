@@ -402,7 +402,7 @@ struct CreateCompetitionView: View {
                     Text(presetSummary)
                         .madFont(size: 12, weight: .medium, design: .rounded)
                         .foregroundColor(.white.opacity(0.6))
-                        .lineLimit(2)
+                        .madBodyLines(2)
                         .multilineTextAlignment(.leading)
                 }
 
@@ -635,7 +635,7 @@ struct CreateCompetitionView: View {
                         Text(selectedType.description)
                             .madFont(size: 12, design: .rounded)
                             .foregroundColor(.white.opacity(0.7))
-                            .lineLimit(2)
+                            .madBodyLines(2)
                     }
 
                     Spacer()
@@ -1158,17 +1158,25 @@ struct CreateCompetitionView: View {
                         .foregroundColor(.black)
                 }
 
-                Text("Create Competition")
-                    .madFont(size: 17, weight: .semibold, design: .rounded)
-                    .foregroundColor(.black)
+                // A floating button: capped so it can't fill the screen, and
+                // the count drops under the label rather than splitting a word.
+                MADInlineStack(spacing: MADTheme.Spacing.md) {
+                    Text("Create Competition")
+                        .madFont(size: 17, weight: .semibold, design: .rounded, maxScale: 1.3)
+                        .foregroundColor(.black)
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.8)
 
-                Spacer()
-
-                if selectedFriends.count > 0 {
-                    Text("\(selectedFriends.count) competitor\(selectedFriends.count == 1 ? "" : "s")")
-                        .madFont(size: 16, design: .rounded)
-                        .foregroundColor(.black.opacity(0.6))
+                    if selectedFriends.count > 0 {
+                        Text("\(selectedFriends.count) competitor\(selectedFriends.count == 1 ? "" : "s")")
+                            .madFont(size: 16, design: .rounded, maxScale: 1.3)
+                            .foregroundColor(.black.opacity(0.6))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                    }
                 }
+
+                Spacer(minLength: 0)
 
                 Image(systemName: "arrow.right.circle.fill")
                     .foregroundColor(.black)

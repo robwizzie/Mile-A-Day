@@ -232,6 +232,23 @@ extension View {
     }
 }
 
+/// Supporting sentences keep their usual line count at ordinary sizes, and may
+/// run on at accessibility sizes rather than ending in "…".
+private struct MADBodyLines: ViewModifier {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    let lines: Int
+
+    func body(content: Content) -> some View {
+        content.lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : lines)
+    }
+}
+
+extension View {
+    func madBodyLines(_ lines: Int) -> some View {
+        modifier(MADBodyLines(lines: lines))
+    }
+}
+
 // MARK: - Inline stack
 
 /// Items that sit on one line at ordinary sizes (a name and its chip) and

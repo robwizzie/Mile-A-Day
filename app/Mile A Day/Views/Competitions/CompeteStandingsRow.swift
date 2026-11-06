@@ -41,6 +41,7 @@ enum CompeteStandingsMetric {
 }
 
 struct CompeteStandingsRow: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let place: Int
     let user: CompetitionUser
     let competition: Competition
@@ -117,6 +118,20 @@ struct CompeteStandingsRow: View {
         }
     }
 
+    /// Beside the name at ordinary sizes. At accessibility sizes it moves under
+    /// the name, so a username with no spaces isn't broken mid-word.
+    private var scoreLabel: some View {
+        Text(scoreText)
+            .competeFont(CompeteDesign.score)
+            .foregroundColor(
+                isEliminated ? CompeteDesign.inkGhost
+                    : (place == 1 ? (CompeteDesign.medal(1) ?? .white) : CompeteDesign.ink)
+            )
+            .monospacedDigit()
+            .lineLimit(1)
+            .fixedSize()
+    }
+
     var body: some View {
         HStack(spacing: 11) {
             CompeteRankBadge(place: place, isTied: isTied)
@@ -154,6 +169,8 @@ struct CompeteStandingsRow: View {
                     if user.has_manual_workouts == true { manualBadge }
                 }
 
+                if dynamicTypeSize.isAccessibilitySize { scoreLabel }
+
                 // The bar and the supporting figure share a line: the bar is
                 // the comparison, the figure is the receipt for it.
                 HStack(spacing: 8) {
@@ -188,15 +205,7 @@ struct CompeteStandingsRow: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            Text(scoreText)
-                .competeFont(CompeteDesign.score)
-                .foregroundColor(
-                    isEliminated ? CompeteDesign.inkGhost
-                        : (place == 1 ? (CompeteDesign.medal(1) ?? .white) : CompeteDesign.ink)
-                )
-                .monospacedDigit()
-                .lineLimit(1)
-                .fixedSize()
+            if !dynamicTypeSize.isAccessibilitySize { scoreLabel }
         }
         .padding(.vertical, 9)
         .padding(.horizontal, 4)

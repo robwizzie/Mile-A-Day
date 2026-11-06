@@ -295,7 +295,7 @@ struct PresetCard: View {
                     Text(preset.blurb)
                         .madFont(size: 12, weight: .medium, design: .rounded)
                         .foregroundColor(.white.opacity(0.6))
-                        .lineLimit(1)
+                        .madBodyLines(1)
                         .minimumScaleFactor(0.75)
                 }
 

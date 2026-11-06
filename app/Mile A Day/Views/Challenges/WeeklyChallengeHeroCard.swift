@@ -105,16 +105,16 @@ struct WeeklyChallengeHeroCard: View {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 5) {
                     Image(systemName: response.progress.completed ? "checkmark.circle.fill" : response.challenge.icon)
-                        .font(.system(size: 12, weight: .bold))
+                        .madFont(size: 12, weight: .bold, maxScale: 1.5)
                         .accessibilityHidden(true)
                     Text(response.progress.completed ? "This week · done" : "This week")
-                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .madFont(size: 12, weight: .semibold, design: .rounded)
                 }
                 .foregroundColor(response.progress.completed ? .green : gradientColors[0])
                 Text(response.challenge.title)
-                    .font(.system(size: 17, weight: .heavy, design: .rounded))
+                    .madFont(size: 17, weight: .heavy, design: .rounded)
                     .foregroundColor(.white)
-                    .lineLimit(1)
+                    .madNameLines()
             }
             Spacer(minLength: 4)
             // Days left, then the same chevron the daily challenge carries:
@@ -122,11 +122,11 @@ struct WeeklyChallengeHeroCard: View {
             // screen, and only one of them used to say so.
             HStack(spacing: 6) {
                 Text(WeeklyChallengeFormat.daysLeft(response.days_left))
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .madFont(size: 12, weight: .semibold, design: .rounded)
                     .foregroundColor(.white.opacity(0.5))
                     .fixedSize()
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 12, weight: .bold))
+                    .madFont(size: 12, weight: .bold, maxScale: 1.5)
                     .foregroundColor(.white.opacity(0.3))
                     .accessibilityHidden(true)
             }
@@ -150,28 +150,28 @@ struct WeeklyChallengeHeroCard: View {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
                     Text("THIS WEEK")
-                        .font(.system(size: 9, weight: .black, design: .rounded))
+                        .madFont(size: 11, weight: .black, design: .rounded, maxScale: 1.3)
                         .tracking(1.2)
                         .foregroundColor(gradientColors[0])
 
                     if response.progress.completed {
                         Text("DONE")
-                            .font(.system(size: 9, weight: .black, design: .rounded))
+                            .madFont(size: 11, weight: .black, design: .rounded)
                             .tracking(1.2)
                             .foregroundColor(.green)
                     }
                 }
 
                 Text(response.challenge.title)
-                    .font(.system(size: 17, weight: .heavy, design: .rounded))
+                    .madFont(size: 17, weight: .heavy, design: .rounded)
                     .foregroundColor(.white)
-                    .lineLimit(1)
+                    .madNameLines()
             }
 
             Spacer(minLength: 4)
 
             Text(WeeklyChallengeFormat.daysLeft(response.days_left))
-                .font(.system(size: 11, weight: .bold, design: .rounded))
+                .madFont(size: 11, weight: .bold, design: .rounded)
                 .foregroundColor(.white.opacity(0.6))
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
@@ -184,7 +184,7 @@ struct WeeklyChallengeHeroCard: View {
     private var progressBar: some View {
         VStack(alignment: .leading, spacing: 7) {
             Text(response.challenge.description)
-                .font(.system(size: 13, weight: .medium, design: .rounded))
+                .madFont(size: 13, weight: .medium, design: .rounded)
                 .foregroundColor(.white.opacity(0.8))
                 .fixedSize(horizontal: false, vertical: true)
 
@@ -202,7 +202,7 @@ struct WeeklyChallengeHeroCard: View {
 
             HStack {
                 Text(progressText)
-                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .madFont(size: 12, weight: .bold, design: .rounded)
                     .foregroundColor(.white.opacity(0.75))
 
                 Spacer(minLength: 4)
@@ -211,7 +211,7 @@ struct WeeklyChallengeHeroCard: View {
                 // percentage beside them was the same fact again.
                 if !compact {
                     Text(ProgressCalculator.formatWholePercent(Double(Int((response.progress.percent * 100).rounded()))))
-                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                        .madFont(size: 12, weight: .bold, design: .rounded)
                         .foregroundColor(gradientColors[0])
                 }
             }
@@ -232,27 +232,29 @@ struct WeeklyChallengeHeroCard: View {
 
             HStack(spacing: 8) {
                 Image(systemName: last.completed ? "checkmark.seal.fill" : last.icon)
-                    .font(.system(size: 12, weight: .bold))
+                    .madFont(size: 12, weight: .bold, maxScale: 1.5)
                     .foregroundColor(tint)
                     .accessibilityHidden(true)
 
                 Text("LAST WEEK")
-                    .font(.system(size: 9, weight: .black, design: .rounded))
+                    .madFont(size: 11, weight: .black, design: .rounded)
                     .tracking(1.2)
-                    .foregroundColor(.white.opacity(0.4))
+                    .foregroundColor(.white.opacity(0.6))
                     .fixedSize()
 
                 Text(last.title)
-                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .madFont(size: 12, weight: .bold, design: .rounded)
                     .foregroundColor(.white.opacity(0.8))
                     .lineLimit(1)
+                    .minimumScaleFactor(0.75)
 
                 Spacer(minLength: 4)
 
                 Text(lastWeekResultText(last))
-                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .madFont(size: 12, weight: .bold, design: .rounded)
                     .foregroundColor(tint)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.75)
                     // Short and derived from a number, never open-ended text.
                     .fixedSize()
             }
@@ -291,20 +293,21 @@ struct WeeklyChallengeHeroCard: View {
 
                 if let rank = response.my_rank {
                     Text("You're \(ActiveCompetitionRow.ordinal(rank)) of \(response.friends.count)")
-                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                        .madFont(size: 12, weight: .bold, design: .rounded, maxScale: 1.3)
                         .foregroundColor(.white.opacity(0.75))
                         .lineLimit(1)
+                        .minimumScaleFactor(0.75)
                 }
 
                 Spacer(minLength: 4)
 
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 11, weight: .bold))
+                    .madFont(size: 11, weight: .bold, maxScale: 1.5)
                     .foregroundColor(.white.opacity(0.35))
             }
         } else if let baseline = response.baseline, baseline > 0 {
             Text("Sized to your last 4 weeks — you've been averaging \(WeeklyChallengeFormat.valueWithUnit(baseline, unit: response.challenge.unit)).")
-                .font(.system(size: 11, weight: .medium, design: .rounded))
+                .madFont(size: 11, weight: .medium, design: .rounded)
                 .foregroundColor(.white.opacity(0.45))
                 .fixedSize(horizontal: false, vertical: true)
         }
