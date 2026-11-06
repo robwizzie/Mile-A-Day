@@ -52,6 +52,7 @@ Details: docs/conventions/backend.md § Backend Conventions
 - Rate limits key on `clientIp()`, never `req.ip`; `TRUST_PROXY_HOPS`, never `true`; unknown IP ⇒ skip. Check: `rate-limit-check`.
 - Shoes are OWNER-ONLY (only `shoeService` reads them); one rule `shoeActivitySql` (iOS `ShoeActivity.of`); mileage derived. Check: `shoes-check`.
 - `/public/users/:username` comes only from `publicProfileService.getPublicProfile`: streak via `effectiveStreakSql` (also `getPublicPostPreview`); `total_miles`/`friend_count`/`medals` null for `workout_visibility = 'private'`. Check: `public-profile-check`.
+- `GET /users/:id` reads via `getUserProfileRow`: full row for the owner only, `OTHER_VIEWER_PROFILE_COLUMNS` for everyone else; list a field there only if shipped clients need it, keep `'' AS email`. Check: `user-profile-fields-check`.
 - `/public/showcase` (onboarding photos, signed-out) serves ONLY the `showcasePostIds()` allowlist (`SHOWCASE_POST_IDS` env, empty = off) via `getShowcasePhotos`: signed urls, deleted/off-feed dropped, never a feed query. Check: `showcase-check`.
 
 ## Architecture: Routes -> Controllers -> Services

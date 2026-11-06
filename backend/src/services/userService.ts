@@ -30,6 +30,28 @@ export async function getUser({
 	return results[0];
 }
 
+/**
+ * The `GET /users/:id` row: the whole record for its owner, and only the
+ * profile fields below for any other viewer. An allowlist, so a column added
+ * to `users` stays owner-only until someone chooses to list it here.
+ *
+ * These are exactly the fields the app reads from another user's record: name
+ * and avatar (`FriendHeader`), plus bio and banner (`UserProfileDetailView`).
+ *
+ * BACKWARDS COMPAT: older App Store builds decode this into a BackendUser whose
+ * `email` is a NON-optional String, so the key has to stay. Same empty-string
+ * shape as searchUsers; drop it once the email-optional build has fully rolled
+ * out.
+ */
+const OTHER_VIEWER_PROFILE_COLUMNS = `user_id, username, first_name, last_name, bio,
+		profile_image_url, profile_banner_url, profile_banner_style, dashboard_style, '' AS email`;
+
+export async function getUserProfileRow(userId: string, viewerId: string | undefined) {
+	const columns = viewerId === userId ? '*' : OTHER_VIEWER_PROFILE_COLUMNS;
+	const [row] = await db.query(`SELECT ${columns} FROM users WHERE user_id = $1`, [userId]);
+	return row;
+}
+
 export async function getUsers(userIds: string[]): Promise<User[]> {
 	return await db.query(
 		`SELECT * FROM users WHERE user_id IN (${userIds.map((_, i: number) => `$${i + 1}`).join(', ')})`,
