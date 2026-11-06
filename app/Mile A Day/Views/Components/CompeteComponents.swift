@@ -613,7 +613,7 @@ struct RivalRow: View {
                 Text(subtitle)
                     .madFont(size: 11, weight: .semibold, design: .rounded)
                     .foregroundColor(.white.opacity(0.5))
-                    .lineLimit(1)
+                    .madBodyLines(1)
                     .minimumScaleFactor(0.75)
             }
 
