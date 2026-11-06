@@ -4,6 +4,7 @@ struct TrophyCaseView: View {
     @ObservedObject var trophyService: TrophyService
     @ObservedObject var competitionService: CompetitionService
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var animateIn = false
     @State private var selectedCompetition: Competition?
     @State private var isLoadingCompetition = false
@@ -242,42 +243,27 @@ struct TrophyCaseView: View {
                 Text(trophy.competitionName)
                     .competeFont(CompeteDesign.nameSmall)
                     .foregroundColor(CompeteDesign.ink)
-                    .lineLimit(1)
+                    .madBodyLines(1)
                     .truncationMode(.tail)
 
-                HStack(spacing: 5) {
-                    Text(trophy.competitionType.displayName.uppercased())
-                        .madFont(size: 11, weight: .heavy, design: .rounded)
-                        .tracking(0.9)
-                        .foregroundColor(Color(hex: trophy.competitionType.gradient[0]))
-                    Text("·").foregroundColor(CompeteDesign.inkGhost)
-                    Text(placementText(trophy))
-                        .competeFont(CompeteDesign.caption)
-                        .foregroundColor(accentColor)
-                    Text("·").foregroundColor(CompeteDesign.inkGhost)
-                    Text(formattedDate(trophy.completedDate))
-                        .competeFont(CompeteDesign.caption)
-                        .foregroundColor(CompeteDesign.inkFaint)
+                trophyDetails(trophy, accentColor: accentColor)
+
+                if dynamicTypeSize.isAccessibilitySize {
+                    HStack(alignment: .firstTextBaseline, spacing: 5) {
+                        trophyScore(trophy)
+                        trophyScoreUnit(trophy)
+                    }
                 }
-                .lineLimit(1)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            VStack(alignment: .trailing, spacing: 0) {
-                Text(formatScore(trophy))
-                    .madFont(size: 17, weight: .heavy, design: .rounded)
-                    .foregroundColor(CompeteDesign.ink)
-                    .monospacedDigit()
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.75)
-                Text(scoreUnitLabel(trophy).uppercased())
-                    .madFont(size: 11, weight: .bold, design: .rounded)
-                    .tracking(0.6)
-                    .foregroundColor(CompeteDesign.inkFaint)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.75)
+            if !dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .trailing, spacing: 0) {
+                    trophyScore(trophy)
+                    trophyScoreUnit(trophy)
+                }
+                .fixedSize()
             }
-            .fixedSize()
 
             Image(systemName: "chevron.right")
                 .madFont(size: 11, weight: .bold, maxScale: 1.5)
@@ -294,6 +280,57 @@ struct TrophyCaseView: View {
             RoundedRectangle(cornerRadius: CompeteDesign.radius, style: .continuous)
                 .strokeBorder(CompeteDesign.hairline, lineWidth: 1)
         )
+    }
+
+    /// Type, placement and date. One dotted line normally; a line each at
+    /// accessibility sizes, where sharing one cuts all three down to "R…".
+    @ViewBuilder
+    private func trophyDetails(_ trophy: CompetitionTrophy, accentColor: Color) -> some View {
+        let type = Text(trophy.competitionType.displayName.uppercased())
+            .madFont(size: 11, weight: .heavy, design: .rounded)
+            .tracking(0.9)
+            .foregroundColor(Color(hex: trophy.competitionType.gradient[0]))
+        let placement = Text(placementText(trophy))
+            .competeFont(CompeteDesign.caption)
+            .foregroundColor(accentColor)
+        let date = Text(formattedDate(trophy.completedDate))
+            .competeFont(CompeteDesign.caption)
+            .foregroundColor(CompeteDesign.inkFaint)
+
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: 2) {
+                type
+                placement
+                date
+            }
+        } else {
+            HStack(spacing: 5) {
+                type
+                Text("·").foregroundColor(CompeteDesign.inkGhost)
+                placement
+                Text("·").foregroundColor(CompeteDesign.inkGhost)
+                date
+            }
+            .lineLimit(1)
+        }
+    }
+
+    private func trophyScore(_ trophy: CompetitionTrophy) -> some View {
+        Text(formatScore(trophy))
+            .madFont(size: 17, weight: .heavy, design: .rounded)
+            .foregroundColor(CompeteDesign.ink)
+            .monospacedDigit()
+            .lineLimit(1)
+            .minimumScaleFactor(0.75)
+    }
+
+    private func trophyScoreUnit(_ trophy: CompetitionTrophy) -> some View {
+        Text(scoreUnitLabel(trophy).uppercased())
+            .madFont(size: 11, weight: .bold, design: .rounded)
+            .tracking(0.6)
+            .foregroundColor(CompeteDesign.inkFaint)
+            .lineLimit(1)
+            .minimumScaleFactor(0.75)
     }
 
     // MARK: - Helpers

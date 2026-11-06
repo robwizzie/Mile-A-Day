@@ -14,6 +14,8 @@ import SwiftUI
 struct CompetitionCompactInfoStrip: View {
     let competition: Competition
 
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
     private var accent: Color { CompeteDesign.accent(competition.type) }
 
     /// The unchanging facts, in reading order. Joined rather than stacked: a
@@ -28,6 +30,54 @@ struct CompetitionCompactInfoStrip: View {
     }
 
     var body: some View {
+        content
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
+        .background(
+            RoundedRectangle(cornerRadius: CompeteDesign.innerRadius, style: .continuous)
+                .fill(CompeteDesign.surface)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: CompeteDesign.innerRadius, style: .continuous)
+                .strokeBorder(CompeteDesign.hairline, lineWidth: 1)
+        )
+    }
+
+    /// One row normally. At accessibility sizes the format takes its own line:
+    /// beside the status and countdown it collapses to "Race · R…".
+    @ViewBuilder private var content: some View {
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .center, spacing: 9) {
+                    status
+                    Spacer(minLength: 0)
+                    countdown
+                }
+                factsLine
+                    .lineLimit(3)
+            }
+        } else {
+            HStack(alignment: .center, spacing: 9) {
+                status
+
+                Rectangle()
+                    .fill(CompeteDesign.rowRule)
+                    .frame(width: 1, height: 11)
+                    .accessibilityHidden(true)
+
+                // The format. Allowed to shrink and truncate — it is reference,
+                // and the countdown beside it is not.
+                factsLine
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                countdown
+            }
+        }
+    }
+
+    private var status: some View {
         HStack(alignment: .center, spacing: 9) {
             Circle()
                 .fill(competition.status.color)
@@ -40,40 +90,24 @@ struct CompetitionCompactInfoStrip: View {
                 .foregroundColor(competition.status.color)
                 .lineLimit(1)
                 .fixedSize()
-
-            Rectangle()
-                .fill(CompeteDesign.rowRule)
-                .frame(width: 1, height: 11)
-                .accessibilityHidden(true)
-
-            // The format. Allowed to shrink and truncate — it is reference,
-            // and the countdown beside it is not.
-            Text(facts.joined(separator: " · "))
-                .competeFont(CompeteDesign.detail)
-                .foregroundColor(CompeteDesign.inkMuted)
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-            if let remaining = remainingTimeString {
-                Text(remaining)
-                    .madFont(size: 12, weight: .heavy, design: .rounded)
-                    .foregroundColor(accent)
-                    .monospacedDigit()
-                    .lineLimit(1)
-                    .fixedSize()
-            }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 11)
-        .background(
-            RoundedRectangle(cornerRadius: CompeteDesign.innerRadius, style: .continuous)
-                .fill(CompeteDesign.surface)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: CompeteDesign.innerRadius, style: .continuous)
-                .strokeBorder(CompeteDesign.hairline, lineWidth: 1)
-        )
+    }
+
+    private var factsLine: some View {
+        Text(facts.joined(separator: " · "))
+            .competeFont(CompeteDesign.detail)
+            .foregroundColor(CompeteDesign.inkMuted)
+    }
+
+    @ViewBuilder private var countdown: some View {
+        if let remaining = remainingTimeString {
+            Text(remaining)
+                .madFont(size: 12, weight: .heavy, design: .rounded)
+                .foregroundColor(accent)
+                .monospacedDigit()
+                .lineLimit(1)
+                .fixedSize()
+        }
     }
 
     // MARK: - Helpers

@@ -144,6 +144,8 @@ struct CompeteHeader<Actions: View>: View {
     var trailingText: String?
     @ViewBuilder var actions: Actions
 
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
     init(
         eyebrow: String,
         title: String? = nil,
@@ -157,8 +159,27 @@ struct CompeteHeader<Actions: View>: View {
     }
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: MADTheme.Spacing.sm) {
-            VStack(alignment: .leading, spacing: 3) {
+        // At accessibility sizes the pills get their own line: beside the
+        // eyebrow, both collapse to "STANDIN…" and "Te…".
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
+                HStack(alignment: .firstTextBaseline, spacing: MADTheme.Spacing.sm) {
+                    titleColumn
+                    trailingLabel
+                }
+                actions
+            }
+        } else {
+            HStack(alignment: .firstTextBaseline, spacing: MADTheme.Spacing.sm) {
+                titleColumn
+                trailingLabel
+                actions
+            }
+        }
+    }
+
+    private var titleColumn: some View {
+        VStack(alignment: .leading, spacing: 3) {
                 Text(eyebrow.uppercased())
                     .competeFont(CompeteDesign.eyebrow)
                     .tracking(CompeteDesign.eyebrowTracking)
@@ -172,18 +193,17 @@ struct CompeteHeader<Actions: View>: View {
                         .lineLimit(2)
                         .minimumScaleFactor(0.85)
                 }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
 
-            if let trailingText {
-                Text(trailingText)
-                    .competeFont(CompeteDesign.caption)
-                    .foregroundColor(CompeteDesign.inkFaint)
-                    .lineLimit(1)
-                    .fixedSize()
-            }
-
-            actions
+    @ViewBuilder private var trailingLabel: some View {
+        if let trailingText {
+            Text(trailingText)
+                .competeFont(CompeteDesign.caption)
+                .foregroundColor(CompeteDesign.inkFaint)
+                .lineLimit(1)
+                .fixedSize()
         }
     }
 }
