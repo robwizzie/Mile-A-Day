@@ -93,7 +93,7 @@ export async function getFriendship(
 
 /**
  * Safe column set for any user record returned to SOMEONE ELSE — friends,
- * incoming requests, sent requests. Never `u.*`: that table carries email,
+ * close friends, incoming requests, sent requests. Never `u.*`: that table carries email,
  * apple_sub and the rest, and these lists are read by other users.
  *
  * BACKWARDS COMPAT: the shipped App Store app decodes these into a BackendUser
@@ -106,7 +106,7 @@ export async function getFriendship(
  * from their whole workout history on every read, N walks and N writes per
  * open of the Friends tab.
  */
-const FRIEND_SAFE_USER_COLUMNS = `u.user_id, u.username, u.first_name, u.last_name, u.bio,
+export const FRIEND_SAFE_USER_COLUMNS = `u.user_id, u.username, u.first_name, u.last_name, u.bio,
 			u.profile_image_url, (${effectiveStreakSql("u")})::int AS current_streak, '' AS email,
 			u.dashboard_style`; // additive: fun|modern|null — the app draws a friend's Flamey poke only on Fun
 
