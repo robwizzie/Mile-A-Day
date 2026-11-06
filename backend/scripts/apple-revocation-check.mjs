@@ -294,7 +294,7 @@ async function main() {
   const rls = await db.query(`SELECT relname FROM pg_class WHERE relname IN ('apple_sign_in_tokens', 'apple_token_revocations') AND relrowsecurity`);
   check("both token tables have RLS on", rls.length, 2);
   const cols = await db.query(`SELECT 1 FROM information_schema.columns WHERE table_name = 'users' AND column_name LIKE '%refresh%'`);
-  check("no token column on users (GET /users/:id serves SELECT *)", cols.length, 0);
+  check("no token column on users", cols.length, 0);
 
   await cleanup();
 }

@@ -4023,8 +4023,8 @@ export const plusGifts = pgTable(
 );
 
 // Sign in with Apple refresh token per account, kept only so account deletion
-// can revoke it (appleSignInTokenService). Never a `users` column:
-// GET /users/:id serves SELECT *. AES-256-GCM, and RLS with no policy hides the
+// can revoke it (appleSignInTokenService). Its own table, never `users`, so no
+// user-row read can return it. AES-256-GCM, and RLS with no policy hides the
 // table from the MCP read roles, like the mcp_* tables.
 export const appleSignInTokens = pgTable("apple_sign_in_tokens", {
   userId: text("user_id")
