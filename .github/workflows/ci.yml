@@ -369,6 +369,10 @@ jobs:
       # and no sensitive column rides along. Both leak or lie in public.
       - name: Public profile check
         run: node scripts/public-profile-check.mjs
+      # `GET /users/:id` by viewer: the owner's full record, the allowlisted
+      # profile fields for anyone else, and the keys shipped decoders require.
+      - name: User profile fields check
+        run: node scripts/user-profile-fields-check.mjs
       # Onboarding's example photos are served to signed-out devices: only the
       # allowlisted posts, in order, dropped once deleted or off the feed,
       # with signed urls and no extra columns.
