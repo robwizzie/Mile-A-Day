@@ -147,6 +147,7 @@ struct CompeteHomeView: View {
             }
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
+            .madTypeCap(.madCardCap)
             // On the List, not the row: a presentation on a List row can be
             // dropped when the row is recycled.
             .sheet(isPresented: $showStartSheet, onDismiss: runPendingStart) {
@@ -202,11 +203,11 @@ struct CompeteHomeView: View {
     private var inviteHandledNote: some View {
         HStack(spacing: 10) {
             Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 14, weight: .bold))
+                .madFont(size: 14, weight: .bold, maxScale: 1.5)
                 .foregroundColor(.green)
 
             Text("That invite has already been handled.")
-                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                .madFont(size: 13, weight: .semibold, design: .rounded)
                 .foregroundColor(.white.opacity(0.75))
 
             Spacer(minLength: 4)
@@ -215,7 +216,7 @@ struct CompeteHomeView: View {
                 withAnimation(.easeOut(duration: 0.2)) { showInviteHandledNote = false }
             } label: {
                 Image(systemName: "xmark")
-                    .font(.system(size: 11, weight: .bold))
+                    .madFont(size: 11, weight: .bold, maxScale: 1.5)
                     .foregroundColor(.white.opacity(0.4))
             }
             .buttonStyle(.plain)
@@ -300,16 +301,16 @@ struct CompeteHomeView: View {
         Button { showStartSheet = true } label: {
             HStack(spacing: 10) {
                 Image(systemName: "plus.circle.fill")
-                    .font(.system(size: 16, weight: .bold))
+                    .madFont(size: 16, weight: .bold, maxScale: 1.5)
                     .foregroundColor(MADTheme.Colors.madRed)
                     .accessibilityHidden(true)
                 Text("Start a competition")
-                    .font(CompeteDesign.name)
+                    .competeFont(CompeteDesign.name)
                     .foregroundColor(CompeteDesign.ink)
                     .lineLimit(1)
                 Spacer(minLength: 4)
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 11, weight: .bold))
+                    .madFont(size: 11, weight: .bold, maxScale: 1.5)
                     .foregroundColor(CompeteDesign.inkFaint)
                     .accessibilityHidden(true)
             }
@@ -344,7 +345,7 @@ struct CompeteHomeView: View {
             )
 
             Text("Pick a mode to see how it works, or start one of these in a couple of taps.")
-                .font(.system(size: 13, weight: .medium, design: .rounded))
+                .madFont(size: 13, weight: .medium, design: .rounded)
                 .foregroundColor(.white.opacity(0.6))
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.horizontal, 14)
@@ -378,9 +379,9 @@ struct CompeteHomeView: View {
             Button(action: onCreateBlank) {
                 HStack(spacing: 6) {
                     Image(systemName: "slider.horizontal.3")
-                        .font(.system(size: 12, weight: .bold))
+                        .madFont(size: 12, weight: .bold, maxScale: 1.5)
                     Text("Build a custom competition")
-                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                        .madFont(size: 13, weight: .bold, design: .rounded)
                 }
                 .foregroundColor(MADTheme.Colors.madRed)
                 .frame(maxWidth: .infinity)

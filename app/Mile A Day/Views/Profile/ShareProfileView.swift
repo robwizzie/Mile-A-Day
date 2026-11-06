@@ -71,7 +71,7 @@ struct ShareProfileView: View {
             )
 
             Text("@\(username)")
-                .font(.system(size: 18, weight: .heavy, design: .rounded))
+                .madFont(size: 18, weight: .heavy, design: .rounded, maxScale: 1.3)
                 .foregroundColor(.white)
         }
 
@@ -97,11 +97,11 @@ struct ShareProfileView: View {
 
         VStack(spacing: MADTheme.Spacing.xs) {
             Text("Friends can scan this with their iPhone Camera or in Mile A Day → Find Friends → Scan")
-                .font(.system(size: 13, weight: .medium, design: .rounded))
+                .madFont(size: 13, weight: .medium, design: .rounded)
                 .foregroundColor(.white.opacity(0.6))
 
             Text(url.absoluteString)
-                .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                .madFont(size: 13, weight: .semibold, design: .monospaced)
                 .foregroundColor(MADTheme.Colors.madRed)
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
@@ -114,9 +114,9 @@ struct ShareProfileView: View {
         ) {
             HStack(spacing: MADTheme.Spacing.sm) {
                 Image(systemName: "square.and.arrow.up")
-                    .font(.system(size: 16, weight: .semibold))
+                    .madFont(size: 16, weight: .semibold, maxScale: 1.5)
                 Text("Share Profile")
-                    .font(.system(size: 16, weight: .bold, design: .rounded))
+                    .madFont(size: 16, weight: .bold, design: .rounded)
             }
             .foregroundColor(.white)
             .frame(maxWidth: .infinity)
@@ -134,15 +134,15 @@ struct ShareProfileView: View {
     private var noUsernameView: some View {
         VStack(spacing: MADTheme.Spacing.md) {
             Image(systemName: "person.crop.circle.badge.questionmark")
-                .font(.system(size: 48))
+                .madFont(size: 48, maxScale: 1.5)
                 .foregroundColor(MADTheme.Colors.secondaryText)
 
             Text("Set a Username First")
-                .font(MADTheme.Typography.title3)
+                .madFont(size: 20, weight: .semibold, design: .rounded)
                 .foregroundColor(MADTheme.Colors.primaryText)
 
             Text("Your share link uses your username. Add one from Profile → Edit Profile, then come back here.")
-                .font(MADTheme.Typography.body)
+                .madFont(size: 17, design: .rounded)
                 .foregroundColor(MADTheme.Colors.secondaryText)
                 .multilineTextAlignment(.center)
         }

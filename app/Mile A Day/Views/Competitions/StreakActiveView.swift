@@ -96,15 +96,15 @@ struct StreakActiveView: View {
             // Streak count
             HStack(spacing: 8) {
                 Image(systemName: "flame.fill")
-                    .font(.system(size: 32))
+                    .madFont(size: 32, maxScale: 1.5)
                     .foregroundColor(.orange)
 
                 Text("\(streak)")
-                    .font(.system(size: 44, weight: .bold, design: .rounded))
+                    .madFont(size: 44, weight: .bold, design: .rounded)
                     .foregroundColor(.white)
 
                 Text("day streak")
-                    .font(.system(size: 14, weight: .medium, design: .rounded))
+                    .madFont(size: 14, weight: .medium, design: .rounded)
                     .foregroundColor(.white.opacity(0.45))
                     .padding(.top, 16)
             }
@@ -113,14 +113,14 @@ struct StreakActiveView: View {
             if isToday {
                 if completed {
                     Label("Done \u{2014} \(String(format: "%.1f", distance)) \(competition.options.unit.shortDisplayName)", systemImage: "checkmark.circle.fill")
-                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+                        .madFont(size: 13, weight: .semibold, design: .rounded)
                         .foregroundColor(.green)
                         .padding(.horizontal, 14)
                         .padding(.vertical, 6)
                         .background(Capsule().fill(Color.green.opacity(0.12)))
                 } else {
                     Label("\(String(format: "%.1f", remaining)) \(competition.options.unit.shortDisplayName) to go", systemImage: "figure.run")
-                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+                        .madFont(size: 13, weight: .semibold, design: .rounded)
                         .foregroundColor(.orange)
                         .padding(.horizontal, 14)
                         .padding(.vertical, 6)
@@ -151,13 +151,13 @@ struct StreakActiveView: View {
         return HStack(spacing: 5) {
             ForEach(0..<displayCount, id: \.self) { i in
                 Image(systemName: i < lives ? "heart.fill" : "heart")
-                    .font(.system(size: 14))
+                    .madFont(size: 14, maxScale: 1.5)
                     .foregroundColor(i < lives ? .red : .white.opacity(0.15))
             }
             if totalLives > maxVisibleHearts {
                 Text("+\(totalLives - maxVisibleHearts)")
-                    .font(.system(size: 11, weight: .semibold, design: .rounded))
-                    .foregroundColor(.white.opacity(0.35))
+                    .madFont(size: 11, weight: .semibold, design: .rounded)
+                    .foregroundColor(.white.opacity(0.6))
             }
         }
     }
@@ -211,8 +211,8 @@ struct StreakActiveView: View {
 
         return VStack(spacing: 3) {
             Text(dayLetter)
-                .font(.system(size: 9, weight: .medium, design: .rounded))
-                .foregroundColor(.white.opacity(0.3))
+                .madFont(size: 11, weight: .medium, design: .rounded)
+                .foregroundColor(.white.opacity(0.6))
 
             ZStack {
                 Circle()
@@ -225,7 +225,7 @@ struct StreakActiveView: View {
                         .foregroundColor(.white)
                 } else {
                     Text("\(dayNum)")
-                        .font(.system(size: 10, weight: isSelected ? .bold : .medium, design: .rounded))
+                        .madFont(size: 11, weight: isSelected ? .bold : .medium, design: .rounded)
                         .foregroundColor(isFuture ? .white.opacity(0.12) : .white)
                 }
             }
@@ -248,14 +248,14 @@ struct StreakActiveView: View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
             HStack {
                 Text(isToday ? "Standings" : "Day Results")
-                    .font(CompeteDesign.eyebrow)
+                    .competeFont(CompeteDesign.eyebrow)
                     .tracking(CompeteDesign.eyebrowTracking)
                     .textCase(.uppercase)
                     .foregroundColor(CompeteDesign.inkFaint)
                 Spacer()
                 Text("\(activeUsers.count) competing")
-                    .font(.system(size: 11, weight: .medium, design: .rounded))
-                    .foregroundColor(.white.opacity(0.3))
+                    .madFont(size: 11, weight: .medium, design: .rounded)
+                    .foregroundColor(.white.opacity(0.6))
             }
             .padding(.horizontal, MADTheme.Spacing.sm)
 
@@ -304,13 +304,15 @@ struct StreakActiveView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 4) {
                         Text(user.displayName)
-                            .font(.system(size: 14, weight: .semibold, design: .rounded))
+                            .madFont(size: 14, weight: .semibold, design: .rounded)
                             .foregroundColor(.white)
-                            .lineLimit(1)
+                            .madNameLines()
 
                         if isMe {
                             Text("YOU")
-                                .font(.system(size: 7, weight: .bold))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.6)
+                                .madFont(size: 11, weight: .bold)
                                 .foregroundColor(.white)
                                 .padding(.horizontal, 3)
                                 .padding(.vertical, 1)
@@ -329,10 +331,10 @@ struct StreakActiveView: View {
                 VStack(alignment: .trailing, spacing: 3) {
                     HStack(spacing: 3) {
                         Image(systemName: "flame.fill")
-                            .font(.system(size: 10))
+                            .madFont(size: 10, maxScale: 1.5)
                             .foregroundColor(.orange)
                         Text("\(streak)")
-                            .font(.system(size: 16, weight: .bold, design: .rounded))
+                            .madFont(size: 16, weight: .bold, design: .rounded)
                             .foregroundColor(.white)
                     }
 
@@ -354,14 +356,14 @@ struct StreakActiveView: View {
             if rank <= 3 {
                 let color: Color = rank == 1 ? .yellow : (rank == 2 ? Color(white: 0.75) : Color(red: 0.75, green: 0.5, blue: 0.2))
                 Text("\(rank)")
-                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .madFont(size: 12, weight: .bold, design: .rounded)
                     .foregroundColor(color)
-                    .frame(width: 22)
+                    .frame(minWidth: 22)
             } else {
                 Text("\(rank)")
-                    .font(.system(size: 12, weight: .bold, design: .rounded))
-                    .foregroundColor(.white.opacity(0.25))
-                    .frame(width: 22)
+                    .madFont(size: 12, weight: .bold, design: .rounded)
+                    .foregroundColor(.white.opacity(0.6))
+                    .frame(minWidth: 22)
             }
         }
     }
@@ -376,8 +378,8 @@ struct StreakActiveView: View {
             }
             if totalLives > maxVisibleHearts {
                 Text("+\(totalLives - maxVisibleHearts)")
-                    .font(.system(size: 6, weight: .medium))
-                    .foregroundColor(.white.opacity(0.2))
+                    .madFont(size: 11, weight: .medium, maxScale: 1.3)
+                    .foregroundColor(.white.opacity(0.6))
             }
         }
     }
@@ -386,15 +388,15 @@ struct StreakActiveView: View {
     private func todayStatus(distance: Double, completed: Bool) -> some View {
         if completed {
             Text("\(String(format: "%.1f", distance)) \(competition.options.unit.shortDisplayName)")
-                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                .madFont(size: 11, weight: .semibold, design: .rounded)
                 .foregroundColor(.green)
         } else if isToday {
             Text("\(String(format: "%.1f", distance))/\(competition.options.goalFormatted)")
-                .font(.system(size: 10, weight: .medium, design: .rounded))
-                .foregroundColor(.white.opacity(0.35))
+                .madFont(size: 11, weight: .medium, design: .rounded)
+                .foregroundColor(.white.opacity(0.6))
         } else {
             Text("Missed")
-                .font(.system(size: 10, weight: .medium, design: .rounded))
+                .madFont(size: 11, weight: .medium, design: .rounded)
                 .foregroundColor(.red.opacity(0.45))
         }
     }
@@ -410,11 +412,11 @@ struct StreakActiveView: View {
             } label: {
                 HStack {
                     Text("\(eliminatedUsers.count) eliminated")
-                        .font(.system(size: 12, weight: .medium, design: .rounded))
-                        .foregroundColor(.white.opacity(0.35))
+                        .madFont(size: 12, weight: .medium, design: .rounded)
+                        .foregroundColor(.white.opacity(0.6))
                     Spacer()
                     Image(systemName: showEliminatedUsers ? "chevron.up" : "chevron.down")
-                        .font(.system(size: 9, weight: .semibold))
+                        .madFont(size: 9, weight: .semibold, maxScale: 1.5)
                         .foregroundColor(.white.opacity(0.2))
                 }
                 .padding(.horizontal, MADTheme.Spacing.md)
@@ -430,15 +432,15 @@ struct StreakActiveView: View {
                                 .opacity(0.4)
 
                             Text(user.displayName)
-                                .font(.system(size: 12, weight: .medium, design: .rounded))
-                                .foregroundColor(.white.opacity(0.25))
+                                .madFont(size: 12, weight: .medium, design: .rounded)
+                                .foregroundColor(.white.opacity(0.6))
                                 .strikethrough(color: .red.opacity(0.2))
 
                             Spacer()
 
                             Text("\(Int(user.score ?? 0))d")
-                                .font(.system(size: 10, weight: .medium, design: .rounded))
-                                .foregroundColor(.white.opacity(0.15))
+                                .madFont(size: 11, weight: .medium, design: .rounded)
+                                .foregroundColor(.white.opacity(0.6))
                         }
                         .padding(.horizontal, MADTheme.Spacing.md)
                         .padding(.vertical, 4)
@@ -469,22 +471,22 @@ struct StreakActiveView: View {
         Button { showFlexConfirm = true } label: {
             HStack(spacing: MADTheme.Spacing.sm) {
                 Image(systemName: "hand.raised.fill")
-                    .font(.system(size: 16))
+                    .madFont(size: 16, maxScale: 1.5)
                     .foregroundColor(.orange)
 
                 VStack(alignment: .leading, spacing: 1) {
                     Text("Flex on everyone")
-                        .font(.system(size: 14, weight: .bold, design: .rounded))
+                        .madFont(size: 14, weight: .bold, design: .rounded)
                         .foregroundColor(.white)
                     Text("Let them know you finished")
-                        .font(.system(size: 10, design: .rounded))
-                        .foregroundColor(.white.opacity(0.35))
+                        .madFont(size: 11, design: .rounded)
+                        .foregroundColor(.white.opacity(0.6))
                 }
 
                 Spacer()
 
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 11, weight: .semibold))
+                    .madFont(size: 11, weight: .semibold, maxScale: 1.5)
                     .foregroundColor(.white.opacity(0.3))
             }
             .padding(MADTheme.Spacing.md)
@@ -505,9 +507,9 @@ struct StreakActiveView: View {
     private func feedbackBanner(_ feedback: ActionFeedback) -> some View {
         HStack(spacing: 6) {
             Image(systemName: feedback.icon)
-                .font(.system(size: 12))
+                .madFont(size: 12, maxScale: 1.5)
             Text(feedback.message)
-                .font(.system(size: 12, weight: .medium, design: .rounded))
+                .madFont(size: 12, weight: .medium, design: .rounded)
         }
         .foregroundColor(feedback.isError ? .red : .green)
         .padding(.horizontal, 14)

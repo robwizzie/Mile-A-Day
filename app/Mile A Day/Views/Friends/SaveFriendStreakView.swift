@@ -124,15 +124,16 @@ struct SaveFriendStreakView: View {
                     TokenMedallion(kind: .assist, held: true, size: style == .compact ? 18 : 20)
                     VStack(alignment: .leading, spacing: 0) {
                         Text("Donate a Mile")
-                            .font(.system(size: style == .compact ? 11 : 12, weight: .heavy, design: .rounded))
+                            .madFont(size: style == .compact ? 11 : 12, weight: .heavy, design: .rounded)
                             .lineLimit(1)
+                            .minimumScaleFactor(0.75)
                         // Says where they LAND, not what's being spent. A bare
                         // "5 days" under the title reads as "this saves 5
                         // days"; the number is actually the streak they end up
                         // on — their run before the miss, plus the covered day,
                         // plus every day they've kept since.
                         Text("Saves \(Self.dayCount(status.streakAfterSave))")
-                            .font(.system(size: style == .compact ? 9 : 10, weight: .bold, design: .rounded))
+                            .madFont(size: style == .compact ? 11 : 11, weight: .bold, design: .rounded)
                             .opacity(0.85)
                             .lineLimit(1)
                             .minimumScaleFactor(0.8)
@@ -161,10 +162,11 @@ struct SaveFriendStreakView: View {
                 )
                 VStack(alignment: .leading, spacing: 0) {
                     Text("Donate a Mile")
-                        .font(.system(size: style == .compact ? 11 : 12, weight: .heavy, design: .rounded))
+                        .madFont(size: style == .compact ? 11 : 12, weight: .heavy, design: .rounded)
                         .lineLimit(1)
+                        .minimumScaleFactor(0.75)
                     Text(String(format: "%.2f mi further today", toGo))
-                        .font(.system(size: style == .compact ? 9 : 10, weight: .bold, design: .rounded))
+                        .madFont(size: style == .compact ? 11 : 11, weight: .bold, design: .rounded)
                         .opacity(0.7)
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
@@ -183,10 +185,10 @@ struct SaveFriendStreakView: View {
         if style == .prominent {
             HStack(alignment: .top, spacing: 6) {
                 Image(systemName: icon)
-                    .font(.system(size: 10, weight: .bold))
+                    .madFont(size: 10, weight: .bold, maxScale: 1.5)
                     .padding(.top, 1)
                 Text(text)
-                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .madFont(size: 11, weight: .medium, design: .rounded)
                     .multilineTextAlignment(.leading)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -201,9 +203,9 @@ struct SaveFriendStreakView: View {
     private func compactInfoPill(icon: String, text: String) -> some View {
         HStack(spacing: 6) {
             Image(systemName: icon)
-                .font(.system(size: 11, weight: .bold))
+                .madFont(size: 11, weight: .bold, maxScale: 1.5)
             Text(text)
-                .font(.system(size: style == .compact ? 10 : 11, weight: .semibold, design: .rounded))
+                .madFont(size: style == .compact ? 11 : 11, weight: .semibold, design: .rounded)
                 .lineLimit(3)
                 .multilineTextAlignment(.leading)
                 .fixedSize(horizontal: false, vertical: true)
@@ -224,10 +226,11 @@ struct SaveFriendStreakView: View {
     private func offeredPill() -> some View {
         HStack(spacing: 5) {
             Image(systemName: "paperplane.fill")
-                .font(.system(size: 12, weight: .bold))
+                .madFont(size: 12, weight: .bold, maxScale: 1.5)
             Text("Mile offered")
-                .font(.system(size: style == .compact ? 11 : 12, weight: .heavy, design: .rounded))
+                .madFont(size: style == .compact ? 11 : 12, weight: .heavy, design: .rounded)
                 .lineLimit(1)
+                .minimumScaleFactor(0.75)
         }
         .foregroundColor(.green)
         .padding(.horizontal, style == .compact ? 11 : 14)

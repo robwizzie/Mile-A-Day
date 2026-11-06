@@ -25,7 +25,7 @@ struct FriendWorkoutsSection: View {
                 ProfileCardLabel(text: "Recent workouts")
                 Spacer()
                 Text("\(workouts.count)")
-                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                    .madFont(size: 11, weight: .bold, design: .rounded)
                     .foregroundColor(.white.opacity(0.55))
                     .padding(.horizontal, 8)
                     .padding(.vertical, 3)
@@ -72,6 +72,7 @@ struct FriendWorkoutRow: View {
     /// duplicate call, rather than waiting for the next profile refresh.
     @State private var overruled = false
     @State private var isDeciding = false
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
         VStack(spacing: 8) {
@@ -114,19 +115,21 @@ struct FriendWorkoutRow: View {
                 // "Walked".
                 HStack(alignment: .firstTextBaseline, spacing: 5) {
                     Text(verb)
-                        .font(.system(size: 14, weight: .bold, design: .rounded))
+                        .madFont(size: 14, weight: .bold, design: .rounded)
                         .foregroundColor(MADTheme.Colors.secondaryText)
                         .lineLimit(1)
+                        .minimumScaleFactor(0.75)
                     Text(workout.distance.milesFormatted)
-                        .font(.system(size: 17, weight: .black, design: .rounded))
+                        .madFont(size: 17, weight: .black, design: .rounded)
                         .monospacedDigit()
                         .foregroundColor(MADTheme.Colors.primaryText)
                         .lineLimit(1)
+                        .minimumScaleFactor(0.75)
                 }
                 .fixedSize(horizontal: true, vertical: false)
                 HStack(spacing: 5) {
                     Image(systemName: "clock.fill")
-                        .font(.system(size: 10, weight: .bold))
+                        .madFont(size: 10, weight: .bold, maxScale: 1.5)
                         .foregroundColor(.orange)
                     // Scale, never clip. As one lineLimit(1) Text this cut its
                     // own tail when space ran short — and the tail is the pace,
@@ -136,12 +139,21 @@ struct FriendWorkoutRow: View {
                     Text(paceText == nil
                          ? workout.formattedDuration
                          : "\(workout.formattedDuration) \u{2022} \(paceText!)")
-                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .madFont(size: 12, weight: .semibold, design: .rounded)
                         .monospacedDigit()
                         .foregroundColor(MADTheme.Colors.secondaryText)
                         .lineLimit(1)
                         .allowsTightening(true)
                         .minimumScaleFactor(0.75)
+                }
+
+                // At the accessibility sizes the date gives up its trailing
+                // column: beside the fixed-size distance it pushes the row past
+                // the screen edge.
+                if dynamicTypeSize.isAccessibilitySize {
+                    Text(startTimeLabel.map { "\(dateLabel) \u{2022} \($0)" } ?? dateLabel)
+                        .madFont(size: 12, weight: .medium, design: .rounded)
+                        .foregroundColor(MADTheme.Colors.secondaryText)
                 }
 
                 // Identical chips to the owner's own WorkoutRow — a friend's run
@@ -164,22 +176,24 @@ struct FriendWorkoutRow: View {
 
             Spacer(minLength: MADTheme.Spacing.xs)
 
-            VStack(alignment: .trailing, spacing: 2) {
-                Text(dateLabel)
-                    .font(.system(size: 12, weight: .bold, design: .rounded))
-                    .foregroundColor(MADTheme.Colors.primaryText)
-                if let time = startTimeLabel {
-                    Text(time)
-                        .font(.system(size: 12, weight: .medium, design: .rounded))
-                        .foregroundColor(MADTheme.Colors.secondaryText)
+            if !dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text(dateLabel)
+                        .madFont(size: 12, weight: .bold, design: .rounded)
+                        .foregroundColor(MADTheme.Colors.primaryText)
+                    if let time = startTimeLabel {
+                        Text(time)
+                            .madFont(size: 12, weight: .medium, design: .rounded)
+                            .foregroundColor(MADTheme.Colors.secondaryText)
+                    }
                 }
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
             }
-            .lineLimit(1)
-            .fixedSize(horizontal: true, vertical: false)
 
             if showChevron {
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 12, weight: .medium))
+                    .madFont(size: 12, weight: .medium, maxScale: 1.5)
                     .foregroundColor(MADTheme.Colors.secondaryText)
             }
         }

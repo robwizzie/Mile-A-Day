@@ -70,7 +70,9 @@ struct HighlightViewerView: View {
                     }
                 }
                 .tabViewStyle(.page(indexDisplayMode: .never))
-                .ignoresSafeArea()
+                // Vertical only: a paging TabView that overlaps a SIDE inset
+                // mis-centres its pages (iPhone Duo's outer display has one).
+                .ignoresSafeArea(edges: .vertical)
             }
 
             VStack(spacing: 10) {

@@ -86,6 +86,7 @@ struct FriendsListView: View {
 
         }
         .background(MADTheme.Colors.appBackgroundGradient)
+        .madTypeCap(.madCardCap)
         .toolbar(.hidden, for: .navigationBar)
         // Pushed, not presented as a sheet — keeps Find Friends inside the
         // tab's NavigationStack so there's no slide-down gesture involved
@@ -264,9 +265,9 @@ struct FriendsListView: View {
     private var savedChip: some View {
         HStack(spacing: 4) {
             Image(systemName: "paperplane.fill")
-                .font(.system(size: 11, weight: .bold))
+                .madFont(size: 11, weight: .bold, maxScale: 1.5)
             Text("Mile offered")
-                .font(.system(size: 11, weight: .heavy, design: .rounded))
+                .madFont(size: 11, weight: .heavy, design: .rounded)
         }
         .foregroundColor(.green)
         .padding(.horizontal, 11)
@@ -281,7 +282,7 @@ struct FriendsListView: View {
         // buttons sit level with the text on every tab.
         HStack(alignment: .center) {
             Text("Friends")
-                .font(.system(size: 26, weight: .heavy, design: .rounded))
+                .madFont(size: 26, weight: .heavy, design: .rounded)
                 .foregroundColor(.white)
                 .lineLimit(1)
                 .minimumScaleFactor(0.65)
@@ -298,10 +299,10 @@ struct FriendsListView: View {
             } label: {
                 HStack(spacing: 5) {
                     Image(systemName: "person.badge.plus")
-                        .font(.system(size: 13, weight: .bold))
+                        .madFont(size: 13, weight: .bold, maxScale: 1.5)
                         .accessibilityHidden(true)
                     Text("Add friends")
-                        .font(.system(size: 14, weight: .bold, design: .rounded))
+                        .madFont(size: 14, weight: .bold, design: .rounded)
                         .lineLimit(1)
                         .fixedSize()
                 }
@@ -336,17 +337,17 @@ struct FriendsListView: View {
                     Text(incoming > 0
                          ? (incoming == 1 ? "1 friend request" : "\(incoming) friend requests")
                          : (sent == 1 ? "1 request sent" : "\(sent) requests sent"))
-                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .madFont(size: 15, weight: .bold, design: .rounded)
                         .foregroundColor(.white)
-                        .lineLimit(1)
+                        .lineLimit(2)
                     Spacer(minLength: 4)
                     if incoming > 0 {
                         Text("Review")
-                            .font(.system(size: 13, weight: .bold, design: .rounded))
+                            .madFont(size: 13, weight: .bold, design: .rounded)
                             .foregroundColor(MADTheme.Colors.madRed)
                     }
                     Image(systemName: "chevron.right")
-                        .font(.system(size: 12, weight: .bold))
+                        .madFont(size: 12, weight: .bold, maxScale: 1.5)
                         .foregroundColor(.white.opacity(0.35))
                         .accessibilityHidden(true)
                 }
@@ -529,16 +530,16 @@ struct FriendsListView: View {
     private var allDoneCelebration: some View {
         HStack(spacing: 12) {
             Image(systemName: "party.popper.fill")
-                .font(.system(size: 20, weight: .bold))
+                .madFont(size: 20, weight: .bold, maxScale: 1.5)
                 .foregroundColor(.green)
                 .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text("Everyone's crushed it today")
-                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                    .madFont(size: 14, weight: .bold, design: .rounded)
                     .foregroundColor(.white)
                 Text("All \(friendService.friends.count) friends hit their goal.")
-                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .madFont(size: 12, weight: .medium, design: .rounded)
                     .foregroundColor(.white.opacity(0.55))
             }
             Spacer()
@@ -570,11 +571,11 @@ struct FriendsListView: View {
     private func sectionHeader(title: String, trailing: String) -> some View {
         HStack {
             Text(title)
-                .font(.system(size: 15, weight: .bold, design: .rounded))
+                .madFont(size: 15, weight: .bold, design: .rounded)
                 .foregroundColor(.white.opacity(0.85))
             Spacer()
             Text(trailing)
-                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                .madFont(size: 13, weight: .semibold, design: .rounded)
                 .foregroundColor(.white.opacity(0.45))
                 .monospacedDigit()
         }
@@ -687,11 +688,11 @@ struct FriendsListView: View {
             )
 
             VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 5) {
+                MADInlineStack {
                     Text(friend.username ?? friend.displayName)
-                        .font(.system(size: 14, weight: .bold, design: .rounded))
+                        .madFont(size: 14, weight: .bold, design: .rounded)
                         .foregroundColor(.white)
-                        .lineLimit(1)
+                        .madNameLines()
                     if let streak = status?.current_streak {
                         StreakFlameChip(streak: streak)
                     }
@@ -703,7 +704,7 @@ struct FriendsListView: View {
                     goal: goalMiles,
                     savedToday: savedToday
                 ))
-                .font(.system(size: 11, weight: .medium, design: .rounded))
+                .madFont(size: 11, weight: .medium, design: .rounded)
                 .foregroundColor(savedToday != nil ? SavedDayStyle.tint : .white.opacity(0.5))
                 .lineLimit(1)
                 .minimumScaleFactor(0.85)
@@ -713,7 +714,7 @@ struct FriendsListView: View {
 
             if isCompleted {
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 12, weight: .bold))
+                    .madFont(size: 12, weight: .bold, maxScale: 1.5)
                     .foregroundColor(.white.opacity(0.3))
                     .padding(.trailing, 4)
             }
@@ -776,10 +777,10 @@ struct FriendsListView: View {
                                 // beside the text so it isn't said twice.
                                 .accessibilityLabel("Nudge again")
                                 .accessibilityHidden(!iconOnly)
-                                .font(.system(size: 10, weight: .semibold))
+                                .madFont(size: 10, weight: .semibold)
                             if !iconOnly {
                                 Text("Nudge again")
-                                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                                    .madFont(size: 11, weight: .semibold, design: .rounded)
                             }
                         }
                     }
@@ -800,10 +801,10 @@ struct FriendsListView: View {
             } else if alreadyNudged {
                 HStack(spacing: 4) {
                     Image(systemName: "bell.slash.fill")
-                        .font(.system(size: 10))
+                        .madFont(size: 10, maxScale: 1.5)
                     if !iconOnly {
                         Text("Nudged")
-                            .font(.system(size: 10, weight: .medium, design: .rounded))
+                            .madFont(size: 11, weight: .medium, design: .rounded)
                     }
                 }
                 .foregroundColor(.white.opacity(0.25))
@@ -824,11 +825,11 @@ struct FriendsListView: View {
                                 .tint(.orange)
                         } else {
                             Image(systemName: "bell.badge")
-                                .font(.system(size: 10, weight: .semibold))
+                                .madFont(size: 10, weight: .semibold, maxScale: 1.5)
                                 .modifier(BellShakeModifier(isShaking: bellShakeIds.contains(friend.user_id)))
                             if !iconOnly {
                                 Text("Nudge")
-                                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                                    .madFont(size: 11, weight: .semibold, design: .rounded)
                             }
                         }
                     }
@@ -870,7 +871,7 @@ struct FriendsListView: View {
                 .progressViewStyle(CircularProgressViewStyle(tint: MADTheme.Colors.madRed))
 
             Text("Loading...")
-                .font(MADTheme.Typography.body)
+                .madFont(size: 17, design: .rounded)
                 .foregroundColor(MADTheme.Colors.secondaryText)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -1066,11 +1067,11 @@ struct NudgeToast: View {
     var body: some View {
         HStack(spacing: 10) {
             Image(systemName: feedback.icon)
-                .font(.system(size: 15, weight: .bold))
+                .madFont(size: 15, weight: .bold, maxScale: 1.5)
                 .foregroundColor(feedback.isError ? .red : .green)
                 .accessibilityHidden(true)
             Text(feedback.message)
-                .font(.system(size: 14, weight: .semibold, design: .rounded))
+                .madFont(size: 14, weight: .semibold, design: .rounded)
                 .foregroundColor(.white)
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
@@ -1107,11 +1108,11 @@ private struct FriendsEmptyFlamey: View {
                 .accessibilityHidden(true)
             VStack(spacing: 4) {
                 Text("Walks are better with friends")
-                    .font(.system(size: 18, weight: .heavy, design: .rounded))
+                    .madFont(size: 18, weight: .heavy, design: .rounded)
                     .foregroundColor(.white)
                     .multilineTextAlignment(.center)
                 Text("Add someone you walk with, or send them your link.")
-                    .font(.system(size: 14, weight: .medium, design: .rounded))
+                    .madFont(size: 14, weight: .medium, design: .rounded)
                     .foregroundColor(.white.opacity(0.6))
                     .multilineTextAlignment(.center)
             }
@@ -1121,7 +1122,7 @@ private struct FriendsEmptyFlamey: View {
                     onAddFriends()
                 } label: {
                     Text("Add friends")
-                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .madFont(size: 15, weight: .bold, design: .rounded)
                         .foregroundColor(.white)
                         .lineLimit(1)
                         .minimumScaleFactor(0.85)
@@ -1137,7 +1138,7 @@ private struct FriendsEmptyFlamey: View {
                         message: Text("Add me on Mile A Day and let's keep our streaks going!")
                     ) {
                         Text("Invite")
-                            .font(.system(size: 15, weight: .bold, design: .rounded))
+                            .madFont(size: 15, weight: .bold, design: .rounded)
                             .foregroundColor(.white)
                             .lineLimit(1)
                             .minimumScaleFactor(0.85)

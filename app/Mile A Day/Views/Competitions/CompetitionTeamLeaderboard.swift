@@ -119,7 +119,9 @@ extension CompetitionDetailView {
 
         VStack(alignment: .leading, spacing: 8) {
             Text("COMPETING WITHOUT A TEAM")
-                .font(CompeteDesign.eyebrow)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+                .competeFont(CompeteDesign.eyebrow)
                 .tracking(CompeteDesign.eyebrowTracking)
                 .foregroundColor(CompeteDesign.inkFaint)
 
@@ -164,7 +166,7 @@ extension CompetitionDetailView {
 
         VStack(alignment: .leading, spacing: 10) {
             Text("What each walker has put in. The competition is won on the team totals.")
-                .font(CompeteDesign.caption)
+                .competeFont(CompeteDesign.caption)
                 .foregroundColor(CompeteDesign.inkFaint)
                 .fixedSize(horizontal: false, vertical: true)
 
@@ -207,7 +209,9 @@ struct TeamLivesChip: View {
     var body: some View {
         if lives <= 0 {
             Text("OUT")
-                .font(.system(size: 9, weight: .bold, design: .rounded))
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+                .madFont(size: 11, weight: .bold, design: .rounded)
                 .foregroundColor(.white.opacity(0.5))
                 .padding(.horizontal, 5)
                 .padding(.vertical, 2)
@@ -218,12 +222,12 @@ struct TeamLivesChip: View {
             HStack(spacing: 2) {
                 ForEach(0..<min(lives, 3), id: \.self) { _ in
                     Image(systemName: "heart.fill")
-                        .font(.system(size: 9))
+                        .madFont(size: 9, maxScale: 1.5)
                         .foregroundColor(MADTheme.Colors.madRed.opacity(0.9))
                 }
                 if lives > 3 {
                     Text("×\(lives)")
-                        .font(.system(size: 9, weight: .bold, design: .rounded))
+                        .madFont(size: 11, weight: .bold, design: .rounded)
                         .foregroundColor(MADTheme.Colors.madRed.opacity(0.9))
                 }
             }

@@ -163,6 +163,7 @@ struct ProfileView: View {
             .scrollContentBackground(.hidden)
         }
         .background(MADTheme.Colors.appBackgroundGradient.ignoresSafeArea())
+        .madTypeCap(.madCardCap)
         .sheet(isPresented: $showPureFlameInfo) {
             PureFlameInfoSheet()
         }
@@ -349,7 +350,7 @@ struct ProfileView: View {
                         showingAllHypes = true
                     } label: {
                         Text("See all")
-                            .font(.system(size: 12, weight: .bold, design: .rounded))
+                            .madFont(size: 12, weight: .bold, design: .rounded)
                             .foregroundColor(MADTheme.Colors.madRed)
                     }
                     .buttonStyle(.plain)
@@ -443,16 +444,16 @@ struct ProfileView: View {
                     + Text("  ")
                     + Text(hype.displayName).fontWeight(.bold)
                     + Text(" \(hype.actionText)"))
-                    .font(.system(size: 14, weight: .medium, design: .rounded))
+                    .madFont(size: 14, weight: .medium, design: .rounded)
                     .foregroundColor(.white.opacity(0.9))
                     .lineLimit(2)
                 Text(Self.relativeHypeTime(hype.created_at))
-                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .madFont(size: 11, weight: .medium, design: .rounded)
                     .foregroundColor(.white.opacity(0.45))
             }
             Spacer(minLength: 4)
             Image(systemName: "chevron.right")
-                .font(.system(size: 11, weight: .bold))
+                .madFont(size: 11, weight: .bold, maxScale: 1.5)
                 .foregroundColor(.white.opacity(0.3))
         }
         .padding(.vertical, 9)
@@ -515,15 +516,15 @@ struct ProfileView: View {
         } label: {
             HStack(spacing: 10) {
                 Image(systemName: "map.fill")
-                    .font(.system(size: 13, weight: .semibold))
+                    .madFont(size: 13, weight: .semibold, maxScale: 1.5)
                     .foregroundColor(MADTheme.Colors.madRed)
                     .accessibilityHidden(true)
                 Text("Route Heatmap")
-                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                    .madFont(size: 14, weight: .bold, design: .rounded)
                     .foregroundColor(.white)
                 Spacer(minLength: 4)
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 10, weight: .bold))
+                    .madFont(size: 10, weight: .bold, maxScale: 1.5)
                     .foregroundColor(.white.opacity(0.35))
                     .accessibilityHidden(true)
             }
@@ -542,7 +543,7 @@ struct ProfileView: View {
             ProfilePostsGridView(userId: uid, isSelf: true)
         } else {
             Text("Sign in to see your posts.")
-                .font(.system(size: 13, weight: .medium, design: .rounded))
+                .madFont(size: 13, weight: .medium, design: .rounded)
                 .foregroundColor(.white.opacity(0.5))
                 .padding(.top, MADTheme.Spacing.xl)
         }
@@ -847,17 +848,17 @@ struct ProfileView: View {
 
                 VStack(alignment: .leading, spacing: 1) {
                     Text("Streak Tokens")
-                        .font(.system(size: 12, weight: .heavy, design: .rounded))
+                        .madFont(size: 12, weight: .heavy, design: .rounded)
                         .foregroundColor(.white)
                     Text(ready > 0 ? "\(ready) available" : "Building your safety net")
-                        .font(.system(size: 10, weight: .semibold, design: .rounded))
+                        .madFont(size: 11, weight: .semibold, design: .rounded)
                         .foregroundColor(.white.opacity(ready > 0 ? 0.68 : 0.55))
                 }
 
                 Spacer(minLength: 4)
 
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 10, weight: .bold))
+                    .madFont(size: 10, weight: .bold, maxScale: 1.5)
                     .foregroundColor(.white.opacity(0.35))
             }
             .padding(.horizontal, 12)
@@ -961,20 +962,20 @@ struct MADStatCard: View {
 
             VStack(spacing: MADTheme.Spacing.xs) {
                 Text(value)
-                    .font(MADTheme.Typography.headline)
+                    .madFont(size: 17, weight: .semibold, design: .rounded)
                     .fontWeight(.bold)
                     .foregroundColor(.primary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
 
                 Text(title)
-                    .font(MADTheme.Typography.caption)
+                    .madFont(size: 12, design: .rounded)
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.center)
 
                 if let subtitle {
                     Text(subtitle)
-                        .font(MADTheme.Typography.caption)
+                        .madFont(size: 12, design: .rounded)
                         .foregroundColor(iconColor)
                         .lineLimit(1)
                         .minimumScaleFactor(0.7)

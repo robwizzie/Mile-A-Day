@@ -48,6 +48,12 @@ struct OnboardingIntroView: View {
                 heroBackdrop
                     .frame(height: heroHeight + curve)
 
+                // The sheet sits UNDER the paged content so both art (above
+                // it) and copy (on it) swipe as one page.
+                IntroSheetShape(curve: curve)
+                    .fill(Self.sheetColor)
+                    .padding(.top, heroHeight - curve)
+
                 // Swiping content: art in the hero, copy in the sheet.
                 TabView(selection: $page) {
                     ForEach(steps.indices, id: \.self) { index in
@@ -65,15 +71,15 @@ struct OnboardingIntroView: View {
                     }
                 }
                 .tabViewStyle(.page(indexDisplayMode: .never))
-                .ignoresSafeArea()
+                .ignoresSafeArea(edges: .vertical)
                 .environment(\.introArtWidth, geo.size.width)
-                .background(alignment: .top) {
-                    // The sheet sits UNDER the paged content so both art
-                    // (above it) and copy (on it) swipe as one page.
-                    IntroSheetShape(curve: curve)
-                        .fill(Self.sheetColor)
-                        .padding(.top, heroHeight - curve)
-                }
+                // A paging TabView that overlaps a SIDE inset mis-centres its
+                // pages (iPhone Duo's outer display has one down its right
+                // edge), so it stays inside the safe column; only the
+                // backdrop and sheet run edge to edge.
+                .frame(width: geo.size.width)
+                .padding(.leading, geo.safeAreaInsets.leading)
+                .padding(.trailing, geo.safeAreaInsets.trailing)
 
                 appIcon
                     .padding(.top, heroHeight - curve - iconSize / 2)
@@ -81,11 +87,15 @@ struct OnboardingIntroView: View {
 
                 topBar
                     .padding(.top, topInset + 4)
+                    .padding(.leading, geo.safeAreaInsets.leading)
+                    .padding(.trailing, geo.safeAreaInsets.trailing)
 
                 VStack {
                     Spacer()
                     controls
                         .padding(.horizontal, 24)
+                        .padding(.leading, geo.safeAreaInsets.leading)
+                        .padding(.trailing, geo.safeAreaInsets.trailing)
                         .padding(.bottom, bottomInset + 14)
                 }
             }
@@ -306,8 +316,9 @@ private struct IntroStepPage: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .contentShape(Rectangle())
-        // Insets are applied by hand (topInset/textTop); the pager must not add them again.
-        .ignoresSafeArea()
+        // Top/bottom insets are applied by hand (topInset/textTop); the pager
+        // must not add them again. Vertical only: see the pager's note.
+        .ignoresSafeArea(edges: .vertical)
         .onAppear { if isActive { reveal() } }
         .onChange(of: isActive) { _, active in if active { reveal() } }
     }

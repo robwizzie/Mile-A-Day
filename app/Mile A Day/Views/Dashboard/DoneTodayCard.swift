@@ -121,7 +121,7 @@ struct DoneTodayCard: View {
             // The reason to take the photo: one light prompt a day.
             HStack(spacing: 8) {
                 Text(theme.emoji)
-                    .font(.system(size: 20))
+                    .madFont(size: 20)
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 1) {
                     Text("Today's photo theme")

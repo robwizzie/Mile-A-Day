@@ -38,15 +38,15 @@ struct PrivacySettingsView: View {
     private var headerSection: some View {
         VStack(spacing: MADTheme.Spacing.md) {
             Image(systemName: "lock.shield")
-                .font(.system(size: 48))
+                .madFont(size: 48, maxScale: 1.5)
                 .foregroundColor(MADTheme.Colors.madRed)
             
             Text("Control Your Privacy")
-                .font(MADTheme.Typography.title2)
+                .madFont(size: 22, weight: .bold, design: .rounded)
                 .foregroundColor(MADTheme.Colors.primaryText)
             
             Text("Choose what information other users can see about you. You can always change these settings later.")
-                .font(MADTheme.Typography.body)
+                .madFont(size: 17, design: .rounded)
                 .foregroundColor(MADTheme.Colors.secondaryText)
                 .multilineTextAlignment(.center)
         }
@@ -77,11 +77,11 @@ struct PrivacySettingsView: View {
             HStack {
                 VStack(alignment: .leading, spacing: MADTheme.Spacing.xs) {
                     Text("Account Visibility")
-                        .font(MADTheme.Typography.headline)
+                        .madFont(size: 17, weight: .semibold, design: .rounded)
                         .foregroundColor(MADTheme.Colors.primaryText)
                     
                     Text(privacySettings.isPublic ? "Your profile is visible to other users" : "Your profile is private")
-                        .font(MADTheme.Typography.caption)
+                        .madFont(size: 12, design: .rounded)
                         .foregroundColor(MADTheme.Colors.secondaryText)
                 }
                 
@@ -100,7 +100,7 @@ struct PrivacySettingsView: View {
             Divider()
             
             Text("What others can see:")
-                .font(MADTheme.Typography.subheadline)
+                .madFont(size: 15, design: .rounded)
                 .foregroundColor(MADTheme.Colors.primaryText)
                 .frame(maxWidth: .infinity, alignment: .leading)
             
@@ -112,7 +112,7 @@ struct PrivacySettingsView: View {
                         .frame(width: 24)
                     
                     Text("Username and Profile Picture")
-                        .font(MADTheme.Typography.body)
+                        .madFont(size: 17, design: .rounded)
                         .foregroundColor(MADTheme.Colors.primaryText)
                     
                     Spacer()
@@ -163,15 +163,15 @@ struct PrivacySettingsView: View {
             
             VStack(spacing: MADTheme.Spacing.sm) {
                 Image(systemName: "lock.fill")
-                    .font(.system(size: 32))
+                    .madFont(size: 32, maxScale: 1.5)
                     .foregroundColor(MADTheme.Colors.secondaryText)
                 
                 Text("Private Account")
-                    .font(MADTheme.Typography.headline)
+                    .madFont(size: 17, weight: .semibold, design: .rounded)
                     .foregroundColor(MADTheme.Colors.primaryText)
                 
                 Text("When your account is private, only your username and profile picture are visible to other users. All other information is hidden.")
-                    .font(MADTheme.Typography.body)
+                    .madFont(size: 17, design: .rounded)
                     .foregroundColor(MADTheme.Colors.secondaryText)
                     .multilineTextAlignment(.center)
             }
@@ -237,11 +237,11 @@ struct PrivacyToggleRow: View {
             
             VStack(alignment: .leading, spacing: MADTheme.Spacing.xs) {
                 Text(title)
-                    .font(MADTheme.Typography.body)
+                    .madFont(size: 17, design: .rounded)
                     .foregroundColor(MADTheme.Colors.primaryText)
                 
                 Text(description)
-                    .font(MADTheme.Typography.caption)
+                    .madFont(size: 12, design: .rounded)
                     .foregroundColor(MADTheme.Colors.secondaryText)
             }
             

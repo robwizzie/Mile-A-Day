@@ -47,19 +47,19 @@ struct PinnedBadgesShowcase: View {
         VStack(alignment: .leading, spacing: pinnedBadges.isEmpty ? 10 : MADTheme.Spacing.md) {
             HStack(spacing: MADTheme.Spacing.sm) {
                 Image(systemName: "pin.fill")
-                    .font(.system(size: 14, weight: .semibold))
+                    .madFont(size: 14, weight: .semibold, maxScale: 1.5)
                     .foregroundStyle(MADTheme.Colors.redGradient)
                 Text("Showcase")
-                    .font(MADTheme.Typography.headline)
+                    .madFont(size: 17, weight: .semibold, design: .rounded)
                     .foregroundColor(.primary)
                 Spacer()
                 if let onManageTapped {
                     Button(action: onManageTapped) {
                         HStack(spacing: 4) {
                             Image(systemName: "pencil")
-                                .font(.system(size: 12, weight: .semibold))
+                                .madFont(size: 12, weight: .semibold, maxScale: 1.5)
                             Text(pinnedBadges.isEmpty ? "Add" : "Edit")
-                                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                                .madFont(size: 13, weight: .semibold, design: .rounded)
                         }
                         .foregroundColor(MADTheme.Colors.madRed)
                         .padding(.horizontal, 12)
@@ -108,7 +108,7 @@ struct PinnedBadgesShowcase: View {
 
             if pinnedBadges.isEmpty {
                 Text(emptyStateText)
-                    .font(MADTheme.Typography.caption)
+                    .madFont(size: 12, design: .rounded)
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: .infinity)
@@ -116,9 +116,9 @@ struct PinnedBadgesShowcase: View {
                 // Subtle hint so users discover the drag gesture without clutter.
                 HStack(spacing: 5) {
                     Image(systemName: "hand.point.up.left.fill")
-                        .font(.system(size: 9, weight: .semibold))
+                        .madFont(size: 9, weight: .semibold, maxScale: 1.5)
                     Text("Hold and drag to reorder")
-                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .madFont(size: 11, weight: .medium, design: .rounded)
                 }
                 .foregroundColor(.white.opacity(0.4))
                 .frame(maxWidth: .infinity)
@@ -215,7 +215,7 @@ struct PinnedBadgeSlotFilled: View {
                 .frame(height: ShowcaseSlotMetrics.medalBox, alignment: .bottom)
 
             Text(badge.name)
-                .font(.system(size: 12, weight: .bold, design: .rounded))
+                .madFont(size: 12, weight: .bold, design: .rounded)
                 .foregroundColor(.white)
                 .multilineTextAlignment(.center)
                 .lineLimit(2)
@@ -223,13 +223,13 @@ struct PinnedBadgeSlotFilled: View {
                 .frame(height: 30, alignment: .top)
 
             Text(MedalStory.rarityAndDate(badge))
-                .font(.system(size: 9, weight: .heavy, design: .rounded))
+                .madFont(size: 11, weight: .heavy, design: .rounded)
                 .foregroundColor(badge.rarity.color)
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
 
             Text(story ?? " ")
-                .font(.system(size: 10, weight: .medium, design: .rounded))
+                .madFont(size: 11, weight: .medium, design: .rounded)
                 .foregroundColor(.white.opacity(0.62))
                 .multilineTextAlignment(.center)
                 .lineLimit(2)
@@ -292,7 +292,7 @@ private struct PinnedBadgeSlotSkeleton: View {
                     .opacity(pulse ? 1.0 : 0.7)
 
                 Image(systemName: "arrow.up.and.down.and.arrow.left.and.right")
-                    .font(.system(size: 16, weight: .black))
+                    .madFont(size: 16, weight: .black, maxScale: 1.5)
                     .foregroundColor(badge.rarity.color.opacity(0.85))
             }
             .frame(height: ShowcaseSlotMetrics.medalBox, alignment: .bottom)
@@ -304,7 +304,7 @@ private struct PinnedBadgeSlotSkeleton: View {
             }
 
             Text("MOVING")
-                .font(.system(size: 10, weight: .black, design: .rounded))
+                .madFont(size: 11, weight: .black, design: .rounded)
                 .tracking(1.4)
                 .foregroundColor(badge.rarity.color.opacity(0.9))
             Spacer(minLength: 0)
@@ -342,8 +342,8 @@ private struct PinnedBadgeSlotEmpty: View {
 
                 if !compact {
                     Text("Add a medal")
-                        .font(.system(size: 11, weight: .semibold, design: .rounded))
-                        .foregroundColor(.white.opacity(0.4))
+                        .madFont(size: 11, weight: .semibold, design: .rounded)
+                        .foregroundColor(.white.opacity(0.6))
                     Spacer(minLength: 0)
                 }
             }

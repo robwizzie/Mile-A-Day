@@ -32,9 +32,9 @@ struct OwnRecentWorkoutsCard: View {
                 Spacer()
                 HStack(spacing: 3) {
                     Text("See all")
-                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                        .madFont(size: 12, weight: .bold, design: .rounded)
                     Image(systemName: "chevron.right")
-                        .font(.system(size: 10, weight: .bold))
+                        .madFont(size: 10, weight: .bold, maxScale: 1.5)
                         .accessibilityHidden(true)
                 }
                 .foregroundColor(MADTheme.Colors.madRed)
@@ -51,7 +51,7 @@ struct OwnRecentWorkoutsCard: View {
             if healthManager.hasLoadedRecentWorkoutsOnce {
                 // A successful query genuinely returned nothing.
                 Text("No workouts yet. Your walks and runs will show up here.")
-                    .font(.system(size: 13, weight: .medium, design: .rounded))
+                    .madFont(size: 13, weight: .medium, design: .rounded)
                     .foregroundColor(.secondary)
             } else {
                 // Not loaded yet (or a locked-device query is still retrying):
@@ -59,7 +59,7 @@ struct OwnRecentWorkoutsCard: View {
                 HStack(spacing: 8) {
                     ProgressView().controlSize(.small)
                     Text("Loading workouts…")
-                        .font(.system(size: 13, weight: .medium, design: .rounded))
+                        .madFont(size: 13, weight: .medium, design: .rounded)
                         .foregroundColor(.secondary)
                 }
             }

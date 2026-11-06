@@ -93,7 +93,7 @@ struct EditProfileView: View {
                         // Error
                         if let error = saveError {
                             Text(error)
-                                .font(MADTheme.Typography.caption)
+                                .madFont(size: 12, design: .rounded)
                                 .foregroundColor(MADTheme.Colors.error)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .padding(.horizontal, MADTheme.Spacing.md)
@@ -193,7 +193,7 @@ struct EditProfileView: View {
             .buttonStyle(.plain)
 
             Text("Change Photo")
-                .font(.system(size: 13, weight: .bold, design: .rounded))
+                .madFont(size: 13, weight: .bold, design: .rounded)
                 .foregroundColor(MADTheme.Colors.madRed)
         }
         .frame(maxWidth: .infinity)
@@ -243,7 +243,7 @@ struct EditProfileView: View {
 
             HStack {
                 Text(hasBannerPhoto ? "Your photo, cropped to fit." : "Pick a color, or use a photo from your library.")
-                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .madFont(size: 11, weight: .medium, design: .rounded)
                     .foregroundColor(.white.opacity(0.45))
                 Spacer(minLength: 8)
                 if hasBannerPhoto {
@@ -251,7 +251,7 @@ struct EditProfileView: View {
                         bannerImage = nil
                         removeBanner = true
                     }
-                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .madFont(size: 12, weight: .bold, design: .rounded)
                     .foregroundColor(MADTheme.Colors.madRed)
                 }
             }
@@ -308,7 +308,7 @@ struct EditProfileView: View {
     /// Section label in the app's editor style (caps, dimmed, tracked).
     private func sectionLabel(_ text: String) -> some View {
         Text(text)
-            .font(.system(size: 11, weight: .heavy, design: .rounded))
+            .madFont(size: 11, weight: .heavy, design: .rounded)
             .tracking(1.2)
             .foregroundColor(.white.opacity(0.45))
     }
@@ -327,15 +327,15 @@ struct EditProfileView: View {
             sectionLabel("NAME")
 
             HStack(spacing: MADTheme.Spacing.md) {
-                TextField("", text: $firstName, prompt: Text("First name").foregroundColor(.white.opacity(0.35)))
-                    .font(.system(size: 15, weight: .medium, design: .rounded))
+                TextField("", text: $firstName, prompt: Text("First name").foregroundColor(.white.opacity(0.6)))
+                    .madFont(size: 15, weight: .medium, design: .rounded)
                     .foregroundColor(.white)
                     .textFieldStyle(.plain)
                     .padding(MADTheme.Spacing.md)
                     .background(fieldBackground())
 
-                TextField("", text: $lastName, prompt: Text("Last name").foregroundColor(.white.opacity(0.35)))
-                    .font(.system(size: 15, weight: .medium, design: .rounded))
+                TextField("", text: $lastName, prompt: Text("Last name").foregroundColor(.white.opacity(0.6)))
+                    .madFont(size: 15, weight: .medium, design: .rounded)
                     .foregroundColor(.white)
                     .textFieldStyle(.plain)
                     .padding(MADTheme.Spacing.md)
@@ -357,11 +357,11 @@ struct EditProfileView: View {
 
             HStack(spacing: 4) {
                 Text("@")
-                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                    .madFont(size: 15, weight: .bold, design: .rounded)
                     .foregroundColor(.white.opacity(0.45))
 
-                TextField("", text: $username, prompt: Text("username").foregroundColor(.white.opacity(0.35)))
-                    .font(.system(size: 15, weight: .medium, design: .rounded))
+                TextField("", text: $username, prompt: Text("username").foregroundColor(.white.opacity(0.6)))
+                    .madFont(size: 15, weight: .medium, design: .rounded)
                     .foregroundColor(.white)
                     .textFieldStyle(.plain)
                     .autocapitalization(.none)
@@ -376,10 +376,10 @@ struct EditProfileView: View {
             if !usernameValidationMessage.isEmpty {
                 HStack(spacing: 5) {
                     Image(systemName: usernameIcon)
-                        .font(.system(size: 12, weight: .bold))
+                        .madFont(size: 12, weight: .bold, maxScale: 1.5)
                         .foregroundColor(usernameColor)
                     Text(usernameValidationMessage)
-                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .madFont(size: 12, weight: .semibold, design: .rounded)
                         .foregroundColor(usernameColor)
                 }
             }
@@ -400,10 +400,10 @@ struct EditProfileView: View {
             TextField(
                 "",
                 text: $bio,
-                prompt: Text("Tell others about yourself…").foregroundColor(.white.opacity(0.35)),
+                prompt: Text("Tell others about yourself…").foregroundColor(.white.opacity(0.6)),
                 axis: .vertical
             )
-            .font(.system(size: 15, weight: .medium, design: .rounded))
+            .madFont(size: 15, weight: .medium, design: .rounded)
             .foregroundColor(.white)
             .textFieldStyle(.plain)
             .lineLimit(3...6)
@@ -411,7 +411,7 @@ struct EditProfileView: View {
             .background(fieldBackground())
 
             Text("\(bio.count)/150")
-                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                .madFont(size: 11, weight: .semibold, design: .rounded)
                 .foregroundColor(bio.count > 150 ? MADTheme.Colors.error : .white.opacity(0.4))
                 .frame(maxWidth: .infinity, alignment: .trailing)
         }

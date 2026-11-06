@@ -31,9 +31,9 @@ struct StreakFlameChip: View {
         if streak > 0 {
             HStack(spacing: 2) {
                 Image(systemName: "flame.fill")
-                    .font(.system(size: glyphSize, weight: .bold))
+                    .madFont(size: glyphSize, weight: .bold, maxScale: 1.5)
                 Text("\(streak)")
-                    .font(.system(size: numberSize, weight: .heavy, design: .rounded))
+                    .madFont(size: numberSize, weight: .heavy, design: .rounded)
                     // Monospaced so a streak ticking 99 → 100 doesn't shuffle
                     // the name beside it.
                     .monospacedDigit()

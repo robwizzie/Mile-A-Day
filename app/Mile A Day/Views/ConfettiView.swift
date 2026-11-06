@@ -12,6 +12,9 @@ struct ConfettiView: View {
     }
     
     var body: some View {
+        // The window's size, not the screen's: on a resizable window (iPhone
+        // Duo's inner display, Split View) the two differ.
+        GeometryReader { geometry in
         ZStack {
             ForEach(particles) { particle in
                 Circle()
@@ -23,7 +26,7 @@ struct ConfettiView: View {
         }
         .onChange(of: isShowing) { oldValue, newValue in
             if newValue {
-                generateParticles()
+                generateParticles(in: geometry.size)
                 
                 // Hide confetti after duration
                 DispatchQueue.main.asyncAfter(deadline: .now() + duration) {
@@ -35,24 +38,25 @@ struct ConfettiView: View {
                 particles = []
             }
         }
+        }
     }
     
-    private func generateParticles() {
+    private func generateParticles(in size: CGSize) {
         particles = []
         
         let colors: [Color] = [.red, .blue, .green, .yellow, .purple, .orange]
         
         for _ in 0..<100 {
-            let randomX = CGFloat.random(in: 0...UIScreen.main.bounds.width)
+            let randomX = CGFloat.random(in: 0...max(size.width, 1))
             let randomY = CGFloat.random(in: -50...0)
-            let size = CGFloat.random(in: 5...12)
+            let dotSize = CGFloat.random(in: 5...12)
             
             var particle = Particle(
                 position: CGPoint(x: randomX, y: randomY),
                 finalPosition: CGPoint(x: randomX + CGFloat.random(in: -100...100),
-                                      y: UIScreen.main.bounds.height + size),
+                                      y: size.height + dotSize),
                 color: colors.randomElement() ?? .red,
-                size: size
+                size: dotSize
             )
             
             withAnimation(.easeOut(duration: Double.random(in: 1...duration))) {

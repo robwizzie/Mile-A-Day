@@ -129,7 +129,7 @@ struct UserProfileDetailView: View {
 
                         if !isCurrentUser(), let mutualCount, mutualCount > 0 {
                             Text("\(mutualCount) mutual friend\(mutualCount == 1 ? "" : "s")")
-                                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                                .madFont(size: 12, weight: .semibold, design: .rounded)
                                 .foregroundColor(.white.opacity(0.55))
                         }
 
@@ -183,6 +183,7 @@ struct UserProfileDetailView: View {
                 await refreshProfileData()
             }
         }
+        .madTypeCap(.madCardCap)
         // Empty: the identity block right under the banner already says
         // "@username" in big type; a nav title repeated it.
         .navigationTitle("")
@@ -338,7 +339,7 @@ struct UserProfileDetailView: View {
                     )
                 if isClose {
                     Image(systemName: "star.fill")
-                        .font(.system(size: 8, weight: .bold))
+                        .madFont(size: 8, weight: .bold, maxScale: 1.5)
                         .foregroundColor(.yellow)
                         .offset(x: -6, y: 5)
                 }
@@ -385,9 +386,9 @@ struct UserProfileDetailView: View {
                         .tint(tint)
                 } else {
                     Image(systemName: icon)
-                        .font(.system(size: 11, weight: .bold))
+                        .madFont(size: 11, weight: .bold, maxScale: 1.5)
                     Text(title)
-                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                        .madFont(size: 12, weight: .bold, design: .rounded)
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
                 }
@@ -626,9 +627,9 @@ struct UserProfileDetailView: View {
                 } label: {
                     HStack(spacing: 6) {
                         Text("See all workouts")
-                            .font(.system(size: 13, weight: .bold, design: .rounded))
+                            .madFont(size: 13, weight: .bold, design: .rounded)
                         Image(systemName: "chevron.right")
-                            .font(.system(size: 11, weight: .bold))
+                            .madFont(size: 11, weight: .bold, maxScale: 1.5)
                             .accessibilityHidden(true)
                     }
                     .foregroundColor(MADTheme.Colors.madRed)
@@ -708,10 +709,10 @@ struct UserProfileDetailView: View {
             // failure) — say so instead of spinning forever.
             VStack(spacing: MADTheme.Spacing.md) {
                 Image(systemName: "trophy.fill")
-                    .font(.system(size: 28))
+                    .madFont(size: 28, maxScale: 1.5)
                     .foregroundColor(.white.opacity(0.25))
                 Text("Couldn't load badges")
-                    .font(.system(size: 13, weight: .medium, design: .rounded))
+                    .madFont(size: 13, weight: .medium, design: .rounded)
                     .foregroundColor(.white.opacity(0.5))
             }
             .frame(maxWidth: .infinity)
@@ -720,7 +721,7 @@ struct UserProfileDetailView: View {
             VStack(spacing: MADTheme.Spacing.md) {
                 ProgressView().tint(MADTheme.Colors.madRed)
                 Text("Loading badges…")
-                    .font(.system(size: 13, weight: .medium, design: .rounded))
+                    .madFont(size: 13, weight: .medium, design: .rounded)
                     .foregroundColor(.white.opacity(0.5))
             }
             .frame(maxWidth: .infinity)
@@ -823,10 +824,11 @@ struct UserProfileDetailView: View {
         } label: {
             HStack(spacing: 5) {
                 Image(systemName: "trophy.fill")
-                    .font(.system(size: 11, weight: .bold))
+                    .madFont(size: 11, weight: .bold, maxScale: 1.5)
                 Text("Compete")
-                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .madFont(size: 12, weight: .bold, design: .rounded)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.75)
             }
             .foregroundColor(Color.yellow)
             .padding(.horizontal, 14)
@@ -896,10 +898,11 @@ struct UserProfileDetailView: View {
                                 .tint(.orange)
                         } else {
                             Image(systemName: "bell.and.waves.left.and.right.fill")
-                                .font(.system(size: 11, weight: .bold))
+                                .madFont(size: 11, weight: .bold, maxScale: 1.5)
                             Text("Nudge again")
-                                .font(.system(size: 12, weight: .bold, design: .rounded))
+                                .madFont(size: 12, weight: .bold, design: .rounded)
                                 .lineLimit(1)
+                                .minimumScaleFactor(0.75)
                         }
                     }
                     .foregroundColor(.orange.opacity(0.75))
@@ -922,9 +925,9 @@ struct UserProfileDetailView: View {
             } else if status.nudgedToday {
                 HStack(spacing: 5) {
                     Image(systemName: "bell.slash.fill")
-                        .font(.system(size: 11, weight: .bold))
+                        .madFont(size: 11, weight: .bold, maxScale: 1.5)
                     Text("Nudged")
-                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                        .madFont(size: 12, weight: .bold, design: .rounded)
                 }
                 .foregroundColor(.white.opacity(0.35))
                 .padding(.horizontal, 14)
@@ -951,10 +954,11 @@ struct UserProfileDetailView: View {
                                 .tint(.orange)
                         } else {
                             Image(systemName: "bell.badge.fill")
-                                .font(.system(size: 11, weight: .bold))
+                                .madFont(size: 11, weight: .bold, maxScale: 1.5)
                             Text("Nudge")
-                                .font(.system(size: 12, weight: .bold, design: .rounded))
+                                .madFont(size: 12, weight: .bold, design: .rounded)
                                 .lineLimit(1)
+                                .minimumScaleFactor(0.75)
                         }
                     }
                     .foregroundColor(Color.orange)
@@ -1034,14 +1038,14 @@ struct UserProfileDetailView: View {
     private var privateAccountView: some View {
         VStack(spacing: 6) {
             Image(systemName: "lock.fill")
-                .font(.system(size: 22, weight: .semibold))
+                .madFont(size: 22, weight: .semibold, maxScale: 1.5)
                 .foregroundColor(.white.opacity(0.45))
                 .accessibilityHidden(true)
             Text("Private account")
-                .font(.system(size: 16, weight: .bold, design: .rounded))
+                .madFont(size: 16, weight: .bold, design: .rounded)
                 .foregroundColor(.white)
             Text("Only their username and profile photo are visible.")
-                .font(.system(size: 13, weight: .medium, design: .rounded))
+                .madFont(size: 13, weight: .medium, design: .rounded)
                 .foregroundColor(.white.opacity(0.6))
                 .multilineTextAlignment(.center)
         }
@@ -1210,10 +1214,10 @@ struct FriendAllWorkoutsView: View {
                         .tint(MADTheme.Colors.madRed)
                 } else {
                     Image(systemName: "arrow.down.circle.fill")
-                        .font(.system(size: 18, weight: .semibold))
+                        .madFont(size: 18, weight: .semibold, maxScale: 1.5)
                         .accessibilityHidden(true)
                     Text("Load More Workouts")
-                        .font(MADTheme.Typography.headline)
+                        .madFont(size: 17, weight: .semibold, design: .rounded)
                 }
             }
             .foregroundColor(MADTheme.Colors.madRed)
@@ -1405,9 +1409,9 @@ struct FriendWorkoutDetailSheet: View {
         } label: {
             HStack(spacing: 4) {
                 Image(systemName: showRealMap ? "paintpalette.fill" : "map.fill")
-                    .font(.system(size: 11, weight: .bold))
+                    .madFont(size: 11, weight: .bold, maxScale: 1.5)
                 Text(showRealMap ? "Art" : "Map")
-                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .madFont(size: 12, weight: .bold, design: .rounded)
             }
             .foregroundColor(.white.opacity(0.8))
             .padding(.horizontal, 10)
@@ -1607,19 +1611,19 @@ struct FriendTodayChallengeRow: View {
             // gradient disc; the card is the one rimless profile surface.
             HStack(spacing: 12) {
                 Image(systemName: iconName)
-                    .font(.system(size: 18, weight: .bold))
+                    .madFont(size: 18, weight: .bold, maxScale: 1.5)
                     .foregroundColor(iconGradient.first ?? .white)
                     .frame(width: 24)
                     .accessibilityHidden(true)
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Today's challenge")
-                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .madFont(size: 12, weight: .semibold, design: .rounded)
                         .foregroundColor(.white.opacity(0.55))
                     Text(displayTitle ?? "Today's challenge")
-                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .madFont(size: 15, weight: .bold, design: .rounded)
                         .foregroundColor(.white)
-                        .lineLimit(1)
+                        .madNameLines()
                 }
 
                 Spacer(minLength: 4)
@@ -1627,10 +1631,10 @@ struct FriendTodayChallengeRow: View {
                 // Status on the right, as words in colour.
                 HStack(spacing: 4) {
                     Image(systemName: today.completed ? "checkmark" : "hourglass")
-                        .font(.system(size: 11, weight: .bold))
+                        .madFont(size: 11, weight: .bold, maxScale: 1.5)
                         .accessibilityHidden(true)
                     Text(today.completed ? "Done" : "Not yet")
-                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                        .madFont(size: 12, weight: .bold, design: .rounded)
                         .lineLimit(1)
                         .fixedSize()
                 }
@@ -1703,13 +1707,13 @@ private struct FriendHeadToHeadStrip: View {
 
                 VStack(spacing: 3) {
                     Text("VS")
-                        .font(.system(size: 11, weight: .black, design: .rounded))
+                        .madFont(size: 11, weight: .black, design: .rounded)
                         .foregroundColor(.white.opacity(0.45))
                     Image(systemName: tied ? "equal.circle.fill" : "arrowtriangle.up.circle.fill")
-                        .font(.system(size: 16, weight: .bold))
+                        .madFont(size: 16, weight: .bold, maxScale: 1.5)
                         .foregroundColor(statusColor)
                 }
-                .frame(width: 44)
+                .frame(minWidth: 44)
 
                 side(
                     name: rivalName,
@@ -1721,7 +1725,7 @@ private struct FriendHeadToHeadStrip: View {
             }
 
             Text(statusText)
-                .font(.system(size: 11, weight: .heavy, design: .rounded))
+                .madFont(size: 11, weight: .heavy, design: .rounded)
                 .foregroundColor(statusColor)
                 .lineLimit(1)
                 .minimumScaleFactor(0.82)
@@ -1729,9 +1733,10 @@ private struct FriendHeadToHeadStrip: View {
             // Live standings, not a verdict — the duel is a whole-day total
             // the server scores after midnight.
             Text("Winner decided at day's end")
-                .font(.system(size: 9, weight: .semibold, design: .rounded))
+                .madFont(size: 11, weight: .semibold, design: .rounded)
                 .foregroundColor(.white.opacity(0.55))
                 .lineLimit(1)
+                .minimumScaleFactor(0.75)
         }
         .padding(.vertical, 10)
         .padding(.horizontal, 12)
@@ -1751,11 +1756,11 @@ private struct FriendHeadToHeadStrip: View {
                 .overlay(Circle().strokeBorder(highlight ? color : .clear, lineWidth: 2))
             VStack(alignment: .leading, spacing: 1) {
                 Text(name)
-                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                    .madFont(size: 11, weight: .bold, design: .rounded, maxScale: 1.3)
                     .foregroundColor(.white)
-                    .lineLimit(1)
+                    .madNameLines()
                 Text("\(formatMiles(miles)) mi")
-                    .font(.system(size: 13, weight: .heavy, design: .rounded))
+                    .madFont(size: 13, weight: .heavy, design: .rounded)
                     .foregroundColor(highlight ? color : .white.opacity(0.72))
                     .monospacedDigit()
             }
@@ -1860,7 +1865,7 @@ struct Last7DaysChart: View {
                 ProfileCardLabel(text: "Last 7 days")
                 Spacer()
                 Text(String(format: "%.1f mi total", weekTotal))
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .madFont(size: 12, weight: .semibold, design: .rounded)
                     .foregroundColor(.white.opacity(0.55))
             }
 
@@ -1913,7 +1918,7 @@ struct Last7DaysChart: View {
                 // Always occupies its slot (hidden when absent) so bars keep a
                 // common baseline.
                 Image(systemName: SavedDayStyle.icon(for: savedBy?.kind ?? "streak_save"))
-                    .font(.system(size: 9, weight: .bold))
+                    .madFont(size: 9, weight: .bold, maxScale: 1.5)
                     .foregroundColor(SavedDayStyle.tint)
                     .opacity(savedBy != nil ? 1 : 0)
                     .frame(height: 10)
@@ -1948,13 +1953,15 @@ struct Last7DaysChart: View {
                 // made it impossible to tell which bar was which day.
                 VStack(spacing: 0) {
                     Text(weekdayAbbrev(for: day))
-                        .font(.system(size: 9, weight: .heavy, design: .rounded))
+                        .madFont(size: 11, weight: .heavy, design: .rounded, maxScale: 1.3)
                     Text(dayNumber(for: day))
-                        .font(.system(size: 9, weight: .bold, design: .rounded))
+                        .madFont(size: 11, weight: .bold, design: .rounded, maxScale: 1.3)
                         .opacity(0.75)
                 }
-                .foregroundColor(isToday || isSelected ? .white : .white.opacity(0.45))
-                .frame(width: 30, height: 30)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+                .foregroundColor(isToday || isSelected ? .white : .white.opacity(0.6))
+                .frame(minWidth: 30, minHeight: 30)
                 .background(
                     Capsule()
                         .fill(
@@ -1994,11 +2001,11 @@ struct Last7DaysChart: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text(dateLabel)
-                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .madFont(size: 12, weight: .bold, design: .rounded)
                     .foregroundColor(.white.opacity(0.85))
                 Spacer()
                 Text(String(format: "%.2f mi", total))
-                    .font(.system(size: 12, weight: .heavy, design: .rounded))
+                    .madFont(size: 12, weight: .heavy, design: .rounded)
                     .foregroundColor(
                         covered.contains(day)
                             ? SavedDayStyle.tint
@@ -2011,10 +2018,10 @@ struct Last7DaysChart: View {
             if let savedBy = covered.day(for: day) {
                 HStack(alignment: .top, spacing: 6) {
                     Image(systemName: SavedDayStyle.icon(for: savedBy.kind))
-                        .font(.system(size: 10, weight: .bold))
+                        .madFont(size: 10, weight: .bold, maxScale: 1.5)
                         .foregroundColor(SavedDayStyle.tint)
                     Text(SavedDayStyle.explanation(for: savedBy, isSelf: isSelf))
-                        .font(.system(size: 11, weight: .semibold, design: .rounded))
+                        .madFont(size: 11, weight: .semibold, design: .rounded)
                         .foregroundColor(SavedDayStyle.tint)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -2023,14 +2030,14 @@ struct Last7DaysChart: View {
 
             if dayWorkouts.isEmpty && total == 0 {
                 Text(covered.contains(day) ? "No miles logged — the streak held anyway" : "No miles logged")
-                    .font(.system(size: 11, weight: .medium, design: .rounded))
-                    .foregroundColor(.white.opacity(0.4))
+                    .madFont(size: 11, weight: .medium, design: .rounded)
+                    .foregroundColor(.white.opacity(0.6))
             } else if dayWorkouts.isEmpty {
                 // Day is older than the capped recent-workouts list — the
                 // total above is still exact (server series).
                 Text("Workout details unavailable for this day")
-                    .font(.system(size: 11, weight: .medium, design: .rounded))
-                    .foregroundColor(.white.opacity(0.4))
+                    .madFont(size: 11, weight: .medium, design: .rounded)
+                    .foregroundColor(.white.opacity(0.6))
             } else {
                 ForEach(dayWorkouts) { workout in
                     HStack(spacing: 8) {
@@ -2042,11 +2049,11 @@ struct Last7DaysChart: View {
                                 Circle().fill(workoutTypeColor(workout.workoutType).opacity(0.15))
                             )
                         Text(workout.workoutType.capitalized)
-                            .font(.system(size: 12, weight: .semibold, design: .rounded))
+                            .madFont(size: 12, weight: .semibold, design: .rounded, maxScale: 1.3)
                             .foregroundColor(.white.opacity(0.8))
                         Spacer()
                         Text(String(format: "%.2f mi", workout.distance))
-                            .font(.system(size: 12, weight: .bold, design: .rounded))
+                            .madFont(size: 12, weight: .bold, design: .rounded)
                             .foregroundColor(.white.opacity(0.85))
                     }
                 }

@@ -96,6 +96,7 @@ struct CompetitionDetailView: View {
                 .scrollBounceBehavior(.basedOnSize)
             }
         }
+        .madTypeCap(.madCardCap)
         .navigationTitle(competition.competition_name)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { toolbarContent }
@@ -158,14 +159,14 @@ struct CompetitionDetailView: View {
             } label: {
                 HStack(spacing: 8) {
                     Image(systemName: "info.circle")
-                        .font(.system(size: 12, weight: .heavy))
+                        .madFont(size: 12, weight: .heavy, maxScale: 1.5)
                         .foregroundColor(.white.opacity(0.45))
                     Text("Timeline & Rules")
-                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                        .madFont(size: 12, weight: .bold, design: .rounded)
                         .foregroundColor(.white.opacity(0.55))
                     Spacer()
                     Image(systemName: "chevron.down")
-                        .font(.system(size: 10, weight: .heavy))
+                        .madFont(size: 10, weight: .heavy, maxScale: 1.5)
                         .foregroundColor(.white.opacity(0.35))
                         .rotationEffect(.degrees(showCompDetails ? 180 : 0))
                 }
@@ -203,10 +204,12 @@ struct CompetitionDetailView: View {
         VStack(spacing: 14) {
             HStack(spacing: 8) {
                 Image(systemName: "calendar")
-                    .font(.system(size: 12, weight: .heavy))
+                    .madFont(size: 12, weight: .heavy, maxScale: 1.5)
                     .foregroundColor(.white.opacity(0.55))
                 Text("TIMELINE")
-                    .font(.system(size: 11, weight: .black, design: .rounded))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+                    .madFont(size: 11, weight: .black, design: .rounded)
                     .tracking(1.4)
                     .foregroundColor(.white.opacity(0.55))
                 Spacer()
@@ -298,16 +301,18 @@ struct CompetitionDetailView: View {
     private func timelineFact(label: String, value: String, icon: String, accent: Color) -> some View {
         HStack(spacing: 8) {
             Image(systemName: icon)
-                .font(.system(size: 11, weight: .bold))
+                .madFont(size: 11, weight: .bold, maxScale: 1.5)
                 .foregroundColor(accent)
                 .frame(width: 14)
             VStack(alignment: .leading, spacing: 2) {
                 Text(label.uppercased())
-                    .font(.system(size: 9, weight: .heavy, design: .rounded))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+                    .madFont(size: 11, weight: .heavy, design: .rounded)
                     .tracking(1.0)
                     .foregroundColor(.white.opacity(0.45))
                 Text(value)
-                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .madFont(size: 13, weight: .bold, design: .rounded)
                     .foregroundColor(.white)
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
@@ -324,10 +329,12 @@ struct CompetitionDetailView: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
                 Image(systemName: "list.bullet.rectangle")
-                    .font(.system(size: 12, weight: .heavy))
+                    .madFont(size: 12, weight: .heavy, maxScale: 1.5)
                     .foregroundColor(.white.opacity(0.55))
                 Text("RULES")
-                    .font(.system(size: 11, weight: .black, design: .rounded))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+                    .madFont(size: 11, weight: .black, design: .rounded)
                     .tracking(1.4)
                     .foregroundColor(.white.opacity(0.55))
                 Spacer()
@@ -346,10 +353,12 @@ struct CompetitionDetailView: View {
             if !competition.workouts.isEmpty {
                 HStack(spacing: 8) {
                     Image(systemName: "figure.run")
-                        .font(.system(size: 11, weight: .bold))
+                        .madFont(size: 11, weight: .bold, maxScale: 1.5)
                         .foregroundColor(.white.opacity(0.5))
                     Text("ACTIVITIES")
-                        .font(.system(size: 10, weight: .heavy, design: .rounded))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.6)
+                        .madFont(size: 11, weight: .heavy, design: .rounded)
                         .tracking(1.2)
                         .foregroundColor(.white.opacity(0.5))
                     Spacer()
@@ -357,9 +366,9 @@ struct CompetitionDetailView: View {
                         ForEach(competition.workouts, id: \.self) { activity in
                             HStack(spacing: 3) {
                                 Image(systemName: activity.icon)
-                                    .font(.system(size: 9))
+                                    .madFont(size: 9, maxScale: 1.5)
                                 Text(activity.displayName)
-                                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                                    .madFont(size: 11, weight: .semibold, design: .rounded)
                             }
                             .foregroundColor(activity.color)
                             .padding(.horizontal, 7)
@@ -500,18 +509,19 @@ struct RuleTile: View {
                     .fill(tile.tint == .white ? Color.white.opacity(0.12) : tile.tint.opacity(0.2))
                     .frame(width: 32, height: 32)
                 Image(systemName: tile.icon)
-                    .font(.system(size: 13, weight: .bold))
+                    .madFont(size: 13, weight: .bold, maxScale: 1.15)
                     .foregroundColor(tile.tint == .white ? .white.opacity(0.85) : tile.tint)
             }
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(tile.label.uppercased())
-                    .font(.system(size: 9, weight: .heavy, design: .rounded))
+                    .madFont(size: 11, weight: .heavy, design: .rounded)
                     .tracking(1.0)
                     .foregroundColor(.white.opacity(0.5))
                     .lineLimit(1)
+                    .minimumScaleFactor(0.75)
                 Text(tile.value)
-                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                    .madFont(size: 14, weight: .bold, design: .rounded)
                     .foregroundColor(.white)
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
@@ -552,15 +562,16 @@ struct TimelineCallout: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(primary)
-                    .font(.system(size: 17, weight: .bold, design: .rounded))
+                    .madFont(size: 17, weight: .bold, design: .rounded)
                     .foregroundColor(.white)
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
                 if let secondary {
                     Text(secondary)
-                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .madFont(size: 12, weight: .medium, design: .rounded)
                         .foregroundColor(.white.opacity(0.55))
                         .lineLimit(1)
+                        .minimumScaleFactor(0.75)
                 }
             }
 

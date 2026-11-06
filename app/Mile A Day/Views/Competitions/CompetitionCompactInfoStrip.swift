@@ -35,7 +35,7 @@ struct CompetitionCompactInfoStrip: View {
                 .accessibilityHidden(true)
 
             Text(competition.status.displayName.uppercased())
-                .font(.system(size: 10, weight: .heavy, design: .rounded))
+                .madFont(size: 11, weight: .heavy, design: .rounded, maxScale: 1.3)
                 .tracking(1.1)
                 .foregroundColor(competition.status.color)
                 .lineLimit(1)
@@ -49,7 +49,7 @@ struct CompetitionCompactInfoStrip: View {
             // The format. Allowed to shrink and truncate — it is reference,
             // and the countdown beside it is not.
             Text(facts.joined(separator: " · "))
-                .font(CompeteDesign.detail)
+                .competeFont(CompeteDesign.detail)
                 .foregroundColor(CompeteDesign.inkMuted)
                 .lineLimit(1)
                 .truncationMode(.tail)
@@ -57,7 +57,7 @@ struct CompetitionCompactInfoStrip: View {
 
             if let remaining = remainingTimeString {
                 Text(remaining)
-                    .font(.system(size: 12, weight: .heavy, design: .rounded))
+                    .madFont(size: 12, weight: .heavy, design: .rounded)
                     .foregroundColor(accent)
                     .monospacedDigit()
                     .lineLimit(1)

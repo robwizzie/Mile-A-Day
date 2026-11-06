@@ -100,11 +100,11 @@ struct SyncStatusBanner: View {
 
                     VStack(alignment: .leading, spacing: 5) {
                         Text(title(for: progress))
-                            .font(.subheadline)
+                            .madFont(size: 15, maxScale: 1.3)
                             .fontWeight(.semibold)
                             .foregroundColor(.primary)
                             .lineLimit(1)
-                            .minimumScaleFactor(0.85)
+                            .minimumScaleFactor(0.7)
                             .frame(maxWidth: .infinity, alignment: .leading)
 
                         if progress.totalToUpload > 0, !progress.isComplete {
@@ -115,7 +115,7 @@ struct SyncStatusBanner: View {
 
                         if let subtitle = subtitle(for: progress) {
                             Text(subtitle)
-                                .font(.caption)
+                                .madFont(size: 12, maxScale: 1.3)
                                 .foregroundColor(.secondary)
                                 .lineLimit(2)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -140,11 +140,11 @@ struct SyncStatusBanner: View {
                 switch progress.stage {
                 case .done:
                     Image(systemName: "checkmark.circle.fill")
-                        .font(.title3)
+                        .madFont(size: 20, maxScale: 1.3)
                         .foregroundColor(.green)
                 case .failed:
                     Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.title3)
+                        .madFont(size: 20, maxScale: 1.3)
                         .foregroundColor(.orange)
                 default:
                     ProgressView()
@@ -155,11 +155,11 @@ struct SyncStatusBanner: View {
 
             VStack(alignment: .leading, spacing: 5) {
                 Text(recalibrationTitle(progress))
-                    .font(.subheadline)
+                    .madFont(size: 15, maxScale: 1.3)
                     .fontWeight(.semibold)
                     .foregroundColor(.primary)
                     .lineLimit(1)
-                    .minimumScaleFactor(0.85)
+                    .minimumScaleFactor(0.7)
                     .frame(maxWidth: .infinity, alignment: .leading)
 
                 if progress.isRunning {
@@ -170,7 +170,7 @@ struct SyncStatusBanner: View {
 
                 if let subtitle = recalibrationSubtitle(progress) {
                     Text(subtitle)
-                        .font(.caption)
+                        .madFont(size: 12, maxScale: 1.3)
                         .foregroundColor(.secondary)
                         .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
@@ -180,7 +180,7 @@ struct SyncStatusBanner: View {
 
             if progress.isRunning, progress.fraction > 0 {
                 Text(ProgressCalculator.formatWholePercent(Double(Int((progress.fraction * 100).rounded()))))
-                    .font(.caption)
+                    .madFont(size: 12, maxScale: 1.3)
                     .fontWeight(.semibold)
                     .foregroundColor(.secondary)
                     .monospacedDigit()
@@ -230,7 +230,7 @@ struct SyncStatusBanner: View {
                     if !syncService.retryFailedSync() { showDetail = true }
                 } label: {
                     Image(systemName: "arrow.clockwise")
-                        .font(.subheadline.weight(.semibold))
+                        .font(.system(size: 15, weight: .semibold))
                         .foregroundColor(MADTheme.Colors.madRed)
                         .frame(width: 34, height: 34)
                         .contentShape(Rectangle())
@@ -241,7 +241,7 @@ struct SyncStatusBanner: View {
             // A percentage, not "412/1284" jammed against a bar that already
             // shows the same thing — the exact counts live one tap away.
             Text(ProgressCalculator.formatWholePercent(Double(Int((progress.displayProgress * 100).rounded()))))
-                .font(.caption)
+                .madFont(size: 12, maxScale: 1.3)
                 .fontWeight(.semibold)
                 .foregroundColor(.secondary)
                 .monospacedDigit()
@@ -253,13 +253,13 @@ struct SyncStatusBanner: View {
         switch progress.phase {
         case .complete:
             Image(systemName: "checkmark.circle.fill")
-                .font(.title3)
+                .madFont(size: 20, maxScale: 1.3)
                 .foregroundColor(.green)
         case .error:
             Image(systemName: progress.failure == .healthNotAsked
                   ? "heart.text.square.fill"
                   : "exclamationmark.triangle.fill")
-                .font(.title3)
+                .madFont(size: 20, maxScale: 1.3)
                 .foregroundColor(.orange)
         default:
             ProgressView()

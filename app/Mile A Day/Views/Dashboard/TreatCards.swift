@@ -38,30 +38,30 @@ struct TreatSceneCard: View {
             VStack(spacing: 10) {
                 HStack(spacing: 6) {
                     Text(CalorieTreat.featureName)
-                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+                        .madFont(size: 13, weight: .semibold, design: .rounded)
                         .foregroundColor(.white.opacity(0.72))
                     Spacer()
                     Text(model.period.title)
-                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+                        .madFont(size: 13, weight: .semibold, design: .rounded)
                         .foregroundColor(.white.opacity(0.55))
                     Image(systemName: "chevron.right")
-                        .font(.system(size: 13, weight: .bold))
+                        .madFont(size: 13, weight: .bold, maxScale: 1.5)
                         .foregroundColor(.white.opacity(0.4))
                 }
 
                 HStack(alignment: .center, spacing: 8) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(TreatFormat.count(model.count))
-                            .font(.system(size: 40, weight: .black, design: .rounded))
+                            .madFont(size: 40, weight: .black, design: .rounded)
                             .monospacedDigit()
                             .foregroundColor(.white)
                             .contentTransition(.numericText())
                         Text(model.treat.unitName(count: model.count))
-                            .font(.system(size: 15, weight: .bold, design: .rounded))
+                            .madFont(size: 15, weight: .bold, design: .rounded)
                             .foregroundColor(.white.opacity(0.9))
                             .fixedSize(horizontal: false, vertical: true)
                         Text(TreatCopy.caption(model))
-                            .font(.system(size: 11, weight: .medium, design: .rounded))
+                            .madFont(size: 11, weight: .medium, design: .rounded)
                             .foregroundColor(.white.opacity(0.5))
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -108,24 +108,25 @@ struct TreatLineCard: View {
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(alignment: .firstTextBaseline, spacing: 5) {
                         Text(TreatFormat.count(model.count))
-                            .font(.system(size: 20, weight: .black, design: .rounded))
+                            .madFont(size: 20, weight: .black, design: .rounded)
                             .monospacedDigit()
                             .foregroundColor(.white)
                             .contentTransition(.numericText())
                         Text(model.treat.unitName(count: model.count))
-                            .font(.system(size: 15, weight: .bold, design: .rounded))
+                            .madFont(size: 15, weight: .bold, design: .rounded)
                             .foregroundColor(.white.opacity(0.9))
                             .lineLimit(1)
                             .minimumScaleFactor(0.8)
                     }
                     Text("\(CalorieTreat.featureName) · \(model.period.title.lowercased())")
-                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .madFont(size: 12, weight: .semibold, design: .rounded)
                         .foregroundColor(.white.opacity(0.5))
                         .lineLimit(1)
+                        .minimumScaleFactor(0.75)
                 }
                 Spacer(minLength: 4)
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 11, weight: .bold))
+                    .madFont(size: 11, weight: .bold, maxScale: 1.5)
                     .foregroundColor(.white.opacity(0.3))
                     .accessibilityHidden(true)
             }
@@ -165,7 +166,7 @@ struct ModernTreatsCard: View {
                         .background(Circle().fill(Color.pink.opacity(0.15)))
                     Spacer()
                     Text(model.period.title)
-                        .font(.system(size: 11, weight: .bold, design: .rounded))
+                        .madFont(size: 11, weight: .bold, design: .rounded, maxScale: 1.3)
                         .foregroundColor(.white.opacity(0.48))
                     Image(systemName: "chevron.right")
                         .font(.system(size: 10, weight: .bold))
@@ -173,22 +174,22 @@ struct ModernTreatsCard: View {
                 }
                 VStack(alignment: .leading, spacing: 2) {
                     Text(CalorieTreat.featureName)
-                        .font(.system(size: 11, weight: .bold, design: .rounded))
+                        .madFont(size: 11, weight: .bold, design: .rounded)
                         .foregroundColor(.white.opacity(0.48))
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
                         Text(TreatFormat.count(model.count))
-                            .font(.system(size: 23, weight: .black, design: .rounded))
+                            .madFont(size: 23, weight: .black, design: .rounded)
                             .monospacedDigit()
                             .foregroundColor(.white)
                             .contentTransition(.numericText())
                         Text(model.treat.unitName(count: model.count))
-                            .font(.system(size: 13, weight: .bold, design: .rounded))
+                            .madFont(size: 13, weight: .bold, design: .rounded)
                             .foregroundColor(.white.opacity(0.85))
                             .lineLimit(1)
                             .minimumScaleFactor(0.8)
                     }
                     Text(TreatCopy.caption(model))
-                        .font(.system(size: 11, weight: .semibold, design: .rounded))
+                        .madFont(size: 11, weight: .semibold, design: .rounded)
                         .foregroundColor(model.isEmpty ? .white.opacity(0.5) : .pink)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -235,7 +236,7 @@ struct TreatGlyphShelf: View {
             }
             if overflow > 0 {
                 Text("+\(overflow)")
-                    .font(.system(size: max(9, size * 0.5), weight: .heavy, design: .rounded))
+                    .madFont(size: max(9, size * 0.5), weight: .heavy, design: .rounded)
                     .foregroundColor(.white.opacity(0.7))
                     .frame(height: size)
                     .padding(.horizontal, 6)

@@ -136,9 +136,6 @@ struct MainTabView: View {
             .tag(4)
         }
         .tint(MADTheme.Colors.madRed)
-        .safeAreaInset(edge: .bottom) {
-            SyncStatusBanner()
-        }
         .overlay(alignment: .top) {
             // Foreground notification banner — floats above all tabs/nav bars.
             InAppNotificationBanner()
@@ -410,6 +407,12 @@ struct MainTabView: View {
             // Keep widget data in sync so the willPresent check has fresh data
             WidgetDataStore.save(todayMiles: newDistance, goal: userManager.currentUser.goalMiles)
         }
+
+            // Sync status floats above the tab bar for the same reason as the
+            // workout banner below, and above that banner when both show.
+            SyncStatusBanner()
+                .padding(.bottom, isTracking && selectedTab != 0 && activeWorkoutForBanner != nil ? 122 : 52)
+                .ignoresSafeArea(.keyboard, edges: .bottom)
 
             // Floating in-app workout banner — sits ABOVE the tab bar instead of
             // over it. (safeAreaInset on a TabView renders on top of the bar, so

@@ -30,7 +30,7 @@ extension CompetitionDetailView {
             if standings.isEmpty {
                 CompeteSurface {
                     Text("No one has joined yet.")
-                        .font(CompeteDesign.detail)
+                        .competeFont(CompeteDesign.detail)
                         .foregroundColor(CompeteDesign.inkFaint)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -144,16 +144,16 @@ extension CompetitionDetailView {
 
             VStack(spacing: 3) {
                 Text(intervalDateLabel)
-                    .font(MADTheme.Typography.headline)
+                    .madFont(size: 17, weight: .semibold, design: .rounded)
                     .foregroundColor(.white)
 
                 if let range = intervalRangeLabel {
                     Text(range)
-                        .font(MADTheme.Typography.caption)
+                        .madFont(size: 12, design: .rounded)
                         .foregroundColor(.white.opacity(0.5))
                 } else if !isToday {
                     Text(selectedIntervalDate.formatted(date: .abbreviated, time: .omitted))
-                        .font(MADTheme.Typography.caption)
+                        .madFont(size: 12, design: .rounded)
                         .foregroundColor(.white.opacity(0.5))
                 }
 
@@ -275,11 +275,11 @@ extension CompetitionDetailView {
             // Matches the standings row's rhythm: at 5pt the bar reads as an
             // underline on the name rather than as a measure of its own.
             VStack(alignment: .leading, spacing: 7) {
-                HStack(spacing: 5) {
+                MADInlineStack {
                     Text(user.displayName)
-                        .font(CompeteDesign.name)
+                        .competeFont(CompeteDesign.name)
                         .foregroundColor(CompeteDesign.ink)
-                        .lineLimit(1)
+                        .madNameLines()
                         .truncationMode(.tail)
                     if isCurrentUser { CompeteTag(text: "YOU", color: accent) }
                 }
@@ -294,23 +294,25 @@ extension CompetitionDetailView {
 
             VStack(alignment: .trailing, spacing: 1) {
                 Text(competition.options.formatQuantityWithUnit(distance))
-                    .font(CompeteDesign.score)
+                    .competeFont(CompeteDesign.score)
                     .foregroundColor(hitTarget ? MADTheme.Colors.success : CompeteDesign.ink)
                     .monospacedDigit()
                     .lineLimit(1)
 
                 if let goal, hitTarget, distance > goal {
                     Text("+\(competition.options.formatQuantity(distance - goal)) over")
-                        .font(.system(size: 10, weight: .semibold, design: .rounded))
+                        .madFont(size: 11, weight: .semibold, design: .rounded)
                         .foregroundColor(MADTheme.Colors.success.opacity(0.75))
                         .monospacedDigit()
                         .lineLimit(1)
+                        .minimumScaleFactor(0.75)
                 } else if goal != nil, !hitTarget {
                     Text("of \(competition.options.goalFormatted)")
-                        .font(.system(size: 10, weight: .medium, design: .rounded))
+                        .madFont(size: 11, weight: .medium, design: .rounded)
                         .foregroundColor(CompeteDesign.inkFaint)
                         .monospacedDigit()
                         .lineLimit(1)
+                        .minimumScaleFactor(0.75)
                 }
             }
             .fixedSize()
@@ -409,7 +411,7 @@ extension CompetitionDetailView {
         return VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
             HStack {
                 Text("Race Progress")
-                    .font(CompeteDesign.eyebrow)
+                    .competeFont(CompeteDesign.eyebrow)
                     .tracking(CompeteDesign.eyebrowTracking)
                     .textCase(.uppercase)
                     .foregroundColor(CompeteDesign.inkFaint)
@@ -419,11 +421,11 @@ extension CompetitionDetailView {
                 // Finish line indicator
                 HStack(spacing: 4) {
                     Image(systemName: "flag.fill")
-                        .font(.system(size: 11))
+                        .madFont(size: 11, maxScale: 1.5)
                         .foregroundColor(.white.opacity(0.4))
                     Text("\(competition.options.goalFormatted) \(competition.options.unit.shortDisplayName)")
-                        .font(.system(size: 12, weight: .medium, design: .rounded))
-                        .foregroundColor(.white.opacity(0.4))
+                        .madFont(size: 12, weight: .medium, design: .rounded)
+                        .foregroundColor(.white.opacity(0.6))
                 }
             }
             .padding(.horizontal, MADTheme.Spacing.sm)
@@ -449,23 +451,23 @@ extension CompetitionDetailView {
                                     .frame(width: 32, height: 32)
 
                                 Text("\(index + 1)")
-                                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                                    .madFont(size: 13, weight: .bold, design: .rounded)
                                     .foregroundColor(index == 0 ? gradientColors.first ?? .white : .white.opacity(0.6))
                             }
 
                             Text(user.displayName)
-                                .font(.system(size: 14, weight: .semibold, design: .rounded))
+                                .madFont(size: 14, weight: .semibold, design: .rounded)
                                 .foregroundColor(.white)
 
                             Spacer()
 
                             VStack(alignment: .trailing, spacing: 1) {
                                 Text("\(competition.options.formatQuantity(distance))/\(competition.options.goalFormatted) \(competition.options.unit.shortDisplayName)")
-                                    .font(.system(size: 13, weight: .medium, design: .rounded))
+                                    .madFont(size: 13, weight: .medium, design: .rounded)
                                     .foregroundColor(finished ? .green : .white.opacity(0.7))
                                 if distance > goal {
                                     Text("+\(competition.options.formatQuantity(distance - goal)) over")
-                                        .font(.system(size: 10, weight: .medium, design: .rounded))
+                                        .madFont(size: 11, weight: .medium, design: .rounded)
                                         .foregroundColor(.green.opacity(0.7))
                                 }
                             }
@@ -505,7 +507,7 @@ extension CompetitionDetailView {
 
                                 // Finish flag at the end of track
                                 Image(systemName: "flag.fill")
-                                    .font(.system(size: 10))
+                                    .madFont(size: 10, maxScale: 1.5)
                                     .foregroundStyle(
                                         LinearGradient(
                                             colors: gradientColors.map { $0.opacity(0.5) },
@@ -517,7 +519,7 @@ extension CompetitionDetailView {
 
                                 // Running man that animates to position
                                 Image(systemName: finished ? "figure.run.circle.fill" : "figure.run")
-                                    .font(.system(size: finished ? 20 : 16, weight: .medium))
+                                    .madFont(size: finished ? 20 : 16, weight: .medium, maxScale: 1.5)
                                     .foregroundStyle(
                                         LinearGradient(
                                             colors: finished ? [.green, gradientColors.last ?? .green] : gradientColors,
@@ -665,9 +667,9 @@ extension CompetitionDetailView {
             let remaining = max(0, expiry.timeIntervalSince(context.date))
             HStack(spacing: 4) {
                 Image(systemName: "timer")
-                    .font(.system(size: 10, weight: .semibold))
+                    .madFont(size: 10, weight: .semibold, maxScale: 1.5)
                 Text(remaining <= 0 ? "Interval ended" : "Ends in \(Self.countdownString(remaining))")
-                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .madFont(size: 11, weight: .semibold, design: .rounded)
             }
             .foregroundColor(MADTheme.Colors.madRed)
             .padding(.horizontal, 8)
@@ -1066,7 +1068,7 @@ struct DailyActivityCalendar: View {
                 monthNavigator
             } else {
                 Text(monthName)
-                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .madFont(size: 13, weight: .bold, design: .rounded)
                     .foregroundColor(.white.opacity(0.85))
                     .frame(maxWidth: .infinity, alignment: .center)
             }
@@ -1113,17 +1115,21 @@ struct DailyActivityCalendar: View {
                     )
                 VStack(alignment: .leading, spacing: 2) {
                     Text("VIEWING")
-                        .font(.system(size: 9, weight: .heavy, design: .rounded))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.6)
+                        .madFont(size: 11, weight: .heavy, design: .rounded, maxScale: 1.3)
                         .tracking(1.0)
                         .foregroundColor(.white.opacity(0.5))
                     HStack(spacing: 6) {
                         Text(user.displayName)
-                            .font(.system(size: 14, weight: .bold, design: .rounded))
+                            .madFont(size: 14, weight: .bold, design: .rounded)
                             .foregroundColor(.white)
-                            .lineLimit(1)
+                            .madNameLines()
                         if focusedIsEliminated {
                             Text("OUT")
-                                .font(.system(size: 9, weight: .heavy, design: .rounded))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.6)
+                                .madFont(size: 11, weight: .heavy, design: .rounded)
                                 .tracking(0.8)
                                 .foregroundColor(.white)
                                 .padding(.horizontal, 6)
@@ -1143,9 +1149,9 @@ struct DailyActivityCalendar: View {
                 } label: {
                     HStack(spacing: 5) {
                         Image(systemName: "person.2.fill")
-                            .font(.system(size: 10, weight: .bold))
+                            .madFont(size: 10, weight: .bold, maxScale: 1.5)
                         Text("Show all")
-                            .font(.system(size: 12, weight: .bold, design: .rounded))
+                            .madFont(size: 12, weight: .bold, design: .rounded)
                     }
                     .foregroundColor(.white)
                     .padding(.horizontal, 11)
@@ -1161,16 +1167,19 @@ struct DailyActivityCalendar: View {
         } else {
             HStack(spacing: 6) {
                 Image(systemName: "person.3.fill")
-                    .font(.system(size: 10, weight: .bold))
+                    .madFont(size: 10, weight: .bold, maxScale: 1.5)
                     .foregroundColor(.white.opacity(0.5))
                 Text("VIEWING ALL PLAYERS")
-                    .font(.system(size: 10, weight: .black, design: .rounded))
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.6)
+                    .layoutPriority(1)
+                    .madFont(size: 11, weight: .black, design: .rounded)
                     .tracking(1.2)
                     .foregroundColor(.white.opacity(0.55))
                 Spacer()
                 Text("Tap a player to focus")
-                    .font(.system(size: 10, weight: .semibold, design: .rounded))
-                    .foregroundColor(.white.opacity(0.35))
+                    .madFont(size: 11, weight: .semibold, design: .rounded)
+                    .foregroundColor(.white.opacity(0.6))
             }
         }
     }
@@ -1183,16 +1192,16 @@ struct DailyActivityCalendar: View {
         return HStack(spacing: 3) {
             ForEach(0..<cap, id: \.self) { i in
                 Image(systemName: i < remaining ? "heart.fill" : "heart")
-                    .font(.system(size: 10, weight: .bold))
+                    .madFont(size: 10, weight: .bold, maxScale: 1.5)
                     .foregroundColor(i < remaining ? DailyActivityCalendar.streakEliminatedColor : .white.opacity(0.25))
             }
             if totalLives > 6 {
                 Text("+\(totalLives - 6)")
-                    .font(.system(size: 8, weight: .heavy, design: .rounded))
-                    .foregroundColor(.white.opacity(0.4))
+                    .madFont(size: 11, weight: .heavy, design: .rounded)
+                    .foregroundColor(.white.opacity(0.6))
             }
             Text(focusedIsEliminated ? "Out of lives" : "\(remaining) left")
-                .font(.system(size: 10, weight: .bold, design: .rounded))
+                .madFont(size: 11, weight: .bold, design: .rounded)
                 .foregroundColor(.white.opacity(0.55))
                 .padding(.leading, 2)
         }
@@ -1202,10 +1211,12 @@ struct DailyActivityCalendar: View {
         HStack(spacing: 14) {
             VStack(alignment: .leading, spacing: 1) {
                 Text(isFocused ? "1" : "\(allUsers.count)")
-                    .font(.system(size: 18, weight: .black, design: .rounded))
+                    .madFont(size: 18, weight: .black, design: .rounded)
                     .foregroundColor(.white)
                 Text(isFocused ? "PLAYER" : "PLAYERS")
-                    .font(.system(size: 9, weight: .heavy, design: .rounded))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+                    .madFont(size: 11, weight: .heavy, design: .rounded)
                     .tracking(1.0)
                     .foregroundColor(.white.opacity(0.5))
             }
@@ -1216,10 +1227,12 @@ struct DailyActivityCalendar: View {
 
             VStack(alignment: .leading, spacing: 1) {
                 Text("\(aggregateHitDays)")
-                    .font(.system(size: 18, weight: .black, design: .rounded))
+                    .madFont(size: 18, weight: .black, design: .rounded)
                     .foregroundColor(.white)
                 Text(streakStatsLabel)
-                    .font(.system(size: 9, weight: .heavy, design: .rounded))
+                    .madFont(size: 11, weight: .heavy, design: .rounded, maxScale: 1.2)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
                     .tracking(1.0)
                     .foregroundColor(.white.opacity(0.5))
             }
@@ -1234,20 +1247,24 @@ struct DailyActivityCalendar: View {
             if isStreakComp && isFocused && totalLives > 0 {
                 VStack(alignment: .leading, spacing: 1) {
                     Text("\(focusedLivesRemaining)/\(totalLives)")
-                        .font(.system(size: 18, weight: .black, design: .rounded))
+                        .madFont(size: 18, weight: .black, design: .rounded)
                         .foregroundColor(focusedIsEliminated ? DailyActivityCalendar.streakEliminatedColor : .white)
                     Text("LIVES LEFT")
-                        .font(.system(size: 9, weight: .heavy, design: .rounded))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.6)
+                        .madFont(size: 11, weight: .heavy, design: .rounded)
                         .tracking(1.0)
                         .foregroundColor(.white.opacity(0.5))
                 }
             } else {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(formattedTotalDistance)
-                        .font(.system(size: 18, weight: .black, design: .rounded))
+                        .madFont(size: 18, weight: .black, design: .rounded)
                         .foregroundColor(.white)
                     Text("\(competition.options.unit.shortDisplayName.uppercased()) TOTAL")
-                        .font(.system(size: 9, weight: .heavy, design: .rounded))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.6)
+                        .madFont(size: 11, weight: .heavy, design: .rounded)
                         .tracking(1.0)
                         .foregroundColor(.white.opacity(0.5))
                 }
@@ -1282,10 +1299,11 @@ struct DailyActivityCalendar: View {
                     let count = activityCount(for: activity)
                     HStack(spacing: 4) {
                         Image(systemName: activity.icon)
-                            .font(.system(size: 10, weight: .bold))
+                            .madFont(size: 10, weight: .bold, maxScale: 1.5)
                         Text("\(count) \(activity.displayName.lowercased())\(count == 1 ? "" : "s")")
-                            .font(.system(size: 11, weight: .bold, design: .rounded))
+                            .madFont(size: 11, weight: .bold, design: .rounded)
                             .lineLimit(1)
+                            .minimumScaleFactor(0.75)
                     }
                     .foregroundColor(activity.color)
                     .padding(.horizontal, 9)
@@ -1328,7 +1346,7 @@ struct DailyActivityCalendar: View {
             Spacer()
 
             Text(monthName)
-                .font(.system(size: 13, weight: .bold, design: .rounded))
+                .madFont(size: 13, weight: .bold, design: .rounded)
                 .foregroundColor(.white)
 
             Spacer()
@@ -1353,9 +1371,9 @@ struct DailyActivityCalendar: View {
         HStack(spacing: 4) {
             ForEach(0..<7, id: \.self) { i in
                 Text(weekdayLabels[i])
-                    .font(.system(size: 9, weight: .black, design: .rounded))
+                    .madFont(size: 11, weight: .black, design: .rounded)
                     .tracking(0.8)
-                    .foregroundColor(.white.opacity(0.4))
+                    .foregroundColor(.white.opacity(0.6))
                     .frame(maxWidth: .infinity)
             }
         }
@@ -1417,10 +1435,12 @@ struct DailyActivityCalendar: View {
         return VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
                 Image(systemName: "calendar")
-                    .font(.system(size: 10, weight: .bold))
+                    .madFont(size: 10, weight: .bold, maxScale: 1.5)
                     .foregroundColor(effectiveAccent)
                 Text(formatter.string(from: date).uppercased())
-                    .font(.system(size: 11, weight: .black, design: .rounded))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+                    .madFont(size: 11, weight: .black, design: .rounded)
                     .tracking(1.0)
                     .foregroundColor(.white.opacity(0.75))
 
@@ -1483,7 +1503,7 @@ struct DailyActivityCalendar: View {
                 }
                 Spacer()
                 Text("Counts \(competition.workouts.map { $0.displayName.lowercased() }.joined(separator: " + "))")
-                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .madFont(size: 11, weight: .semibold, design: .rounded)
                     .foregroundColor(.white.opacity(0.45))
             }
         }
@@ -1505,7 +1525,7 @@ struct DailyActivityCalendar: View {
                         .strokeBorder(state == .off ? Color.white.opacity(0.18) : Color.clear, lineWidth: 1)
                 )
             Text(label)
-                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                .madFont(size: 11, weight: .semibold, design: .rounded, maxScale: 1.3)
                 .foregroundColor(.white.opacity(0.55))
         }
     }
@@ -1521,7 +1541,7 @@ struct DailyActivityCalendar: View {
                     .foregroundColor(.white)
             }
             Text(label)
-                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                .madFont(size: 11, weight: .semibold, design: .rounded)
                 .foregroundColor(.white.opacity(0.65))
         }
     }
@@ -1596,7 +1616,9 @@ private struct DailyCalendarCell: View {
 
             // Day number
             Text("\(dayNumber)")
-                .font(.system(size: 11, weight: isAllHit || isSelected ? .black : .bold, design: .rounded))
+                .madFont(size: 11, weight: isAllHit || isSelected ? .black : .bold, design: .rounded, maxScale: 1.3)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
                 .foregroundColor(
                     !isInRange ? .white.opacity(0.18) :
                     isSelected ? .white :
@@ -1672,18 +1694,18 @@ private struct DailyCalendarCell: View {
             switch status {
             case .completed:
                 Image(systemName: "checkmark")
-                    .font(.system(size: 12, weight: .heavy))
+                    .madFont(size: 12, weight: .heavy, maxScale: 1.5)
                     .foregroundColor(.white)
             case .today:
                 Text("\(dayNumber)")
-                    .font(.system(size: 11, weight: .heavy, design: .rounded))
+                    .madFont(size: 11, weight: .heavy, design: .rounded)
                     .foregroundColor(.white)
             case .lifeLost:
                 // Day number sits center, with a small broken-heart corner badge
                 // to telegraph "you spent a life here". Keep day number visible
                 // so users can still navigate by date.
                 Text("\(dayNumber)")
-                    .font(.system(size: 11, weight: .heavy, design: .rounded))
+                    .madFont(size: 11, weight: .heavy, design: .rounded)
                     .foregroundColor(.white)
                 Image(systemName: "heart.slash.fill")
                     .font(.system(size: 8, weight: .bold))
@@ -1697,8 +1719,10 @@ private struct DailyCalendarCell: View {
                     .foregroundColor(.white)
             case .postElimination:
                 Text("\(dayNumber)")
-                    .font(.system(size: 11, weight: .bold, design: .rounded))
-                    .foregroundColor(.white.opacity(0.28))
+                    .madFont(size: 11, weight: .bold, design: .rounded, maxScale: 1.3)
+                    .foregroundColor(.white.opacity(0.6))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
             }
 
             // Run/walk type dots only make sense on days with activity —
@@ -1756,12 +1780,14 @@ private struct DayDetailRow: View {
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 4) {
                     Text(user.displayName)
-                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                        .madFont(size: 13, weight: .bold, design: .rounded)
                         .foregroundColor(.white.opacity(hasActivity ? 1.0 : 0.55))
-                        .lineLimit(1)
+                        .madNameLines()
                     if isCurrentUser {
                         Text("YOU")
-                            .font(.system(size: 8, weight: .black))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.6)
+                            .madFont(size: 11, weight: .black)
                             .foregroundColor(.white)
                             .padding(.horizontal, 4)
                             .padding(.vertical, 1)
@@ -1769,7 +1795,7 @@ private struct DayDetailRow: View {
                     }
                 }
                 Text(hasActivity ? distanceText : "Off day")
-                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .madFont(size: 11, weight: .medium, design: .rounded)
                     .foregroundColor(hasActivity ? accent : .white.opacity(0.35))
 
                 // Per-type run/walk split chips for this day (new backends only).
@@ -1778,10 +1804,11 @@ private struct DayDetailRow: View {
                         ForEach(activitySplits, id: \.activity) { split in
                             HStack(spacing: 3) {
                                 Image(systemName: split.activity.icon)
-                                    .font(.system(size: 8, weight: .bold))
+                                    .madFont(size: 8, weight: .bold, maxScale: 1.5)
                                 Text(splitText(for: split.entry))
-                                    .font(.system(size: 9, weight: .bold, design: .rounded))
+                                    .madFont(size: 11, weight: .bold, design: .rounded)
                                     .lineLimit(1)
+                                    .minimumScaleFactor(0.75)
                             }
                             .foregroundColor(split.activity.color)
                             .padding(.horizontal, 6)
@@ -1797,7 +1824,7 @@ private struct DayDetailRow: View {
 
             if hitGoal {
                 Image(systemName: "checkmark.seal.fill")
-                    .font(.system(size: 14))
+                    .madFont(size: 14, maxScale: 1.5)
                     .foregroundColor(accent)
             }
         }
