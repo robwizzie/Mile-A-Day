@@ -179,3 +179,6 @@ All imports MUST end with `.js` extension, e.g. `import { foo } from './services
 - `supersedePreGoalWorkoutNotification` gates on `mileIsReachingFriends`; call it from the claimed early return and unconditionally on the edit path. Check: `friend-notification-dedupe-check`.
 - One walk = one friend announcement: supersede the pre-goal row, keyed on `completedByWorkoutId`; EXPIRE, never delete.
 - Admin Network serves 0.25° cells + counts only, never a point. Check: `admin-network-check`.
+
+## Buddy live routes
+- `buddy_live_routes` row = that walker's opt-in; serve only through `getLiveRoutes` (participants who also share, blocks respected), and delete on finish, leave and close. `scripts/buddy-live-route-check.mjs` pins every door.

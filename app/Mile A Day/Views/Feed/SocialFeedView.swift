@@ -35,6 +35,7 @@ private struct WorkoutCommentsTarget: Identifiable {
 /// photo posts AND raw walk/run activity. Posting and viewing friends' stories
 /// are both gated on completing today's mile (the server re-verifies posting).
 struct SocialFeedView: View {
+    @Environment(\.duoSpread) private var duoSpread
     /// True while the Feed tab is the selected one. TabView keeps tab views
     /// alive, so `.onAppear`/`.task` don't re-fire on tab switches — this lets
     /// the feed silently refresh when the user returns to it (e.g. after
@@ -373,6 +374,171 @@ struct SocialFeedView: View {
         !hypesUnlimited && (hypesRemaining ?? HypeService.dailyLimit) <= 0
     }
 
+    private func feedColumn<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        ScrollView {
+            LazyVStack(spacing: FeedLayout.postGap) {
+                content()
+            }
+            .padding(.vertical, MADTheme.Spacing.sm)
+            .padding(.bottom, MADTheme.Spacing.xxl)
+            // Posts on the Feed tab are stacked, not boxed (`FeedLayout`).
+            .environment(\.feedCardChrome, .stacked)
+            .environment(\.feedMediaCornerRadius, 0)
+            .lockedToScrollWidth()
+        }
+    }
+
+    /// Today's board and the one-off cards under it.
+    @ViewBuilder
+    private var feedBoard: some View {
+        Group {
+            TodayBoardView(
+                groups: stories,
+                friendsToday: friendsToday,
+                friendsOut: buddy.friendsOutNow,
+                currentUserId: currentUserId,
+                myName: userManager.currentUser.username ?? userManager.currentUser.name,
+                myImageURL: userManager.currentUser.profileImageUrl,
+                myMiles: todaysDistance,
+                myGoal: userManager.currentUser.goalMiles,
+                mileDone: mileDone,
+                canPost: canPostNow,
+                hasSharedWorkout: alreadySharedWorkout,
+                // The ring tracks the CAMERA countdown only; posting
+                // itself outlives it, so the "+" stays unlocked.
+                windowOpen: freshWindow.isCameraOpen,
+                windowOpenedAt: freshWindow.windowOpenedAt,
+                storyZoom: storyZoom,
+                focusedStoryId: viewerGroup == nil ? nil : storyZoomId,
+                friendsTodayFetchedAt: friendsTodayFetchedAt,
+                isGroupViewable: { canViewStories(of: $0) },
+                isGroupUnviewed: { isGroupUnviewed(of: $0) },
+                onTapAdd: {
+                    // After the mile, your tile OFFERS the finish
+                    // frame for your story; nothing is added until
+                    // you choose it. Before, it explains the lock.
+                    if mileDone, statsInput.workoutId != nil {
+                        showFinishStorySheet = true
+                    } else {
+                        handleCompose()
+                    }
+                },
+                onTapGroup: { viewerGroup = $0 },
+                onLockedStoryTap: { showMileHint = true },
+                onNudge: { friend in nudgeFromBoard(friend) },
+                onTapFriend: { friend in
+                    openFriendProfile(id: friend.user_id, username: friend.username,
+                                      firstName: friend.first_name, lastName: friend.last_name,
+                                      imageURL: friend.profile_image_url)
+                },
+                refreshLive: { await buddy.refreshFriendsOutNow() },
+                onOpenLiveProfile: { friend in
+                    openFriendProfile(id: friend.userId, username: friend.username,
+                                      firstName: friend.firstName, lastName: friend.lastName,
+                                      imageURL: friend.profileImageUrl)
+                }
+            )
+            .tourAnchor("feed.board")
+        }
+        // Its own node: the feed's other nodes already carry
+        // presentations, and two on one node drop one.
+        .sheet(isPresented: $showFinishStorySheet) {
+            AddFinishStorySheet(
+                stats: statsInput,
+                onAdded: { Task { await refreshRail() } },
+                onPostPhoto: {
+                    // After this sheet has gone, or the composer's
+                    // cover is dropped in its dismissal.
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { handleCompose() }
+                }
+            )
+            .presentationDragIndicator(.visible)
+        }
+
+        if !memories.isEmpty {
+            MemoriesCardView(memories: memories) { showMemories = true }
+                .padding(.horizontal, FeedLayout.gutter)
+        }
+
+        if isWeeklyRecapDay {
+            weeklyRecapTeaserCard
+                .padding(.horizontal, FeedLayout.gutter)
+        }
+
+        // One-time, dismissible: hide start & end now exists and
+        // is on. Renders nothing once seen.
+        RoutePrivacyIntroCard()
+
+        // Posts made with no signal, waiting to go out. Renders
+        // nothing when there are none.
+        PostDraftsCard()
+    }
+
+    /// A multi-view result so the posts stay direct children of the LazyVStack.
+    @ViewBuilder
+    private var feedPosts: some View {
+        FeedHairline()
+            .padding(.horizontal, FeedLayout.gutter)
+            .id(feedTopAnchorId)
+
+        if isLoading && feed.isEmpty {
+            ProgressView()
+                .progressViewStyle(CircularProgressViewStyle(tint: MADTheme.Colors.madRed))
+                .padding(.vertical, MADTheme.Spacing.xxl)
+        } else if feed.isEmpty {
+            emptyState
+        } else {
+            // FLAT. The date headers and the cards are both direct
+            // children of the LazyVStack, which is the only way it
+            // can be lazy: it materialises its own children on
+            // demand, but a child it does build is built WHOLE.
+            // Grouping the cards into per-day sections put them
+            // inside a plain `VStack` one level down, so opening
+            // the feed built every card in a section at once —
+            // "Older" is usually the entire history — with their
+            // images, route art and map snapshots. That is the
+            // scroll stutter; the grouping itself is fine and
+            // stays, it just can't own a container.
+            ForEach(feed) { entry in
+                if let title = sectionHeaderBefore[entry.id] {
+                    feedSectionHeader(title)
+                        .padding(.horizontal, FeedLayout.gutter)
+                        .padding(.top, FeedLayout.rowGap)
+                }
+
+                feedCard(entry)
+                    // Deep-link landing ring — fades once seen.
+                    .overlay(
+                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
+                            .strokeBorder(
+                                Color.orange.opacity(highlightedEntryId == entry.id ? 0.75 : 0),
+                                lineWidth: 2
+                            )
+                            .allowsHitTesting(false)
+                    )
+                    .animation(.easeInOut(duration: 0.35), value: highlightedEntryId)
+                    // Prefetch a few cards early (not just on the
+                    // very last row) so the next page is usually
+                    // there before the user reaches the bottom.
+                    .onAppear {
+                        if feed.suffix(3).contains(where: { $0.id == entry.id }) {
+                            Task { await loadMore() }
+                        }
+                    }
+                    // Edge to edge: the card pads its own text
+                    // rows; the extra bottom space is what
+                    // separates one post from the next.
+                    .padding(.bottom, FeedLayout.postSpacing)
+                    .id(entry.id)
+            }
+            if isLoadingMore {
+                ProgressView().tint(.white).padding(.vertical, MADTheme.Spacing.md)
+            } else if loadMoreFailed, nextBefore != nil {
+                loadMoreRetryRow
+            }
+        }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             MADTabHeader(title: "Feed")
@@ -408,157 +574,21 @@ struct SocialFeedView: View {
                 }
 
             ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(spacing: FeedLayout.postGap) {
-                    Group {
-                        TodayBoardView(
-                            groups: stories,
-                            friendsToday: friendsToday,
-                            friendsOut: buddy.friendsOutNow,
-                            currentUserId: currentUserId,
-                            myName: userManager.currentUser.username ?? userManager.currentUser.name,
-                            myImageURL: userManager.currentUser.profileImageUrl,
-                            myMiles: todaysDistance,
-                            myGoal: userManager.currentUser.goalMiles,
-                            mileDone: mileDone,
-                            canPost: canPostNow,
-                            hasSharedWorkout: alreadySharedWorkout,
-                            // The ring tracks the CAMERA countdown only; posting
-                            // itself outlives it, so the "+" stays unlocked.
-                            windowOpen: freshWindow.isCameraOpen,
-                            windowOpenedAt: freshWindow.windowOpenedAt,
-                            storyZoom: storyZoom,
-                            focusedStoryId: viewerGroup == nil ? nil : storyZoomId,
-                            friendsTodayFetchedAt: friendsTodayFetchedAt,
-                            isGroupViewable: { canViewStories(of: $0) },
-                            isGroupUnviewed: { isGroupUnviewed(of: $0) },
-                            onTapAdd: {
-                                // After the mile, your tile OFFERS the finish
-                                // frame for your story; nothing is added until
-                                // you choose it. Before, it explains the lock.
-                                if mileDone, statsInput.workoutId != nil {
-                                    showFinishStorySheet = true
-                                } else {
-                                    handleCompose()
-                                }
-                            },
-                            onTapGroup: { viewerGroup = $0 },
-                            onLockedStoryTap: { showMileHint = true },
-                            onNudge: { friend in nudgeFromBoard(friend) },
-                            onTapFriend: { friend in
-                                openFriendProfile(id: friend.user_id, username: friend.username,
-                                                  firstName: friend.first_name, lastName: friend.last_name,
-                                                  imageURL: friend.profile_image_url)
-                            },
-                            refreshLive: { await buddy.refreshFriendsOutNow() },
-                            onOpenLiveProfile: { friend in
-                                openFriendProfile(id: friend.userId, username: friend.username,
-                                                  firstName: friend.firstName, lastName: friend.lastName,
-                                                  imageURL: friend.profileImageUrl)
-                            }
-                        )
-                        .tourAnchor("feed.board")
+            Group {
+                if duoSpread {
+                    // The day on one page, posts on the other: today's board
+                    // stays in view however far down the feed you read.
+                    DuoTwoPages(rightTitle: "Posts") {
+                        feedColumn { feedBoard }
+                    } right: {
+                        feedColumn { feedPosts }
                     }
-                    // Its own node: the feed's other nodes already carry
-                    // presentations, and two on one node drop one.
-                    .sheet(isPresented: $showFinishStorySheet) {
-                        AddFinishStorySheet(
-                            stats: statsInput,
-                            onAdded: { Task { await refreshRail() } },
-                            onPostPhoto: {
-                                // After this sheet has gone, or the composer's
-                                // cover is dropped in its dismissal.
-                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { handleCompose() }
-                            }
-                        )
-                        .presentationDragIndicator(.visible)
-                    }
-
-                    if !memories.isEmpty {
-                        MemoriesCardView(memories: memories) { showMemories = true }
-                            .padding(.horizontal, FeedLayout.gutter)
-                    }
-
-                    if isWeeklyRecapDay {
-                        weeklyRecapTeaserCard
-                            .padding(.horizontal, FeedLayout.gutter)
-                    }
-
-                    // One-time, dismissible: hide start & end now exists and
-                    // is on. Renders nothing once seen.
-                    RoutePrivacyIntroCard()
-
-                    // Posts made with no signal, waiting to go out. Renders
-                    // nothing when there are none.
-                    PostDraftsCard()
-
-                    FeedHairline()
-                        .padding(.horizontal, FeedLayout.gutter)
-                        .id(feedTopAnchorId)
-
-                    if isLoading && feed.isEmpty {
-                        ProgressView()
-                            .progressViewStyle(CircularProgressViewStyle(tint: MADTheme.Colors.madRed))
-                            .padding(.vertical, MADTheme.Spacing.xxl)
-                    } else if feed.isEmpty {
-                        emptyState
-                    } else {
-                        // FLAT. The date headers and the cards are both direct
-                        // children of the LazyVStack, which is the only way it
-                        // can be lazy: it materialises its own children on
-                        // demand, but a child it does build is built WHOLE.
-                        // Grouping the cards into per-day sections put them
-                        // inside a plain `VStack` one level down, so opening
-                        // the feed built every card in a section at once —
-                        // "Older" is usually the entire history — with their
-                        // images, route art and map snapshots. That is the
-                        // scroll stutter; the grouping itself is fine and
-                        // stays, it just can't own a container.
-                        ForEach(feed) { entry in
-                            if let title = sectionHeaderBefore[entry.id] {
-                                feedSectionHeader(title)
-                                    .padding(.horizontal, FeedLayout.gutter)
-                                    .padding(.top, FeedLayout.rowGap)
-                            }
-
-                            feedCard(entry)
-                                // Deep-link landing ring — fades once seen.
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
-                                        .strokeBorder(
-                                            Color.orange.opacity(highlightedEntryId == entry.id ? 0.75 : 0),
-                                            lineWidth: 2
-                                        )
-                                        .allowsHitTesting(false)
-                                )
-                                .animation(.easeInOut(duration: 0.35), value: highlightedEntryId)
-                                // Prefetch a few cards early (not just on the
-                                // very last row) so the next page is usually
-                                // there before the user reaches the bottom.
-                                .onAppear {
-                                    if feed.suffix(3).contains(where: { $0.id == entry.id }) {
-                                        Task { await loadMore() }
-                                    }
-                                }
-                                // Edge to edge: the card pads its own text
-                                // rows; the extra bottom space is what
-                                // separates one post from the next.
-                                .padding(.bottom, FeedLayout.postSpacing)
-                                .id(entry.id)
-                        }
-                        if isLoadingMore {
-                            ProgressView().tint(.white).padding(.vertical, MADTheme.Spacing.md)
-                        } else if loadMoreFailed, nextBefore != nil {
-                            loadMoreRetryRow
-                        }
+                } else {
+                    feedColumn {
+                        feedBoard
+                        feedPosts
                     }
                 }
-                .padding(.vertical, MADTheme.Spacing.sm)
-                .padding(.bottom, MADTheme.Spacing.xxl)
-                // Posts on the Feed tab are stacked, not boxed (`FeedLayout`).
-                .environment(\.feedCardChrome, .stacked)
-                .environment(\.feedMediaCornerRadius, 0)
-                .lockedToScrollWidth()
             }
             .scrollIndicators(.hidden)
             .overlay(alignment: .top) {

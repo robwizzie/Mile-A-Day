@@ -47,6 +47,31 @@ extension EnvironmentValues {
     }
 }
 
+private struct DuoColumnWidthKey: EnvironmentKey {
+    static let defaultValue = CGFloat.infinity
+}
+
+extension EnvironmentValues {
+    /// The width of the Duo page this view sits on. Infinite everywhere else.
+    var duoColumnWidth: CGFloat {
+        get { self[DuoColumnWidthKey.self] }
+        set { self[DuoColumnWidthKey.self] = newValue }
+    }
+}
+
+private struct DuoHomeWideKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    /// True while Home has the whole spread to itself (no friends page beside
+    /// it), so the dashboard lays out across it instead of down one column.
+    var duoHomeWide: Bool {
+        get { self[DuoHomeWideKey.self] }
+        set { self[DuoHomeWideKey.self] = newValue }
+    }
+}
+
 private struct DuoSpreadHost: ViewModifier {
     @State private var width: CGFloat = 0
 
@@ -63,7 +88,27 @@ private struct DuoSpreadHost: ViewModifier {
     }
 }
 
+private struct DuoPageMargins: ViewModifier {
+    @Environment(\.duoSpread) private var duoSpread
+
+    func body(content: Content) -> some View {
+        // Same modifiers at every width: folding must not rebuild the screen.
+        content
+            .padding(.top, duoSpread ? 14 : 0)
+            .padding(.leading, duoSpread ? 8 : 0)
+            .background {
+                if duoSpread {
+                    MADTheme.Colors.appBackgroundGradient.ignoresSafeArea()
+                }
+            }
+    }
+}
+
 extension View {
+    /// Moves a tab's title clear of the inner display's rounded corner, which
+    /// has no status bar above it to do that. Off everywhere but the spread.
+    func duoPageMargins() -> some View { modifier(DuoPageMargins()) }
+
     /// Publishes `\.duoSpread` below this view. On every other device this
     /// adds nothing at all: no reader, no state.
     @ViewBuilder

@@ -42,6 +42,8 @@ struct WorkoutTrackingView: View {
     // (e.g. user navigates back to the dashboard mid-workout).
     @ObservedObject private var locationManager = WorkoutLocationManager.shared
     @Environment(\.duoSpread) private var duoSpread
+    /// Stats or Route, on a phone's tracker during an outdoor buddy walk.
+    @State private var phoneRouteSelected = false
     // Pre-start wizard, in order: activity → location → race mode → ghost
     // options (only when the race is chosen) → presence consent (once ever) →
     // countdown. Each step owns exactly one question, and every one of these
@@ -853,6 +855,9 @@ struct WorkoutTrackingView: View {
                 // they don't — without ever pushing the Stop button off-screen.
                 // Spacing and ring size adapt to the screen height so compact
                 // devices fit without scrolling while large ones keep the airy look.
+                if offersPhoneRoute {
+                    phoneRouteTabs
+                }
                 HStack(spacing: 0) {
                 ScrollView {
                     VStack(spacing: metricSpacing(for: screen.size.height)) {
@@ -927,9 +932,14 @@ struct WorkoutTrackingView: View {
                     }
                 )
                 .frame(maxWidth: .infinity)
+                // Hidden, not removed: the metrics keep their measured height
+                // and scroll position for the moment you tap back.
+                .opacity(showingPhoneRoute ? 0 : 1)
+                .accessibilityHidden(showingPhoneRoute)
+                .overlay { phoneRoutePage }
 
                 if showsBuddyCommandCenter, let session = buddyService.session {
-                    DuoBuddyPanel {
+                    DuoBuddyPanel(session: session) {
                         BuddyRosterStrip(
                             session: session,
                             currentUserId: buddyService.currentUserId,
@@ -1423,7 +1433,6 @@ struct WorkoutTrackingView: View {
         UIApplication.shared.open(url)
     }
 
-    /// Vertical spacing between the metric blocks, tightened on shorter screens.
     /// iPhone Duo's inner display, mid-buddy-walk, outdoors: your route and
     /// the crew on their own page. Indoors there is no route to draw.
     private var showsBuddyCommandCenter: Bool {
@@ -1431,6 +1440,82 @@ struct WorkoutTrackingView: View {
             && !locationManager.acceptsTreadmill
     }
 
+    /// Every other iPhone, same walk: no room for the map beside the numbers,
+    /// so it's a second view of this screen, one tap from the stats.
+    private var offersPhoneRoute: Bool {
+        !duoSpread && effectiveBuddySessionId != nil && buddyService.session != nil
+            && !locationManager.acceptsTreadmill
+    }
+
+    private var showingPhoneRoute: Bool { offersPhoneRoute && phoneRouteSelected }
+
+    private func phoneRouteTab(_ title: LocalizedStringKey, icon: String, route: Bool) -> some View {
+        let selected = phoneRouteSelected == route
+        return Button {
+            MADHaptics.tap()
+            withAnimation(.easeOut(duration: 0.2)) { phoneRouteSelected = route }
+        } label: {
+            Label(title, systemImage: icon)
+                .madFont(size: 14, weight: .bold, design: .rounded, maxScale: 1.3)
+                .lineLimit(1)
+                .foregroundColor(selected ? .black : .white.opacity(0.8))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
+                .background(Capsule().fill(selected ? Color.white : Color.clear))
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    private var phoneRouteTabs: some View {
+        HStack(spacing: 4) {
+            phoneRouteTab("Stats", icon: "gauge.with.needle", route: false)
+            phoneRouteTab("Route", icon: "map", route: true)
+        }
+        .padding(4)
+        .background(Capsule().fill(Color.white.opacity(0.1)))
+        .padding(.horizontal, 20)
+        .padding(.top, 8)
+    }
+
+    private func phoneRouteStat(_ value: String, label: String) -> some View {
+        VStack(spacing: 2) {
+            Text(value)
+                .font(.system(size: 30, weight: .bold, design: .rounded))
+                .monospacedDigit()
+                .foregroundColor(.white)
+                .contentTransition(.numericText())
+            Text(label)
+                .madFont(size: 12, weight: .semibold, design: .rounded, maxScale: 1.3)
+                .foregroundColor(.white.opacity(0.65))
+        }
+        .frame(maxWidth: .infinity)
+        .accessibilityElement(children: .combine)
+    }
+
+    /// The map, with the crew above and the two numbers you still need below.
+    @ViewBuilder
+    private var phoneRoutePage: some View {
+        if showingPhoneRoute, let session = buddyService.session {
+            VStack(spacing: 12) {
+                BuddyRosterStrip(
+                    session: session,
+                    currentUserId: buddyService.currentUserId,
+                    myPause: locationManager.isPausedForCrew
+                )
+                LiveRouteMap(session: session)
+                HStack(spacing: 0) {
+                    phoneRouteStat(currentDistance.distanceText, label: DistanceUnits.current.plural)
+                    phoneRouteStat(formattedTime, label: "Time")
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 8)
+            .transition(.opacity)
+        }
+    }
+
+    /// Vertical spacing between the metric blocks, tightened on shorter screens.
     private func metricSpacing(for screenHeight: CGFloat) -> CGFloat {
         guard screenHeight > 0 else { return 40 }
         return screenHeight < 700 ? 24 : 40

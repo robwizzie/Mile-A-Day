@@ -114,6 +114,7 @@ struct DashboardMilestoneBar: View {
 }
 
 struct ModernDashboardBody: View {
+    @Environment(\.duoHomeWide) private var duoHomeWide
     @ObservedObject var healthManager: HealthKitManager
     @ObservedObject var userManager: UserManager
     /// Only the optional friends' activity card reads it.
@@ -136,44 +137,73 @@ struct ModernDashboardBody: View {
         )
     }
 
+    @ViewBuilder
+    private var hero: some View {
+        ModernHeroCard(
+            healthManager: healthManager,
+            userManager: userManager,
+            currentDistance: state.distance,
+            goalDistance: state.goal,
+            progress: state.progress,
+            isGoalCompleted: state.completed,
+            todaySteps: healthManager.todaysSteps,
+            stepGoalMet: StepGoalDayStore.isTodayMet(),
+            hasActiveWorkout: hasActiveWorkout,
+            distanceIsFresh: healthManager.hasFreshTodaysDistance,
+            showWorkoutView: $showWorkoutView,
+            onReplay: onReplay
+        )
+        // Fixed flame box beside a ~130pt stat column: the hero's text
+        // grows only as far as that column honestly holds.
+        .madTypeCap(.madFixedChromeCap)
+    }
+
+    @ViewBuilder
+    private var dayCards: some View {
+        VStack(spacing: 6) {
+            DashboardStartMileButton(hasActiveWorkout: hasActiveWorkout, prominent: true,
+                                     goalDone: state.completed, showWorkoutView: $showWorkoutView)
+            LogPastWorkoutLink(action: onLogPastWorkout)
+        }
+
+        BuddyWalkPill(hasActiveWorkout: hasActiveWorkout)
+
+        NextMedalCard(userManager: userManager, style: .modern)
+    }
+
+    @AppStorage(DashboardCards.modernKey) private var cardsRaw = ""
+
+    /// One card fits under the day's cards on the wide spread, beside the hero.
+    private var soleCard: Bool { DashboardCards.ordered(in: cardsRaw, for: .modern).count == 1 }
+
+    private var cardsBlock: some View {
+        DashboardCardsBlock(
+            style: .modern,
+            healthManager: healthManager,
+            userManager: userManager,
+            friendService: friendService
+        )
+    }
+
     var body: some View {
         VStack(spacing: 14) {
-            ModernHeroCard(
-                healthManager: healthManager,
-                userManager: userManager,
-                currentDistance: state.distance,
-                goalDistance: state.goal,
-                progress: state.progress,
-                isGoalCompleted: state.completed,
-                todaySteps: healthManager.todaysSteps,
-                stepGoalMet: StepGoalDayStore.isTodayMet(),
-                hasActiveWorkout: hasActiveWorkout,
-                distanceIsFresh: healthManager.hasFreshTodaysDistance,
-                showWorkoutView: $showWorkoutView,
-                onReplay: onReplay
-            )
-            // Fixed flame box beside a ~130pt stat column: the hero's text
-            // grows only as far as that column honestly holds.
-            .madTypeCap(.madFixedChromeCap)
-
-            VStack(spacing: 6) {
-                DashboardStartMileButton(hasActiveWorkout: hasActiveWorkout, prominent: true,
-                                         goalDone: state.completed, showWorkoutView: $showWorkoutView)
-                LogPastWorkoutLink(action: onLogPastWorkout)
+            if duoHomeWide {
+                HStack(alignment: .top, spacing: 16) {
+                    hero.frame(maxWidth: .infinity)
+                    VStack(spacing: 14) {
+                        dayCards
+                        if soleCard { cardsBlock.environment(\.duoHomeWide, false) }
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+            } else {
+                hero
+                dayCards
             }
-
-            BuddyWalkPill(hasActiveWorkout: hasActiveWorkout)
-
-            NextMedalCard(userManager: userManager, style: .modern)
 
             // Everything below the day's cards is the user's to arrange
             // (DashboardCards): default here is just the daily challenge.
-            DashboardCardsBlock(
-                style: .modern,
-                healthManager: healthManager,
-                userManager: userManager,
-                friendService: friendService
-            )
+            if !(duoHomeWide && soleCard) { cardsBlock }
         }
         .padding(.horizontal, 16)
         .padding(.top, 8)
@@ -183,6 +213,7 @@ struct ModernDashboardBody: View {
 }
 
 struct FunDashboardBody: View {
+    @Environment(\.duoHomeWide) private var duoHomeWide
     @ObservedObject var healthManager: HealthKitManager
     @ObservedObject var userManager: UserManager
     @ObservedObject var friendService: FriendService
@@ -204,58 +235,88 @@ struct FunDashboardBody: View {
         )
     }
 
+    @ViewBuilder
+    private var hero: some View {
+        FlameBuddyHeroCard(
+            healthManager: healthManager,
+            userManager: userManager,
+            currentDistance: state.distance,
+            goalDistance: state.goal,
+            progress: state.progress,
+            isGoalCompleted: state.completed,
+            todaySteps: healthManager.todaysSteps,
+            stepGoalMet: StepGoalDayStore.isTodayMet(),
+            hasActiveWorkout: hasActiveWorkout,
+            distanceIsFresh: healthManager.hasFreshTodaysDistance,
+            showWorkoutView: $showWorkoutView,
+            onReplay: onReplay
+        )
+        // The stat frame grows with its text (statFrameHeight), but the
+        // column beside Flamey is ~155pt wide, so it caps here.
+        .madTypeCap(.madFixedChromeCap)
+        .tourAnchor("home.hero")
+    }
+
+    /// The day's cards. A multi-view result on purpose, read the note below.
+    @ViewBuilder
+    private var dayCards: some View {
+        // NOT wrapped in a stack: FunStartCard's parts (the share card,
+        // the buddy pill) and the Plus card each hide on their own, and an
+        // EMPTY wrapper stack still takes a slot in this one, so a done,
+        // shared day had a doubled gap under the hero.
+        FunStartCard(
+            healthManager: healthManager,
+            userManager: userManager,
+            trustedDone: (state.completed && healthManager.hasFreshTodaysDistance)
+                || StepGoalDayStore.isTodayMet(),
+            hasActiveWorkout: hasActiveWorkout,
+            showWorkoutView: $showWorkoutView,
+            onLogPastWorkout: onLogPastWorkout
+        )
+        // Mile A Day+ at the moment it would have helped: hides itself
+        // unless the streak is at risk or Plus would already hold a Save.
+        // Its body is an always-present (empty) stack, so it shares a
+        // ZERO-spacing stack with the medal card and brings its own gap:
+        // as its own item here it left a doubled gap under the hero.
+        VStack(spacing: 0) {
+            PlusStreakCard(streak: userManager.currentUser.streak, bottomSpacing: 18)
+            NextMedalCard(userManager: userManager, style: .fun)
+        }
+    }
+
+    @AppStorage(DashboardCards.funKey) private var cardsRaw = ""
+
+    /// One card fits under the day's cards on the wide spread, beside the hero.
+    private var soleCard: Bool { DashboardCards.ordered(in: cardsRaw, for: .fun).count == 1 }
+
+    private var cardsBlock: some View {
+        DashboardCardsBlock(
+            style: .fun,
+            healthManager: healthManager,
+            userManager: userManager,
+            friendService: friendService
+        )
+    }
+
     var body: some View {
         VStack(spacing: 18) {
-            FlameBuddyHeroCard(
-                healthManager: healthManager,
-                userManager: userManager,
-                currentDistance: state.distance,
-                goalDistance: state.goal,
-                progress: state.progress,
-                isGoalCompleted: state.completed,
-                todaySteps: healthManager.todaysSteps,
-                stepGoalMet: StepGoalDayStore.isTodayMet(),
-                hasActiveWorkout: hasActiveWorkout,
-                distanceIsFresh: healthManager.hasFreshTodaysDistance,
-                showWorkoutView: $showWorkoutView,
-                onReplay: onReplay
-            )
-            // The stat frame grows with its text (statFrameHeight), but the
-            // column beside Flamey is ~155pt wide, so it caps here.
-            .madTypeCap(.madFixedChromeCap)
-            .tourAnchor("home.hero")
-
-            // NOT wrapped in a stack: FunStartCard's parts (the share card,
-            // the buddy pill) and the Plus card each hide on their own, and an
-            // EMPTY wrapper stack still takes a slot in this one, so a done,
-            // shared day had a doubled gap under the hero.
-            FunStartCard(
-                healthManager: healthManager,
-                userManager: userManager,
-                trustedDone: (state.completed && healthManager.hasFreshTodaysDistance)
-                    || StepGoalDayStore.isTodayMet(),
-                hasActiveWorkout: hasActiveWorkout,
-                showWorkoutView: $showWorkoutView,
-                onLogPastWorkout: onLogPastWorkout
-            )
-            // Mile A Day+ at the moment it would have helped: hides itself
-            // unless the streak is at risk or Plus would already hold a Save.
-            // Its body is an always-present (empty) stack, so it shares a
-            // ZERO-spacing stack with the medal card and brings its own gap:
-            // as its own item here it left a doubled gap under the hero.
-            VStack(spacing: 0) {
-                PlusStreakCard(streak: userManager.currentUser.streak, bottomSpacing: 18)
-                NextMedalCard(userManager: userManager, style: .fun)
+            if duoHomeWide {
+                HStack(alignment: .top, spacing: 16) {
+                    hero.frame(maxWidth: .infinity)
+                    VStack(spacing: 18) {
+                        dayCards
+                        if soleCard { cardsBlock.environment(\.duoHomeWide, false) }
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+            } else {
+                hero
+                dayCards
             }
 
             // Everything below the day's cards is the user's to arrange
             // (DashboardCards): default here is just the daily challenge.
-            DashboardCardsBlock(
-                style: .fun,
-                healthManager: healthManager,
-                userManager: userManager,
-                friendService: friendService
-            )
+            if !(duoHomeWide && soleCard) { cardsBlock }
         }
         .padding(.horizontal, 16)
         .padding(.top, 8)

@@ -68,9 +68,10 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
     /// Anchor fix for distance accrual. Deliberately NOT advanced on sub-noise
     /// displacements — see accrueDistance.
     private var lastLocation: CLLocation?
-    /// This walk's line for the Duo's buddy map. On-device only and read by
-    /// that map alone: it never reaches the route, the server or a friend.
-    private(set) var duoTrail: [CLLocationCoordinate2D] = []
+    /// This walk's line for the buddy-walk map (`LiveRouteMap`). Stays on this
+    /// phone unless the walker turns on route sharing for the walk, and then
+    /// only through `LiveRouteRelease`, which holds back both ends.
+    private(set) var liveTrail: [CLLocationCoordinate2D] = []
     /// Last fix ACCEPTED into the route trace (stricter bar than distance).
     private var lastRoutePoint: CLLocation?
     private(set) var isUsingPedometer = false
@@ -508,7 +509,7 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
         automotiveVerdictAt = nil
         lastLocation = nil
         lastRoutePoint = nil
-        duoTrail = []
+        liveTrail = []
         lastFixAt = nil
         isUsingPedometer = (locationType == .indoor)
         pedometerOffset = initialDistance
@@ -1153,8 +1154,8 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
         // what stops the pause gap being counted as one long walked segment.
         guard !isPaused else { return }
 
-        if DuoDevice.isDuo, let coordinate = locations.last?.coordinate, duoTrail.count < 20_000 {
-            duoTrail.append(coordinate)
+        if let coordinate = locations.last?.coordinate, liveTrail.count < 20_000 {
+            liveTrail.append(coordinate)
         }
 
         // Process EVERY delivered fix in order — background delivery batches

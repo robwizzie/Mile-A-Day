@@ -2,6 +2,7 @@ import SwiftUI
 import HealthKit
 
 struct ProfileView: View {
+    @Environment(\.duoSpread) private var duoSpread
     @Environment(\.appStateManager) var appStateManager
     @ObservedObject var userManager: UserManager
     @ObservedObject var healthManager: HealthKitManager
@@ -78,89 +79,137 @@ struct ProfileView: View {
         var id: String { rawValue }
     }
 
+    /// Who you are and your numbers.
+    @ViewBuilder
+    private var profileSummary: some View {
+        ProfileIdentityBlock(
+            username: userManager.currentUser.username,
+            displayName: ownDisplayName,
+            bio: userManager.currentUser.bio,
+            // Pure Flame seal when the current streak is 100%
+            // natural (no token rescues). Server-gated: hidden
+            // until streak features are live for this user.
+            showsPureFlame: tokensState.payload?.natural_streak == true
+                && userManager.currentUser.streak > 0,
+            onPureFlame: { showPureFlameInfo = true }
+        )
+
+        // Streak · Miles · Friends. Friends opens a plain A–Z
+        // list of your friends (the Friends TAB is one tap
+        // away in the tab bar; pushing it again here was a
+        // second copy of a whole tab).
+        ProfileStatTiles(
+            streak: userManager.currentUser.streak,
+            totalMiles: userManager.currentUser.totalMiles,
+            friendCount: ownFriendCount,
+            // The Miles tile owns lifetime miles, so it is
+            // also the door to the Total Miles screen.
+            onTapMiles: { activeSheet = .totalMiles }
+        ) {
+            if let uid = userManager.currentUser.backendUserId {
+                UserFriendsListView(
+                    userId: uid,
+                    ownerName: userManager.currentUser.username ?? "You",
+                    friendService: friendService
+                )
+            }
+        }
+
+        // Token shelf — your minted set, right under the numbers
+        // it protects. Hidden until streak features are active.
+        if let tokens = tokensState.payload {
+            profileTokenShelf(tokens)
+        }
+
+        // Flamey's Closet is no longer a header row here: it is
+        // reached from Settings and the Fun hero's Closet pill.
+    }
+
+    private func profileTabBar(fillsWidth: Bool = false) -> some View {
+        ProfileTabBar(
+            selection: $profileTab,
+            items: [
+                .init(id: .activity, title: "Activity"),
+                .init(id: .posts, title: "Posts"),
+                .init(id: .stats, title: "Stats"),
+                .init(id: .badges, title: "Badges")
+            ],
+            fillsWidth: fillsWidth
+        )
+    }
+
+    private var profileTabContent: some View {
+        Group {
+            switch profileTab {
+            case .activity: ownActivityTabContent
+            case .posts: ownPostsTabContent
+            case .stats: ownStatsTabContent
+            case .badges: ownBadgesTabContent
+            }
+        }
+        .animation(.easeInOut(duration: 0.18), value: profileTab)
+        .padding(.horizontal, MADTheme.Spacing.screenGutter)
+        .padding(.top, MADTheme.Spacing.md)
+    }
+
     var body: some View {
         // The banner runs under the status bar, so the scroll ignores the top
         // safe area and the hero pads its own top bar by that inset.
         GeometryReader { geo in
-            ScrollView {
-                VStack(spacing: 0) {
-                    profileHero(topInset: geo.safeAreaInsets.top)
-
-                    VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
-                        ProfileIdentityBlock(
-                            username: userManager.currentUser.username,
-                            displayName: ownDisplayName,
-                            bio: userManager.currentUser.bio,
-                            // Pure Flame seal when the current streak is 100%
-                            // natural (no token rescues). Server-gated: hidden
-                            // until streak features are live for this user.
-                            showsPureFlame: tokensState.payload?.natural_streak == true
-                                && userManager.currentUser.streak > 0,
-                            onPureFlame: { showPureFlameInfo = true }
-                        )
-
-                        // Streak · Miles · Friends. Friends opens a plain A–Z
-                        // list of your friends (the Friends TAB is one tap
-                        // away in the tab bar; pushing it again here was a
-                        // second copy of a whole tab).
-                        ProfileStatTiles(
-                            streak: userManager.currentUser.streak,
-                            totalMiles: userManager.currentUser.totalMiles,
-                            friendCount: ownFriendCount,
-                            // The Miles tile owns lifetime miles, so it is
-                            // also the door to the Total Miles screen.
-                            onTapMiles: { activeSheet = .totalMiles }
-                        ) {
-                            if let uid = userManager.currentUser.backendUserId {
-                                UserFriendsListView(
-                                    userId: uid,
-                                    ownerName: userManager.currentUser.username ?? "You",
-                                    friendService: friendService
-                                )
+            if duoSpread {
+                // You on one page; your activity, posts, stats and badges on
+                // the other, so opening a section never scrolls you away.
+                DuoTwoPages {
+                    ScrollView {
+                        VStack(spacing: 0) {
+                            profileHero(topInset: geo.safeAreaInsets.top)
+                            VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
+                                profileSummary
                             }
+                            .padding(.horizontal, MADTheme.Spacing.screenGutter)
+                            .padding(.top, 6)
                         }
-
-                        // Token shelf — your minted set, right under the numbers
-                        // it protects. Hidden until streak features are active.
-                        if let tokens = tokensState.payload {
-                            profileTokenShelf(tokens)
-                        }
-
-                        // Flamey's Closet is no longer a header row here: it is
-                        // reached from Settings and the Fun hero's Closet pill.
-
-                        // Same four sections as a friend's profile, Activity first.
-                        ProfileTabBar(
-                            selection: $profileTab,
-                            items: [
-                                .init(id: .activity, title: "Activity"),
-                                .init(id: .posts, title: "Posts"),
-                                .init(id: .stats, title: "Stats"),
-                                .init(id: .badges, title: "Badges")
-                            ]
-                        )
-                        .padding(.top, 4)
+                        .padding(.bottom, 40)
+                        .lockedToScrollWidth()
                     }
-                    .padding(.horizontal, MADTheme.Spacing.screenGutter)
-                    .padding(.top, 6)
-
-                    Group {
-                        switch profileTab {
-                        case .activity: ownActivityTabContent
-                        case .posts: ownPostsTabContent
-                        case .stats: ownStatsTabContent
-                        case .badges: ownBadgesTabContent
+                    .ignoresSafeArea(edges: .top)
+                    .scrollContentBackground(.hidden)
+                } right: {
+                    VStack(spacing: 0) {
+                        profileTabBar(fillsWidth: true)
+                            .padding(.horizontal, MADTheme.Spacing.screenGutter)
+                            .padding(.top, 16)
+                        ScrollView {
+                            profileTabContent
+                                .padding(.bottom, 40)
+                                .lockedToScrollWidth()
                         }
+                        .scrollContentBackground(.hidden)
                     }
-                    .animation(.easeInOut(duration: 0.18), value: profileTab)
-                    .padding(.horizontal, MADTheme.Spacing.screenGutter)
-                    .padding(.top, MADTheme.Spacing.md)
                 }
-                .padding(.bottom, 100)
-                .lockedToScrollWidth()
+            } else {
+                ScrollView {
+                    VStack(spacing: 0) {
+                        profileHero(topInset: geo.safeAreaInsets.top)
+
+                        VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
+                            profileSummary
+
+                            // Same four sections as a friend's profile, Activity first.
+                            profileTabBar()
+                                .padding(.top, 4)
+                        }
+                        .padding(.horizontal, MADTheme.Spacing.screenGutter)
+                        .padding(.top, 6)
+
+                        profileTabContent
+                    }
+                    .padding(.bottom, 100)
+                    .lockedToScrollWidth()
+                }
+                .ignoresSafeArea(edges: .top)
+                .scrollContentBackground(.hidden)
             }
-            .ignoresSafeArea(edges: .top)
-            .scrollContentBackground(.hidden)
         }
         .background(MADTheme.Colors.appBackgroundGradient.ignoresSafeArea())
         .sheet(isPresented: $showPureFlameInfo) {

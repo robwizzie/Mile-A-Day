@@ -50,6 +50,11 @@ import {
   updateSession,
 } from "../services/buddySessionService.js";
 import {
+  appendLiveRoutePoints,
+  getLiveRoutes,
+  setLiveRouteSharing,
+} from "../services/buddyLiveRouteService.js";
+import {
   createRecurringWalk,
   deleteRecurringWalk,
   listRecurringWalks,
@@ -735,6 +740,55 @@ export async function progressController(
     );
   } catch (error) {
     handleError(res, error, "recording buddy progress");
+  }
+}
+
+/** Opt in or out of sharing your route, for this walk only. */
+export async function liveRouteSharingController(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
+  if (!requireEnabled(res)) return;
+  try {
+    const { enabled } = req.body ?? {};
+    if (typeof enabled !== "boolean") {
+      return res.status(400).json({ error: "enabled_required" });
+    }
+    res.json(
+      await setLiveRouteSharing(req.params.sessionId, req.userId!, enabled),
+    );
+  } catch (error) {
+    handleError(res, error, "setting buddy live route sharing");
+  }
+}
+
+export async function liveRoutePointsController(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
+  if (!requireEnabled(res)) return;
+  try {
+    res.json(
+      await appendLiveRoutePoints(
+        req.params.sessionId,
+        req.userId!,
+        req.body?.points,
+      ),
+    );
+  } catch (error) {
+    handleError(res, error, "recording buddy live route");
+  }
+}
+
+export async function liveRoutesController(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
+  if (!requireEnabled(res)) return;
+  try {
+    res.json(await getLiveRoutes(req.params.sessionId, req.userId!));
+  } catch (error) {
+    handleError(res, error, "reading buddy live routes");
   }
 }
 

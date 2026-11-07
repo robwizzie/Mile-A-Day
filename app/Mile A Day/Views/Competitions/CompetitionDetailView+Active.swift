@@ -11,15 +11,40 @@ extension CompetitionDetailView {
     // duplicating logic. Above the tabbed card: the user's own past-7-day
     // ring strip (Apple-Fitness style) — taps drill into a per-day sheet.
     var activeContent: some View {
-        VStack(spacing: MADTheme.Spacing.xl) {
-            if duoSpread, DuoDuelCard.isDuel(competition) {
-                DuoDuelCard(competition: competition)
+        activeChrome {
+            VStack(spacing: MADTheme.Spacing.xl) {
+                CompetitionMyDailyRings(competition: competition)
+                mainTabbedCard
             }
-
-            CompetitionMyDailyRings(competition: competition)
-
-            mainTabbedCard
         }
+    }
+
+    /// The Duo's two pages: where you stand on one, the race's tabs on the other.
+    var activeTwoPages: some View {
+        activeChrome {
+            DuoTwoPages {
+                ScrollView {
+                    VStack(spacing: MADTheme.Spacing.lg) {
+                        CompetitionCompactInfoStrip(competition: competition)
+                        if DuoDuelCard.isDuel(competition) {
+                            DuoDuelCard(competition: competition)
+                        }
+                        CompetitionMyDailyRings(competition: competition)
+                        collapsibleCompetitionDetails
+                    }
+                    .padding(MADTheme.Spacing.md)
+                }
+            } right: {
+                ScrollView {
+                    mainTabbedCard
+                        .padding(MADTheme.Spacing.md)
+                }
+            }
+        }
+    }
+
+    private func activeChrome<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        content()
         .overlay(alignment: .top) {
             if let feedback = actionFeedback {
                 feedbackBanner(feedback)

@@ -115,7 +115,7 @@ struct PrivacyHubView: View {
             SettingsDivider(inset: 0)
             SettingsToggleRow(
                 title: "Show when I'm out",
-                subtitle: "Friends see you're walking now, never where",
+                subtitle: "Friends see you're out, never where you are",
                 isOn: $prefs.shareLivePresence
             )
         }

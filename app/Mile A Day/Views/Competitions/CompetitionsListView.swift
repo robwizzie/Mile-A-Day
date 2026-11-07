@@ -15,6 +15,7 @@ struct CompetitionsListView: View {
     @ObservedObject var competitionService: CompetitionService
     @ObservedObject private var trophyService = TrophyService.shared
 
+    @Environment(\.duoSpread) private var duoSpread
     @State private var selectedSegment: CompeteSegment = .compete
     /// Set when a `competition_invite` push wants the invites section on
     /// screen; `CompeteHomeView` consumes and clears it.
@@ -55,61 +56,42 @@ struct CompetitionsListView: View {
             MADTabHeader(title: "Compete", actions: headerActions)
                 .tourAnchor("compete.header")
 
-            MADPillPicker(
-                selection: $selectedSegment,
-                options: [
-                    .init(
-                        id: .compete,
-                        title: "Compete",
-                        systemImage: "bolt.fill",
-                        badgeCount: competitionService.invites.count
-                    ),
-                    .init(
-                        id: .record,
-                        title: "History",
-                        systemImage: "trophy.fill",
-                        badgeCount: 0
-                    )
-                ]
-            )
-            .padding(.horizontal, MADTheme.Spacing.md)
-            .padding(.top, MADTheme.Spacing.xs)
-            .padding(.bottom, MADTheme.Spacing.sm)
+            if !duoSpread {
+                MADPillPicker(
+                    selection: $selectedSegment,
+                    options: [
+                        .init(
+                            id: .compete,
+                            title: "Compete",
+                            systemImage: "bolt.fill",
+                            badgeCount: competitionService.invites.count
+                        ),
+                        .init(
+                            id: .record,
+                            title: "History",
+                            systemImage: "trophy.fill",
+                            badgeCount: 0
+                        )
+                    ]
+                )
+                .padding(.horizontal, MADTheme.Spacing.md)
+                .padding(.top, MADTheme.Spacing.xs)
+                .padding(.bottom, MADTheme.Spacing.sm)
+            }
 
             Group {
-                switch selectedSegment {
-                case .compete:
-                    // Skeletons only while there is genuinely nothing to show.
-                    // Keying on isLoading alone swapped the live list out on
-                    // every background refresh, which also cancelled
-                    // pull-to-refresh mid-flight.
-                    if competitionService.competitions.isEmpty
-                        && competitionService.invites.isEmpty
-                        && !competitionService.hasLoadedOnce {
-                        loadingView
-                    } else {
-                        CompeteHomeView(
-                            competitionService: competitionService,
-                            trophyService: trophyService,
-                            scrollTarget: $scrollTarget,
-                            onOpen: { selectedCompetition = $0 },
-                            onExplainMode: { explainerType = $0 },
-                            onStartPreset: { createRequest = CreateRequest(preset: $0) },
-                            onCreateBlank: { createRequest = CreateRequest() },
-                            onEdit: { competitionToEdit = $0 },
-                            onError: { actionError = $0 },
-                            onOpenWeekly: { showingWeeklyChallenge = true }
-                        )
-                        .id("compete-segment")
+                if duoSpread {
+                    // Both at once, so the picker has nothing left to pick.
+                    DuoTwoPages(leftTitle: "Right now", rightTitle: "History") {
+                        competeSegment
+                    } right: {
+                        recordSegment
                     }
-                case .record:
-                    CompeteRecordView(
-                        competitionService: competitionService,
-                        trophyService: trophyService,
-                        onOpen: { selectedCompetition = $0 },
-                        onOpenTrophyCase: { showingTrophyCase = true }
-                    )
-                    .id("record-segment")
+                } else {
+                    switch selectedSegment {
+                    case .compete: competeSegment
+                    case .record: recordSegment
+                    }
                 }
             }
             // Deliberately attached HERE and not to the VStack below: stacking
@@ -158,10 +140,13 @@ struct CompetitionsListView: View {
                 startsCollapsed: request.preset != nil
             )
         }
-        .sheet(item: $selectedCompetition) { competition in
-            NavigationStack {
-                CompetitionDetailView(competition: competition, competitionService: competitionService)
-            }
+        .sheet(item: duoSpread ? .constant(nil) : $selectedCompetition) { competition in
+            competitionDetail(competition)
+        }
+        // A sheet would float a centred panel over the two pages; a competition
+        // has a two-page layout of its own.
+        .fullScreenCover(item: duoSpread ? $selectedCompetition : .constant(nil)) { competition in
+            competitionDetail(competition)
         }
         .sheet(isPresented: $showingTrophyCase) {
             NavigationStack {
@@ -306,6 +291,49 @@ struct CompetitionsListView: View {
             ) { createRequest = CreateRequest() }
         )
         return actions
+    }
+
+    private func competitionDetail(_ competition: Competition) -> some View {
+        NavigationStack {
+            CompetitionDetailView(competition: competition, competitionService: competitionService)
+        }
+    }
+
+    @ViewBuilder
+    private var competeSegment: some View {
+        // Skeletons only while there is genuinely nothing to show.
+        // Keying on isLoading alone swapped the live list out on
+        // every background refresh, which also cancelled
+        // pull-to-refresh mid-flight.
+        if competitionService.competitions.isEmpty
+            && competitionService.invites.isEmpty
+            && !competitionService.hasLoadedOnce {
+            loadingView
+        } else {
+            CompeteHomeView(
+                competitionService: competitionService,
+                trophyService: trophyService,
+                scrollTarget: $scrollTarget,
+                onOpen: { selectedCompetition = $0 },
+                onExplainMode: { explainerType = $0 },
+                onStartPreset: { createRequest = CreateRequest(preset: $0) },
+                onCreateBlank: { createRequest = CreateRequest() },
+                onEdit: { competitionToEdit = $0 },
+                onError: { actionError = $0 },
+                onOpenWeekly: { showingWeeklyChallenge = true }
+            )
+            .id("compete-segment")
+        }
+    }
+
+    private var recordSegment: some View {
+        CompeteRecordView(
+            competitionService: competitionService,
+            trophyService: trophyService,
+            onOpen: { selectedCompetition = $0 },
+            onOpenTrophyCase: { showingTrophyCase = true }
+        )
+        .id("record-segment")
     }
 
     // MARK: - Loading View

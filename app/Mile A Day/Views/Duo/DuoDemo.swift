@@ -2,12 +2,12 @@
 import SwiftUI
 import CoreLocation
 
-/// Test builds only: `-MADDuoDemo flyover|share` opens that real screen with
+/// Test builds only: `-MADDuoDemo flyover|share|milestone` opens that real screen with
 /// sample data, for screens that otherwise need a recorded route. Compiled out
 /// of Release.
 private struct DuoDemoCover: ViewModifier {
     enum Demo: String, Identifiable {
-        case flyover, share
+        case flyover, share, milestone
         var id: String { rawValue }
     }
 
@@ -42,6 +42,10 @@ private struct DuoDemoCover: ViewModifier {
                     ],
                     officialDistanceMiles: 4
                 ))
+            case .milestone:
+                StreakMilestoneCelebrationView(
+                info: StreakMilestoneInfo(days: 500, achievedOn: Date(), totalMiles: 612.4, isReplay: false)
+                )
             case .share:
                 ShareStudioView(content: {
                     var content = MADStoryContent()

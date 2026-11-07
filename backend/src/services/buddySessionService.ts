@@ -16,6 +16,7 @@ import { CLIENT_FEATURES, userSupports } from "./clientFeatures.js";
 import { evaluateSocialBadgesForUser } from "./badgeService.js";
 import { logError } from "./errorLogService.js";
 import { BadRequestError } from "../errors/Errors.js";
+import { clearLiveRoute, clearLiveRoutes } from "./buddyLiveRouteService.js";
 import {
   BUDDY_ABANDON_HOURS,
   BUDDY_MAX_PARTICIPANTS,
@@ -934,6 +935,7 @@ export async function leaveSession(
         AND status NOT IN ('finished', 'left')`,
     [sessionId, userId],
   );
+  await clearLiveRoute(sessionId, userId);
   await bumpVersion(sessionId);
   await recordEvent(sessionId, userId, "left");
   await finalizeIfDue(sessionId);
@@ -1981,6 +1983,7 @@ async function cancelInternal(
     [sessionId, actorUserId],
   );
   if (cancelled.length === 0) return false;
+  await clearLiveRoutes(sessionId);
 
   // Everyone still in the room is released. Deliberately NOT 'finished':
   // finished is what the history reads, and a walk nobody took must never
@@ -2310,6 +2313,7 @@ export async function finishParticipation(
       WHERE session_id = $1 AND user_id = $2 AND status = 'active'`,
     [sessionId, userId],
   );
+  await clearLiveRoute(sessionId, userId);
   // Link NOW, not at close. The usual order on a phone is HealthKit save →
   // observer sync (reconcileBuddySessions: participant still 'active', no
   // stamp) → this Finish — so the workout was on the server, route and all,
@@ -2419,6 +2423,7 @@ async function closeSession(
     [sessionId, winnerId],
   );
   if (closed.length === 0) return; // someone else finalized first
+  await clearLiveRoutes(sessionId);
 
   await db.query(
     `UPDATE buddy_session_participants

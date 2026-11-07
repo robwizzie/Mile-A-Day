@@ -946,6 +946,35 @@ final class BuddySessionService: ObservableObject {
         }
     }
 
+    // MARK: - Live routes (opt-in, per walk)
+
+    /// Returns whether sharing is on. Throws `route_sharing_unavailable` when a
+    /// setting (maps off, private workouts, Stealth) rules it out.
+    func setLiveRouteSharing(sessionId: String, enabled: Bool) async throws -> Bool {
+        try await request(
+            "/buddy/sessions/\(sessionId)/live-route",
+            method: .PUT,
+            json: ["enabled": enabled],
+            responseType: BuddyLiveRouteSharingResponse.self
+        ).sharing
+    }
+
+    func postLiveRoutePoints(
+        sessionId: String, points: [[Double]]
+    ) async throws -> BuddyLiveRoutePostResponse {
+        try await request(
+            "/buddy/sessions/\(sessionId)/live-route/points",
+            method: .POST,
+            json: ["points": points],
+            responseType: BuddyLiveRoutePostResponse.self)
+    }
+
+    func fetchLiveRoutes(sessionId: String) async throws -> BuddyLiveRoutesState {
+        try await request(
+            "/buddy/sessions/\(sessionId)/live-route",
+            responseType: BuddyLiveRoutesState.self)
+    }
+
     /// Mark this participant done. Distance is reported one last time first so
     /// the recap and placements use the true final number.
     ///
@@ -958,6 +987,8 @@ final class BuddySessionService: ObservableObject {
     /// closed it hours later.
     func finish(finalDistanceMiles: Double, durationSeconds: TimeInterval) async {
         guard let id = session?.id else { return }
+        // Stops uploading now; the server deletes the line on finish.
+        BuddyLiveRouteSharing.shared.detach()
         await reportProgress(
             distanceMiles: finalDistanceMiles,
             durationSeconds: durationSeconds,

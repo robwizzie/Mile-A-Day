@@ -1,31 +1,61 @@
 import SwiftUI
 
-/// Home at a glance: the dashboard on one page, friends' day on the other, so
-/// anyone about to lose a streak is one look and one Nudge away.
+/// Home at a glance: with friends, the dashboard on one page and their day on
+/// the other, so anyone about to lose a streak is one look and one Nudge away.
+/// With none there is no second page at all: the dashboard takes the whole
+/// spread (`\.duoHomeWide`) instead of sitting beside an empty half.
 struct DuoHomeSplit<Home: View>: View {
     @ObservedObject var friendService: FriendService
     @ViewBuilder let home: () -> Home
     @Environment(\.duoSpread) private var duoSpread
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var friends: [FriendActivityItem] = []
+    @State private var fetchedAt = Date()
 
     var body: some View {
-        // One HStack whatever the width: the dashboard must keep its identity
-        // (and its scroll position) as the phone folds and unfolds.
+        // Inside the NavigationStack, so a pushed screen gets the whole
+        // display. One HStack at every width: the dashboard keeps its identity
+        // and scroll position through a fold.
         HStack(spacing: 0) {
             home()
-            if duoSpread {
-                DuoFriendsTodayPanel(friendService: friendService)
+                .frame(maxWidth: .infinity)
+                .environment(\.duoHomeWide, duoSpread && friends.isEmpty)
+            if duoSpread, !friends.isEmpty {
+                DuoFriendsTodayPanel(friendService: friendService, friends: friends, fetchedAt: fetchedAt)
                     .frame(maxWidth: .infinity)
+                    .transition(.opacity)
             }
         }
+        .animation(.easeOut(duration: 0.2), value: friends.isEmpty)
+        // Only while unfolded: nowhere else does this view make a request.
+        .task(id: duoSpread) {
+            guard duoSpread else { return }
+            // The first try can beat sign-in restoring the user id at launch.
+            for _ in 0..<3 where friends.isEmpty {
+                await load()
+                if friends.isEmpty { try? await Task.sleep(for: .seconds(2)) }
+            }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active, duoSpread { Task { await load() } }
+        }
+        .onChange(of: friendService.friends.count) {
+            if duoSpread { Task { await load() } }
+        }
+    }
+
+    private func load() async {
+        guard let fresh = try? await friendService.fetchFriendsActivityToday() else { return }
+        friends = fresh
+        fetchedAt = Date()
     }
 }
 
 private struct DuoFriendsTodayPanel: View {
     @ObservedObject var friendService: FriendService
+    let friends: [FriendActivityItem]
+    let fetchedAt: Date
     @ObservedObject private var nudges = NudgeStatusStore.shared
-    @State private var friends: [FriendActivityItem] = []
-    @State private var fetchedAt = Date()
-    @Environment(\.scenePhase) private var scenePhase
 
     /// At risk first, longest streak leading; then not yet done; done last.
     private var sorted: [FriendActivityItem] {
@@ -48,11 +78,6 @@ private struct DuoFriendsTodayPanel: View {
                     .madFont(size: 22, weight: .heavy, design: .rounded, maxScale: 1.4)
                     .foregroundColor(.white)
                     .padding(.top, 16)
-                if friends.isEmpty {
-                    Text("Add friends to see their day here.")
-                        .madFont(size: 15, weight: .medium, design: .rounded, maxScale: 1.4)
-                        .foregroundColor(.white.opacity(0.65))
-                }
                 ForEach(sorted) { friend in
                     row(friend)
                 }
@@ -62,16 +87,6 @@ private struct DuoFriendsTodayPanel: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .background(MADTheme.Colors.appBackgroundGradient.ignoresSafeArea())
-        .task {
-            // The first try can beat sign-in restoring the user id at launch.
-            for _ in 0..<3 where friends.isEmpty {
-                await load()
-                if friends.isEmpty { try? await Task.sleep(for: .seconds(2)) }
-            }
-        }
-        .onChange(of: scenePhase) { _, phase in
-            if phase == .active { Task { await load() } }
-        }
     }
 
     private func row(_ friend: FriendActivityItem) -> some View {
@@ -124,11 +139,5 @@ private struct DuoFriendsTodayPanel: View {
         }
         .buttonStyle(.plain)
         .disabled(nudged)
-    }
-
-    private func load() async {
-        guard let fresh = try? await friendService.fetchFriendsActivityToday() else { return }
-        friends = fresh
-        fetchedAt = Date()
     }
 }

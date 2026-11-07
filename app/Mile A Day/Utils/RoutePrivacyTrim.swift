@@ -24,10 +24,10 @@ enum RoutePrivacyTrim {
     static let options: [Int] = NotificationPreferences.routePrivacyOptions
     /// What an unset preference means (1/8 mile). Same default as the server.
     static let defaultMeters = NotificationPreferences.defaultRoutePrivacyMeters
-    /// Below this many metres of kept line (or under 40% of the walk) nothing
-    /// is served at all.
-    static let minimumKeptMeters = 300.0
-    static let minimumKeptFraction = 0.4
+    /// Below this many metres of kept line nothing is served at all: it's too
+    /// short to draw. Everything longer is shown, because the cuts already keep
+    /// the start and end hidden.
+    static let minimumKeptMeters = 30.0
 
     /// The user's own setting, as last written or read from the server.
     static var currentSettingMeters: Int {
@@ -79,39 +79,33 @@ enum RoutePrivacyTrim {
         let last = coordinates[n - 1]
 
         var startIndex: Int?
-        var startPath = 0.0
         var c = 0.0
         for i in 1..<n {
             c += distance(coordinates[i - 1], coordinates[i])
             if c >= cutStart, distance(first, coordinates[i]) >= cutStart {
                 startIndex = i
-                startPath = c
                 break
             }
         }
         guard let s = startIndex else { return nil }
 
         var endIndex: Int?
-        var endPath = 0.0
         c = 0
         for i in stride(from: n - 2, through: 0, by: -1) {
             c += distance(coordinates[i + 1], coordinates[i])
             if c >= cutEnd, distance(last, coordinates[i]) >= cutEnd {
                 endIndex = i
-                endPath = c
                 break
             }
         }
         guard let e = endIndex, e > s else { return nil }
 
-        // kept >= 0.4 × (start + kept + end)  ⇔  kept >= (2/3)(start + end)
-        let threshold = max(minimumKeptMeters, (startPath + endPath) * 2.0 / 3.0)
         var kept = 0.0
         for i in (s + 1)...e {
             kept += distance(coordinates[i - 1], coordinates[i])
-            if kept >= threshold { break }
+            if kept >= minimumKeptMeters { break }
         }
-        return kept >= threshold ? s...e : nil
+        return kept >= minimumKeptMeters ? s...e : nil
     }
 
     // MARK: - What a friend sees
@@ -136,6 +130,19 @@ enum RoutePrivacyTrim {
         guard let range = keptRange(coordinates: coordinates, cutStart: cut.start, cutEnd: cut.end)
         else { return .hidden }
         return .trimmed(range)
+    }
+
+    /// What friends will get for the poster's own route, so a preview can show
+    /// exactly that. Nil means no route for them, and the frame draws Flamey.
+    static func friendsView(
+        _ coordinates: [CLLocationCoordinate2D]?,
+        workoutId: String?
+    ) -> [CLLocationCoordinate2D]? {
+        guard let coordinates, coordinates.count >= 2,
+              NotificationPreferences.load().shareRouteMaps
+        else { return nil }
+        let line = shareable(coordinates, key: workoutId)
+        return line.count >= 2 ? line : nil
     }
 
     /// The route as it may leave the phone: trimmed exactly as friends see

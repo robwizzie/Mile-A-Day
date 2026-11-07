@@ -1195,3 +1195,26 @@ struct BuddyHistoryResponse: Codable {
         case totals
     }
 }
+
+// MARK: - Live routes
+
+struct BuddyLiveRouteSharingResponse: Codable {
+    let sharing: Bool
+}
+
+struct BuddyLiveRoutePostResponse: Codable {
+    let sharing: Bool
+    let accepted: Int
+}
+
+/// What this walker may see right now. `routes` is empty unless they share too.
+struct BuddyLiveRoutesState: Codable {
+    struct Route: Codable {
+        let user_id: String
+        /// `[lat, lng]`, oldest first.
+        let points: [[Double]]
+    }
+
+    let sharing: Bool
+    let routes: [Route]
+}

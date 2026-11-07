@@ -79,18 +79,20 @@ struct FlameyClosetView: View {
                 sheet = .name
             }
             caption
+                .padding(.horizontal, 16)
             VStack(spacing: 8) { actionButtons(compact: false) }
                 .padding(.horizontal, 16)
             Spacer(minLength: 0)
         }
         // Fixed, so the wardrobe gets the rest: left to share the HStack, the
         // stage's natural width squeezed the tiles.
-        .frame(width: 290)
+        .frame(width: 340)
     }
 
     var body: some View {
         VStack(spacing: 0) {
             topBar
+                .padding(.top, showsDressingRoom ? 12 : 0)
                 .sheet(item: $sheet) { which in
                     sheetView(which)
                 }

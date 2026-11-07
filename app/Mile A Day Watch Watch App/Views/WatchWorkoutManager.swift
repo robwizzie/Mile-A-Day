@@ -1,3 +1,4 @@
+import CoreLocation
 import Foundation
 import HealthKit
 
@@ -36,6 +37,9 @@ final class WatchWorkoutManager: NSObject, ObservableObject {
     private let healthStore = HKHealthStore()
     private var session: HKWorkoutSession?
     private var builder: HKLiveWorkoutBuilder?
+    /// Outdoor only. Without this, a walk recorded here had no route anywhere.
+    private var routeBuilder: HKWorkoutRouteBuilder?
+    private let locationManager = CLLocationManager()
 
     // Timing
     private var startDate: Date?
@@ -65,6 +69,7 @@ final class WatchWorkoutManager: NSObject, ObservableObject {
 
         let typesToShare: Set<HKSampleType> = [
             HKObjectType.workoutType(),
+            HKSeriesType.workoutRoute(),
             HKObjectType.quantityType(forIdentifier: .distanceWalkingRunning)!,
             HKObjectType.quantityType(forIdentifier: .activeEnergyBurned)!,
             HKObjectType.quantityType(forIdentifier: .heartRate)!
@@ -133,6 +138,7 @@ final class WatchWorkoutManager: NSObject, ObservableObject {
             }
 
             startTimer()
+            if locationType == .outdoor { startRoute() }
         } catch {
             print("[Watch] Failed to create workout session: \(error.localizedDescription)")
             startupFailure = "Couldn't start this workout."
@@ -155,6 +161,16 @@ final class WatchWorkoutManager: NSObject, ObservableObject {
                 }
             }
         }
+    }
+
+    /// Best effort: a walk with no location permission still saves, without a map.
+    private func startRoute() {
+        routeBuilder = HKWorkoutRouteBuilder(healthStore: healthStore, device: nil)
+        locationManager.delegate = self
+        locationManager.desiredAccuracy = kCLLocationAccuracyBest
+        locationManager.activityType = .fitness
+        locationManager.requestWhenInUseAuthorization()
+        locationManager.startUpdatingLocation()
     }
 
     func pauseWorkout() {
@@ -270,11 +286,27 @@ final class WatchWorkoutManager: NSObject, ObservableObject {
                     if let workout {
                         // Best effort, detached from the UI: the summary screen
                         // never waits on the network, and the iPhone's sync is
-                        // the backstop.
-                        Task { await WatchWorkoutUploader.upload(workout) }
+                        // the backstop. The route goes first so the upload
+                        // that follows can carry it.
+                        self.finishRoute(for: workout) {
+                            Task { await WatchWorkoutUploader.upload(workout) }
+                        }
                     }
                 }
             }
+        }
+    }
+
+    private func finishRoute(for workout: HKWorkout, then done: @escaping () -> Void) {
+        locationManager.stopUpdatingLocation()
+        guard let routeBuilder else {
+            done()
+            return
+        }
+        self.routeBuilder = nil
+        routeBuilder.finishRoute(with: workout, metadata: nil) { _, error in
+            if let error { print("[Watch] finishRoute failed: \(error.localizedDescription)") }
+            done()
         }
     }
 
@@ -383,6 +415,21 @@ extension WatchWorkoutManager: HKWorkoutSessionDelegate {
             }
             self.finalizeBuilder(endingAt: Date())
         }
+    }
+}
+
+// MARK: - Route
+extension WatchWorkoutManager: CLLocationManagerDelegate {
+    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        let usable = locations.filter { (0...50).contains($0.horizontalAccuracy) }
+        guard !isPaused, !usable.isEmpty else { return }
+        routeBuilder?.insertRouteData(usable) { _, error in
+            if let error { print("[Watch] route insert failed: \(error.localizedDescription)") }
+        }
+    }
+
+    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+        print("[Watch] location failed: \(error.localizedDescription)")
     }
 }
 

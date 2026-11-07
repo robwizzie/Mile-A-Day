@@ -135,31 +135,9 @@ struct ShareStudioView: View {
 
             VStack(spacing: 0) {
                 header
+                    .padding(.top, usesTwoPages ? 12 : 0)
                 if usesTwoPages {
-                    // iPhone Duo's inner display: the card on one page, the
-                    // styles and ways to share it on the other.
-                    HStack(spacing: 0) {
-                        VStack(spacing: 0) {
-                            if families.count > 1 {
-                                familyChips
-                                    .padding(.top, 2)
-                            }
-                            carousel
-                                .padding(.top, 10)
-                            pageCaption
-                                .padding(.vertical, 10)
-                        }
-                        .frame(maxWidth: .infinity)
-                        ScrollView(showsIndicators: false) {
-                            VStack(spacing: 14) {
-                                options
-                                destinationsNode
-                            }
-                            .padding(16)
-                        }
-                        // Fixed: the stat chips need this to fit on one row.
-                        .frame(width: 370)
-                    }
+                    twoPageBody
                 } else {
                     if families.count > 1 {
                         familyChips
@@ -217,6 +195,72 @@ struct ShareStudioView: View {
     }
 
     /// Its own node: two presentations on one view race.
+    /// iPhone Duo's inner display: the card alone on one page, everything you
+    /// can do to it on the other, with the ways to share it always in reach.
+    private var twoPageBody: some View {
+        HStack(spacing: 0) {
+            VStack(spacing: 10) {
+                carousel
+                pageCaption
+            }
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity)
+
+            VStack(spacing: 0) {
+                ScrollView(showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 22) {
+                        if families.count > 1 {
+                            twoPageSection("Style") {
+                                FlowLayout(spacing: 8) {
+                                    ForEach(families) { familyChip($0) }
+                                }
+                            }
+                        }
+                        if current.formats.count > 1 {
+                            twoPageSection("Size") {
+                                optionRows(template: current, showsShape: true,
+                                           showsStats: false,
+                                           showsExplainer: effectiveFormat(current) == .sticker)
+                            }
+                        }
+                        if current.usesStatToggle, availableStats.count > 1 {
+                            twoPageSection("On the card") {
+                                FlowLayout(spacing: 8) {
+                                    ForEach(availableStats) { statChip($0) }
+                                }
+                            }
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(20)
+                }
+                Rectangle()
+                    .fill(Color.white.opacity(0.08))
+                    .frame(height: 1)
+                destinationsNode
+                    .padding(16)
+            }
+            .background(
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .fill(Color.white.opacity(0.05))
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .padding(.trailing, 16)
+            .padding(.bottom, 12)
+            .frame(maxWidth: .infinity)
+        }
+    }
+
+    private func twoPageSection<Content: View>(_ title: LocalizedStringKey,
+                                               @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title)
+                .font(.system(size: 13, weight: .heavy, design: .rounded))
+                .foregroundColor(.white.opacity(0.55))
+            content()
+        }
+    }
+
     private var destinationsNode: some View {
         destinations
             .sheet(item: $messageItem) { item in
@@ -264,34 +308,36 @@ struct ShareStudioView: View {
     private var familyChips: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
-                ForEach(families) { family in
-                    let selected = current.family == family
-                    Button {
-                        guard let first = templates.first(where: { $0.family == family }) else { return }
-                        withAnimation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.86)) {
-                            selection = first
-                        }
-                    } label: {
-                        HStack(spacing: 5) {
-                            Image(systemName: family.icon)
-                                .font(.system(size: 11, weight: .bold))
-                                .accessibilityHidden(true)
-                            Text(family.title)
-                                .font(.system(size: 13, weight: .bold, design: .rounded))
-                                .lineLimit(1)
-                                .fixedSize(horizontal: true, vertical: false)
-                        }
-                        .foregroundColor(selected ? .black : .white.opacity(0.75))
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 7)
-                        .background(Capsule().fill(selected ? Color.white : Color.white.opacity(0.1)))
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityAddTraits(selected ? .isSelected : [])
-                }
+                ForEach(families) { familyChip($0) }
             }
             .padding(.horizontal, 20)
         }
+    }
+
+    private func familyChip(_ family: ShareTemplateFamily) -> some View {
+        let selected = current.family == family
+        return Button {
+            guard let first = templates.first(where: { $0.family == family }) else { return }
+            withAnimation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.86)) {
+                selection = first
+            }
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: family.icon)
+                    .font(.system(size: 11, weight: .bold))
+                    .accessibilityHidden(true)
+                Text(family.title)
+                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
+            }
+            .foregroundColor(selected ? .black : .white.opacity(0.75))
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .background(Capsule().fill(selected ? Color.white : Color.white.opacity(0.1)))
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
     // MARK: Carousel

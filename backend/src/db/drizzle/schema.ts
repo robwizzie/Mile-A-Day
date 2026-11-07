@@ -2465,6 +2465,44 @@ export const buddyLooking = pgTable(
   ],
 );
 
+// A walker's live route on a buddy walk. The row IS their opt-in for this walk:
+// no row, nothing stored and nothing served. Ephemeral by design (deleted when
+// they finish or leave and when the session closes). Points are [lat, lng], and
+// the phone only releases one after moving past it by route_privacy_meters, so
+// neither end of a walk is ever here. See buddyLiveRouteService.
+export const buddyLiveRoutes = pgTable(
+  "buddy_live_routes",
+  {
+    sessionId: varchar("session_id", { length: 32 }).notNull(),
+    userId: text("user_id").notNull(),
+    points: jsonb().default([]).notNull(),
+    pointCount: integer("point_count").default(0).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.sessionId, table.userId],
+      name: "buddy_live_routes_pkey",
+    }),
+    foreignKey({
+      columns: [table.sessionId],
+      foreignColumns: [buddySessions.id],
+      name: "buddy_live_routes_session_id_fkey",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.userId],
+      foreignColumns: [users.userId],
+      name: "buddy_live_routes_user_id_fkey",
+    }).onDelete("cascade"),
+    index("idx_buddy_live_routes_updated_at").using(
+      "btree",
+      table.updatedAt.asc().nullsLast(),
+    ),
+  ],
+);
+
 export const androidWaitlist = pgTable(
   "android_waitlist",
   {
