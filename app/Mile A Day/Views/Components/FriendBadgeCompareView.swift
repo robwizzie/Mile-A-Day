@@ -105,18 +105,18 @@ struct FriendBadgeCompareView: View {
             VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
                 HStack(spacing: MADTheme.Spacing.sm) {
                     Image(systemName: "rosette")
-                        .font(.system(size: 14, weight: .semibold))
+                        .madFont(size: 14, weight: .semibold, maxScale: 1.5)
                         .foregroundStyle(MADTheme.Colors.redGradient)
                     Text("Medals")
-                        .font(MADTheme.Typography.headline)
+                        .madFont(size: 17, weight: .semibold, design: .rounded)
                         .foregroundColor(.primary)
                     Spacer()
                     HStack(spacing: 4) {
                         Text("\(ownedCount)")
-                            .font(.system(size: 13, weight: .bold, design: .rounded))
+                            .madFont(size: 13, weight: .bold, design: .rounded)
                             .foregroundColor(.primary)
                         Text("/ \(totalVisibleCount)")
-                            .font(.system(size: 12, weight: .semibold, design: .rounded))
+                            .madFont(size: 12, weight: .semibold, design: .rounded)
                             .foregroundColor(.secondary)
                     }
                     .padding(.horizontal, 10)
@@ -198,11 +198,11 @@ struct FriendBadgeCompareView: View {
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: "chevron.down.circle.fill")
-                    .font(.system(size: 14, weight: .semibold))
+                    .madFont(size: 14, weight: .semibold, maxScale: 1.5)
                 Text("Show \(nextChunk) more")
-                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .madFont(size: 13, weight: .semibold, design: .rounded)
                 Text("· \(remaining) left")
-                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .madFont(size: 12, weight: .medium, design: .rounded)
                     .foregroundColor(.white.opacity(0.55))
             }
             .foregroundColor(.white)
@@ -230,9 +230,9 @@ struct FriendBadgeCompareView: View {
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: "chevron.up")
-                    .font(.system(size: 11, weight: .semibold))
+                    .madFont(size: 11, weight: .semibold, maxScale: 1.5)
                 Text("Show less")
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .madFont(size: 12, weight: .semibold, design: .rounded)
             }
             .foregroundColor(.white.opacity(0.5))
             .padding(.horizontal, 12)
@@ -245,10 +245,10 @@ struct FriendBadgeCompareView: View {
     private var emptyState: some View {
         VStack(spacing: 12) {
             Image(systemName: selectedFilter == .youMissing ? "checkmark.circle" : "trophy")
-                .font(.system(size: 40))
+                .madFont(size: 40, maxScale: 1.5)
                 .foregroundColor(.white.opacity(0.3))
             Text(emptyStateText)
-                .font(MADTheme.Typography.caption)
+                .madFont(size: 12, design: .rounded)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
         }
@@ -266,7 +266,9 @@ struct FriendBadgeCompareView: View {
 
     private var youDontHaveTag: some View {
         Text("YOU'RE MISSING")
-            .font(.system(size: 8, weight: .black, design: .rounded))
+            .lineLimit(1)
+            .minimumScaleFactor(0.6)
+            .madFont(size: 11, weight: .black, design: .rounded)
             .tracking(0.6)
             .foregroundColor(.white)
             .padding(.horizontal, 6)
@@ -289,9 +291,9 @@ private struct CompareFilterChip: View {
         Button(action: action) {
             HStack(spacing: 6) {
                 Image(systemName: icon)
-                    .font(.system(size: 11, weight: .semibold))
+                    .madFont(size: 11, weight: .semibold, maxScale: 1.5)
                 Text(title)
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .madFont(size: 12, weight: .semibold, design: .rounded)
             }
             .foregroundColor(isSelected ? .white : .white.opacity(0.6))
             .padding(.horizontal, 12)
@@ -337,12 +339,14 @@ private struct FriendBadgeDetailView: View {
 
                     VStack(spacing: 6) {
                         Text(badge.name)
-                            .font(.system(size: 26, weight: .bold, design: .rounded))
+                            .madFont(size: 26, weight: .bold, design: .rounded)
                             .foregroundColor(.primary)
                             .multilineTextAlignment(.center)
 
                         Text(badge.rarity.rawValue.uppercased())
-                            .font(.system(size: 11, weight: .black, design: .rounded))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.6)
+                            .madFont(size: 11, weight: .black, design: .rounded)
                             .tracking(1.5)
                             .foregroundColor(badge.rarity.color)
                             .padding(.horizontal, 12)
@@ -351,7 +355,7 @@ private struct FriendBadgeDetailView: View {
                     }
 
                     Text(badge.description)
-                        .font(MADTheme.Typography.body)
+                        .madFont(size: 17, design: .rounded)
                         .foregroundColor(.secondary)
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, MADTheme.Spacing.lg)
@@ -359,17 +363,19 @@ private struct FriendBadgeDetailView: View {
                     if !badge.isLocked {
                         VStack(spacing: 4) {
                             Text("EARNED BY \(ownerDisplayName.uppercased())")
-                                .font(.system(size: 10, weight: .bold, design: .rounded))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.6)
+                                .madFont(size: 11, weight: .bold, design: .rounded)
                                 .tracking(1.2)
                                 .foregroundColor(.secondary)
                             Text(badge.dateAwarded.formattedShortDate)
-                                .font(.system(size: 14, weight: .semibold, design: .rounded))
+                                .madFont(size: 14, weight: .semibold, design: .rounded)
                                 .foregroundColor(.primary)
                         }
                         .padding(.top, MADTheme.Spacing.sm)
                     } else {
                         Text("\(ownerDisplayName) hasn't earned this yet.")
-                            .font(MADTheme.Typography.caption)
+                            .madFont(size: 12, design: .rounded)
                             .foregroundColor(.secondary)
                             .padding(.top, MADTheme.Spacing.sm)
                     }

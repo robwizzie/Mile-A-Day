@@ -54,7 +54,7 @@ struct FriendSearchView: View {
                     showingScanner = true
                 } label: {
                     Image(systemName: "qrcode.viewfinder")
-                        .font(.system(size: 17, weight: .semibold))
+                        .madFont(size: 17, weight: .semibold, maxScale: 1.5)
                 }
                 .accessibilityLabel("Scan a friend's QR code")
             }
@@ -113,16 +113,16 @@ struct FriendSearchView: View {
     private var searchBar: some View {
         HStack(spacing: MADTheme.Spacing.sm) {
             Image(systemName: "magnifyingglass")
-                .font(.system(size: 15, weight: .semibold))
+                .madFont(size: 15, weight: .semibold, maxScale: 1.5)
                 .foregroundColor(.white.opacity(0.45))
 
             TextField(
                 "",
                 text: $searchText,
                 prompt: Text("Search by username")
-                    .foregroundColor(.white.opacity(0.4))
+                    .foregroundColor(.white.opacity(0.6))
             )
-            .font(MADTheme.Typography.body)
+            .madFont(size: 17, design: .rounded)
             .foregroundColor(.white)
             .autocorrectionDisabled()
             .textInputAutocapitalization(.never)
@@ -134,7 +134,7 @@ struct FriendSearchView: View {
                     searchText = ""
                 } label: {
                     Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 16))
+                        .madFont(size: 16, maxScale: 1.5)
                         .foregroundColor(.white.opacity(0.4))
                 }
                 .buttonStyle(.plain)
@@ -179,7 +179,7 @@ struct FriendSearchView: View {
                                     } label: {
                                         HStack(spacing: MADTheme.Spacing.xs) {
                                             Text("Friends")
-                                                .font(MADTheme.Typography.smallBold)
+                                                .madFont(size: 14, weight: .semibold, design: .rounded)
                                             Image(systemName: "chevron.down")
                                                 .font(.caption2)
                                         }
@@ -225,7 +225,7 @@ struct FriendSearchView: View {
                 .progressViewStyle(CircularProgressViewStyle(tint: MADTheme.Colors.madRed))
 
             Text("Searching...")
-                .font(MADTheme.Typography.body)
+                .madFont(size: 17, design: .rounded)
                 .foregroundColor(MADTheme.Colors.secondaryText)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -235,16 +235,16 @@ struct FriendSearchView: View {
     private var noResultsView: some View {
         VStack(spacing: MADTheme.Spacing.lg) {
             Image(systemName: "magnifyingglass")
-                .font(.system(size: 48))
+                .madFont(size: 48, maxScale: 1.5)
                 .foregroundColor(MADTheme.Colors.secondaryText)
 
             VStack(spacing: MADTheme.Spacing.sm) {
                 Text("No Results Found")
-                    .font(MADTheme.Typography.title3)
+                    .madFont(size: 20, weight: .semibold, design: .rounded)
                     .foregroundColor(MADTheme.Colors.primaryText)
 
                 Text("We couldn't find any users matching '\(searchText)'. Try a different search term.")
-                    .font(MADTheme.Typography.body)
+                    .madFont(size: 17, design: .rounded)
                     .foregroundColor(MADTheme.Colors.secondaryText)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, MADTheme.Spacing.lg)
@@ -270,9 +270,11 @@ struct FriendSearchView: View {
                     .padding(.top, MADTheme.Spacing.xl)
                 } else if !suggestions.isEmpty {
                     Text("PEOPLE YOU MAY KNOW")
-                        .font(.system(size: 11, weight: .heavy, design: .rounded))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.6)
+                        .madFont(size: 11, weight: .heavy, design: .rounded)
                         .tracking(1.4)
-                        .foregroundColor(.white.opacity(0.4))
+                        .foregroundColor(.white.opacity(0.6))
                         .padding(.horizontal, 4)
                         .padding(.top, MADTheme.Spacing.sm)
 
@@ -301,15 +303,15 @@ struct FriendSearchView: View {
                 } else if hasLoadedSuggestions {
                     VStack(spacing: MADTheme.Spacing.sm) {
                         Image(systemName: "person.2.circle.fill")
-                            .font(.system(size: 48))
+                            .madFont(size: 48, maxScale: 1.5)
                             .foregroundColor(MADTheme.Colors.madRed)
 
                         Text("Discover Runners")
-                            .font(MADTheme.Typography.title2)
+                            .madFont(size: 22, weight: .bold, design: .rounded)
                             .foregroundColor(MADTheme.Colors.primaryText)
 
                         Text("Search by username to find people you know")
-                            .font(MADTheme.Typography.body)
+                            .madFont(size: 17, design: .rounded)
                             .foregroundColor(MADTheme.Colors.secondaryText)
                             .multilineTextAlignment(.center)
                     }
@@ -337,17 +339,17 @@ struct FriendSearchView: View {
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Invite Friends")
-                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .madFont(size: 15, weight: .bold, design: .rounded, maxScale: 1.3)
                         .foregroundColor(.white)
                     Text("Share your profile link or QR code")
-                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .madFont(size: 12, weight: .medium, design: .rounded)
                         .foregroundColor(.white.opacity(0.55))
                 }
 
                 Spacer(minLength: 4)
 
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 13, weight: .bold))
+                    .madFont(size: 13, weight: .bold, maxScale: 1.5)
                     .foregroundColor(.white.opacity(0.4))
             }
             .padding(MADTheme.Spacing.md)

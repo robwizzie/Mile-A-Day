@@ -199,21 +199,21 @@ struct LeaderboardSection: View {
         HStack(spacing: MADTheme.Spacing.md) {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Your rank")
-                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .madFont(size: 13, weight: .semibold, design: .rounded)
                     .foregroundColor(.white.opacity(0.6))
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     // The brand red lives on the number, not on the card.
                     Text("#\(entry.rank)")
-                        .font(.system(size: 34, weight: .black, design: .rounded))
+                        .madFont(size: 34, weight: .black, design: .rounded)
                         .foregroundColor(MADTheme.Colors.madRed)
                     if vm.totalCount > 0 {
                         Text("of \(vm.totalCount)")
-                            .font(.system(size: 13, weight: .semibold, design: .rounded))
-                            .foregroundColor(.white.opacity(0.4))
+                            .madFont(size: 13, weight: .semibold, design: .rounded)
+                            .foregroundColor(.white.opacity(0.6))
                     }
                 }
                 Text(filterSubtitle)
-                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .madFont(size: 11, weight: .medium, design: .rounded)
                     .foregroundColor(.white.opacity(0.45))
             }
 
@@ -221,10 +221,10 @@ struct LeaderboardSection: View {
 
             VStack(alignment: .trailing, spacing: 2) {
                 Text(formatValue(entry.value, metric: vm.metric))
-                    .font(.system(size: 24, weight: .bold, design: .rounded))
+                    .madFont(size: 24, weight: .bold, design: .rounded)
                     .foregroundColor(.white)
                 Text(metricUnitText)
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .madFont(size: 12, weight: .semibold, design: .rounded)
                     .foregroundColor(.white.opacity(0.5))
             }
         }
@@ -235,14 +235,14 @@ struct LeaderboardSection: View {
     private var notRankedCard: some View {
         HStack(spacing: MADTheme.Spacing.md) {
             Image(systemName: vm.metric.iconName)
-                .font(.system(size: 22, weight: .bold))
+                .madFont(size: 22, weight: .bold, maxScale: 1.5)
                 .foregroundColor(.white.opacity(0.35))
             VStack(alignment: .leading, spacing: 2) {
                 Text("You're not ranked yet")
-                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                    .madFont(size: 14, weight: .bold, design: .rounded)
                     .foregroundColor(.white)
                 Text(notRankedMessage)
-                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .madFont(size: 12, weight: .medium, design: .rounded)
                     .foregroundColor(.white.opacity(0.55))
             }
             Spacer()
@@ -292,11 +292,11 @@ struct LeaderboardSection: View {
     private func chipLabel(icon: String, text: String) -> some View {
         HStack(spacing: 5) {
             Image(systemName: icon)
-                .font(.system(size: 10, weight: .bold))
+                .madFont(size: 10, weight: .bold, maxScale: 1.5)
             Text(text)
-                .font(.system(size: 12, weight: .bold, design: .rounded))
+                .madFont(size: 12, weight: .bold, design: .rounded)
             Image(systemName: "chevron.down")
-                .font(.system(size: 8, weight: .heavy))
+                .madFont(size: 8, weight: .heavy, maxScale: 1.5)
                 .opacity(0.6)
         }
         .foregroundColor(.white)
@@ -333,16 +333,16 @@ struct LeaderboardSection: View {
     private var firstTimeEmptyState: some View {
         VStack(spacing: MADTheme.Spacing.md) {
             Image(systemName: "person.2.badge.plus")
-                .font(.system(size: 36, weight: .bold))
+                .madFont(size: 36, weight: .bold, maxScale: 1.5)
                 .foregroundColor(MADTheme.Colors.madRed.opacity(0.85))
                 .padding(.bottom, 4)
 
             Text("Add friends to compete")
-                .font(.system(size: 16, weight: .bold, design: .rounded))
+                .madFont(size: 16, weight: .bold, design: .rounded)
                 .foregroundColor(.white)
 
             Text("Your leaderboard fills in as soon as you add a friend. The board ranks you against people you actually know.")
-                .font(.system(size: 12, weight: .medium, design: .rounded))
+                .madFont(size: 12, weight: .medium, design: .rounded)
                 .foregroundColor(.white.opacity(0.55))
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, MADTheme.Spacing.lg)
@@ -354,9 +354,9 @@ struct LeaderboardSection: View {
                 } label: {
                     HStack(spacing: 6) {
                         Image(systemName: "person.badge.plus")
-                            .font(.system(size: 13, weight: .bold))
+                            .madFont(size: 13, weight: .bold, maxScale: 1.5)
                         Text("Find Friends")
-                            .font(.system(size: 13, weight: .bold, design: .rounded))
+                            .madFont(size: 13, weight: .bold, design: .rounded)
                     }
                     .foregroundColor(.white)
                     .padding(.horizontal, 18)
@@ -379,7 +379,7 @@ struct LeaderboardSection: View {
         VStack(spacing: MADTheme.Spacing.md) {
             ProgressView().tint(MADTheme.Colors.madRed)
             Text("Loading rankings…")
-                .font(.system(size: 13, weight: .medium, design: .rounded))
+                .madFont(size: 13, weight: .medium, design: .rounded)
                 .foregroundColor(.white.opacity(0.5))
         }
         .frame(maxWidth: .infinity)
@@ -389,17 +389,17 @@ struct LeaderboardSection: View {
     private func errorState(_ message: String) -> some View {
         VStack(spacing: MADTheme.Spacing.md) {
             Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 28))
+                .madFont(size: 28, maxScale: 1.5)
                 .foregroundColor(.orange.opacity(0.75))
 
             Text("Leaderboard didn't load")
-                .font(.system(size: 14, weight: .bold, design: .rounded))
+                .madFont(size: 14, weight: .bold, design: .rounded)
                 .foregroundColor(.white.opacity(0.85))
 
             // Full error text — selectable so the user can copy + send it back
             // when reporting issues. Wider than the rest of the UI on purpose.
             Text(message)
-                .font(.system(size: 12, weight: .regular, design: .monospaced))
+                .madFont(size: 12, weight: .regular, design: .monospaced)
                 .foregroundColor(.white.opacity(0.7))
                 .multilineTextAlignment(.center)
                 .textSelection(.enabled)
@@ -415,7 +415,7 @@ struct LeaderboardSection: View {
                 )
 
             Button("Retry") { vm.refresh() }
-                .font(.system(size: 13, weight: .bold, design: .rounded))
+                .madFont(size: 13, weight: .bold, design: .rounded)
                 .foregroundColor(.white)
                 .padding(.horizontal, 18)
                 .padding(.vertical, 9)
@@ -428,10 +428,10 @@ struct LeaderboardSection: View {
     private var emptyState: some View {
         VStack(spacing: MADTheme.Spacing.sm) {
             Image(systemName: vm.metric.iconName)
-                .font(.system(size: 32))
+                .madFont(size: 32, maxScale: 1.5)
                 .foregroundColor(.white.opacity(0.25))
             Text(emptyStateMessage)
-                .font(.system(size: 13, weight: .medium, design: .rounded))
+                .madFont(size: 13, weight: .medium, design: .rounded)
                 .foregroundColor(.white.opacity(0.55))
                 .multilineTextAlignment(.center)
         }
@@ -541,7 +541,7 @@ struct LeaderboardSection: View {
                         Circle().strokeBorder(accent, lineWidth: isFirst ? 3 : 2)
                     )
                 Text("\(entry.rank)")
-                    .font(.system(size: 11, weight: .heavy, design: .rounded))
+                    .madFont(size: 11, weight: .heavy, design: .rounded, maxScale: 1.3)
                     .foregroundColor(.black.opacity(0.8))
                     .frame(width: 20, height: 20)
                     .background(Circle().fill(accent))
@@ -555,20 +555,22 @@ struct LeaderboardSection: View {
             }
             VStack(spacing: 1) {
                 Text(handleText(entry))
-                    .font(.system(size: isFirst ? 13 : 11, weight: .bold, design: .rounded))
+                    .madFont(size: isFirst ? 13 : 11, weight: .bold, design: .rounded)
                     .foregroundColor(.white)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.75)
                 if entry.is_current_user {
                     youLabel
                 }
                 Text(formatValue(entry.value, metric: vm.metric))
-                    .font(.system(size: isFirst ? 14 : 12, weight: .heavy, design: .rounded))
+                    .madFont(size: isFirst ? 14 : 12, weight: .heavy, design: .rounded)
                     .foregroundColor(accent)
                 if let subtitle = podiumStatsSubtitle(entry) {
                     Text(subtitle)
-                        .font(.system(size: 9, weight: .semibold, design: .rounded))
+                        .madFont(size: 11, weight: .semibold, design: .rounded)
                         .foregroundColor(.white.opacity(0.45))
                         .lineLimit(1)
+                        .minimumScaleFactor(0.75)
                         .padding(.horizontal, 2)
                 }
             }
@@ -582,7 +584,7 @@ struct LeaderboardSection: View {
     /// "You" beside your own name: sentence case in the brand red, no chip.
     private var youLabel: some View {
         Text("You")
-            .font(.system(size: 11, weight: .bold, design: .rounded))
+            .madFont(size: 11, weight: .bold, design: .rounded)
             .foregroundColor(MADTheme.Colors.madRed)
             .lineLimit(1)
             .fixedSize()
@@ -602,7 +604,7 @@ struct LeaderboardSection: View {
     private func listRow(entry: LeaderboardEntry) -> some View {
         HStack(spacing: MADTheme.Spacing.md) {
             Text("\(entry.rank)")
-                .font(.system(size: 13, weight: .heavy, design: .rounded))
+                .madFont(size: 13, weight: .heavy, design: .rounded)
                 .foregroundColor(.white.opacity(0.5))
                 .frame(width: 28, alignment: .center)
 
@@ -614,25 +616,27 @@ struct LeaderboardSection: View {
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 4) {
                     Text(handleText(entry))
-                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+                        .madFont(size: 13, weight: .semibold, design: .rounded, maxScale: 1.3)
                         .foregroundColor(.white)
                         .lineLimit(1)
+                        .minimumScaleFactor(0.75)
                     if entry.is_current_user {
                         youLabel
                     }
                 }
                 if let subtitle = statsSubtitle(entry) {
                     Text(subtitle)
-                        .font(.system(size: 10, weight: .medium, design: .rounded))
+                        .madFont(size: 11, weight: .medium, design: .rounded)
                         .foregroundColor(.white.opacity(0.45))
                         .lineLimit(1)
+                        .minimumScaleFactor(0.75)
                 }
             }
 
             Spacer()
 
             Text(formatValue(entry.value, metric: vm.metric))
-                .font(.system(size: 13, weight: .bold, design: .rounded))
+                .madFont(size: 13, weight: .bold, design: .rounded)
                 .foregroundColor(.white.opacity(0.85))
         }
         .padding(.horizontal, MADTheme.Spacing.md)

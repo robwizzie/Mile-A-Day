@@ -95,10 +95,10 @@ struct FriendRequestsSheet: View {
         } label: {
             HStack(spacing: 6) {
                 Text(t.displayName)
-                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .madFont(size: 13, weight: .bold, design: .rounded)
                 if count > 0 {
                     Text("\(count)")
-                        .font(.system(size: 10, weight: .heavy, design: .rounded))
+                        .madFont(size: 11, weight: .heavy, design: .rounded)
                         .padding(.horizontal, 5)
                         .padding(.vertical, 1)
                         .background(
@@ -169,9 +169,9 @@ struct FriendRequestsSheet: View {
                                     Button(action: { run(request, onAccept) }) {
                                         HStack(spacing: MADTheme.Spacing.xs) {
                                             Image(systemName: "checkmark")
-                                                .font(.system(size: 12, weight: .semibold))
+                                                .madFont(size: 12, weight: .semibold, maxScale: 1.5)
                                             Text("Accept")
-                                                .font(MADTheme.Typography.smallBold)
+                                                .madFont(size: 14, weight: .semibold, design: .rounded)
                                         }
                                         .foregroundColor(.white)
                                         .frame(maxWidth: .infinity)
@@ -186,9 +186,9 @@ struct FriendRequestsSheet: View {
                                     Button(action: { run(request, onDecline) }) {
                                         HStack(spacing: MADTheme.Spacing.xs) {
                                             Image(systemName: "xmark")
-                                                .font(.system(size: 12, weight: .semibold))
+                                                .madFont(size: 12, weight: .semibold, maxScale: 1.5)
                                             Text("Decline")
-                                                .font(MADTheme.Typography.smallBold)
+                                                .madFont(size: 14, weight: .semibold, design: .rounded)
                                         }
                                         .foregroundColor(.white.opacity(0.7))
                                         .frame(maxWidth: .infinity)
@@ -204,7 +204,7 @@ struct FriendRequestsSheet: View {
                                     }
                                     .buttonStyle(.plain)
                                 }
-                                .frame(width: 90)
+                                .frame(minWidth: 90)
                                 .disabled(inFlight.contains(request.user_id))
                                 .opacity(inFlight.contains(request.user_id) ? 0.5 : 1)
                             )
@@ -264,10 +264,10 @@ private struct FriendRequestFeedbackBanner: View {
                 .fill(accent)
                 .frame(width: 3, height: 28)
             Image(systemName: feedback.icon)
-                .font(.system(size: 14, weight: .bold))
+                .madFont(size: 14, weight: .bold, maxScale: 1.5)
                 .foregroundColor(accent)
             Text(feedback.message)
-                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                .madFont(size: 13, weight: .semibold, design: .rounded)
                 .foregroundColor(.white)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)

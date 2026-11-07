@@ -51,7 +51,7 @@ struct QRScannerView: View {
 
     private var hintBanner: some View {
         Text("Point at a friend's Mile A Day QR code")
-            .font(.system(size: 14, weight: .semibold, design: .rounded))
+            .madFont(size: 14, weight: .semibold, design: .rounded)
             .foregroundColor(.white)
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
@@ -61,7 +61,7 @@ struct QRScannerView: View {
 
     private func message(_ text: String) -> some View {
         Text(text)
-            .font(.system(size: 15, weight: .medium, design: .rounded))
+            .madFont(size: 15, weight: .medium, design: .rounded)
             .foregroundColor(.white.opacity(0.85))
             .multilineTextAlignment(.center)
             .padding(32)

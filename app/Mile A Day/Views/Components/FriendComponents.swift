@@ -40,7 +40,7 @@ struct UserProfileCard: View {
                         // Username and Name
                         VStack(alignment: .leading, spacing: 2) {
                             Text(user.username ?? "Unknown")
-                                .font(MADTheme.Typography.headline)
+                                .madFont(size: 17, weight: .semibold, design: .rounded)
                                 .foregroundColor(MADTheme.Colors.primaryText)
                                 // Truncate long names with an ellipsis instead of
                                 // wrapping char-by-char (e.g. "Char les") when the
@@ -51,9 +51,9 @@ struct UserProfileCard: View {
 
                             if user.displayName != user.username {
                                 Text(user.displayName)
-                                    .font(MADTheme.Typography.caption)
+                                    .madFont(size: 12, design: .rounded)
                                     .foregroundColor(MADTheme.Colors.secondaryText)
-                                    .lineLimit(1)
+                                    .madNameLines()
                                     .truncationMode(.tail)
                             }
                         }
@@ -61,16 +61,17 @@ struct UserProfileCard: View {
                         // Subtitle (e.g., today's progress)
                         if let subtitle = subtitle {
                             Text(subtitle)
-                                .font(.system(size: 11, weight: .medium, design: .rounded))
+                                .madFont(size: 11, weight: .medium, design: .rounded)
                                 .foregroundColor(subtitle.contains("Done") ? .green.opacity(0.8) : .orange.opacity(0.8))
                                 .lineLimit(1)
+                                .minimumScaleFactor(0.75)
                                 .truncationMode(.tail)
                         }
 
                         // Bio
                         if showDetails, let bio = user.bio, !bio.isEmpty {
                             Text(bio)
-                                .font(MADTheme.Typography.caption)
+                                .madFont(size: 12, design: .rounded)
                                 .foregroundColor(MADTheme.Colors.secondaryText)
                                 .lineLimit(2)
                         }
@@ -139,7 +140,7 @@ struct FriendActionButton: View {
                         .progressViewStyle(CircularProgressViewStyle(tint: style.foregroundColor))
                 } else {
                     Text(title)
-                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                        .madFont(size: 13, weight: .bold, design: .rounded)
                 }
             }
             .foregroundColor(style.foregroundColor)
@@ -240,7 +241,7 @@ struct FriendStatsView: View {
                 ProgressView()
                     .tint(MADTheme.Colors.madRed)
                 Text("Loading stats…")
-                    .font(.system(size: 13, weight: .medium, design: .rounded))
+                    .madFont(size: 13, weight: .medium, design: .rounded)
                     .foregroundColor(.white.opacity(0.5))
             }
             .frame(maxWidth: .infinity)
@@ -258,17 +259,17 @@ struct FriendBadgesView: View {
         VStack(spacing: MADTheme.Spacing.sm) {
             HStack {
                 Text("Medals")
-                    .font(MADTheme.Typography.headline)
+                    .madFont(size: 17, weight: .semibold, design: .rounded)
                     .foregroundColor(MADTheme.Colors.primaryText)
                 Spacer()
                 Text("\(badges.count)")
-                    .font(MADTheme.Typography.caption)
+                    .madFont(size: 12, design: .rounded)
                     .foregroundColor(MADTheme.Colors.secondaryText)
             }
             
             if badges.isEmpty {
                 Text("No medals yet")
-                    .font(MADTheme.Typography.caption)
+                    .madFont(size: 12, design: .rounded)
                     .foregroundColor(MADTheme.Colors.secondaryText)
                     .frame(maxWidth: .infinity)
                     .padding(MADTheme.Spacing.lg)
@@ -281,7 +282,7 @@ struct FriendBadgesView: View {
                 
                 if badges.count > 6 {
                     Text("+ \(badges.count - 6) more")
-                        .font(MADTheme.Typography.caption)
+                        .madFont(size: 12, design: .rounded)
                         .foregroundColor(MADTheme.Colors.secondaryText)
                         .padding(.top, MADTheme.Spacing.sm)
                 }
@@ -303,7 +304,7 @@ struct BadgeView: View {
                 .foregroundColor(badge.rarity.color)
             
             Text(badge.name)
-                .font(MADTheme.Typography.caption)
+                .madFont(size: 12, design: .rounded)
                 .foregroundColor(MADTheme.Colors.primaryText)
                 .multilineTextAlignment(.center)
                 .lineLimit(2)
@@ -401,12 +402,12 @@ struct FriendEmptyStateView: View {
 
             VStack(spacing: MADTheme.Spacing.md) {
                 Text(title)
-                    .font(.system(size: 28, weight: .bold, design: .rounded))
+                    .madFont(size: 28, weight: .bold, design: .rounded)
                     .foregroundColor(MADTheme.Colors.primaryText)
                     .multilineTextAlignment(.center)
 
                 Text(message)
-                    .font(MADTheme.Typography.body)
+                    .madFont(size: 17, design: .rounded)
                     .foregroundColor(MADTheme.Colors.secondaryText)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, MADTheme.Spacing.lg)
@@ -418,7 +419,7 @@ struct FriendEmptyStateView: View {
                         Image(systemName: "person.badge.plus")
                             .font(.title3)
                         Text(actionTitle)
-                            .font(MADTheme.Typography.callout)
+                            .madFont(size: 16, design: .rounded)
                             .fontWeight(.semibold)
                     }
                     .foregroundColor(.white)
