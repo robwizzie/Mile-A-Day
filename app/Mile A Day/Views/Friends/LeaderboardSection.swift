@@ -557,8 +557,7 @@ struct LeaderboardSection: View {
                 Text(handleText(entry))
                     .madFont(size: isFirst ? 13 : 11, weight: .bold, design: .rounded)
                     .foregroundColor(.white)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.75)
+                    .madNameLines()
                 if entry.is_current_user {
                     youLabel
                 }
@@ -618,8 +617,7 @@ struct LeaderboardSection: View {
                     Text(handleText(entry))
                         .madFont(size: 13, weight: .semibold, design: .rounded, maxScale: 1.3)
                         .foregroundColor(.white)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.75)
+                        .madNameLines()
                     if entry.is_current_user {
                         youLabel
                     }
