@@ -43,6 +43,7 @@ struct FlameyClosetView: View {
     var previewCollapsed: Bool = false
     var previewScroll: CGFloat = 0
 
+    @Environment(\.duoSpread) private var duoSpread
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var typeSize
     @State private var lineClear: Task<Void, Never>?
@@ -63,29 +64,52 @@ struct FlameyClosetView: View {
 
     private var isCollapsed: Bool { collapsed || previewCollapsed }
 
+    /// iPhone Duo's inner display: Flamey gets his own page, and the wardrobe
+    /// the other, so every outfit tries on with the whole of him in view.
+    private var showsDressingRoom: Bool { duoSpread && scrollable }
+
+    private var dressingRoomStage: some View {
+        VStack(spacing: 12) {
+            Spacer(minLength: 0)
+            stage(size: 210)
+            FlameyNamePlate(name: model.name) {
+                MADHaptics.tap()
+                sheet = .name
+            }
+            caption
+            VStack(spacing: 8) { actionButtons(compact: false) }
+                .padding(.horizontal, 20)
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             topBar
                 .sheet(item: $sheet) { which in
                     sheetView(which)
                 }
-            ScrollViewReader { proxy in
-                VStack(spacing: 0) {
-                    header { slot in
-                        withAnimation(reduceMotion ? nil : .snappy) {
-                            proxy.scrollTo(anchorId(slot), anchor: .top)
+            HStack(spacing: 0) {
+                if showsDressingRoom { dressingRoomStage }
+                ScrollViewReader { proxy in
+                    VStack(spacing: 0) {
+                        header { slot in
+                            withAnimation(reduceMotion ? nil : .snappy) {
+                                proxy.scrollTo(anchorId(slot), anchor: .top)
+                            }
                         }
+                        grid
                     }
-                    grid
-                }
-                .onChange(of: model.tab) { _, _ in
-                    proxy.scrollTo("closet-top", anchor: .top)
-                }
-                .onAppear {
-                    // Opened ON an item (a medal's "See it in Flamey's
-                    // Closet", the unlock card): land on its section.
-                    guard scrollable, let focus = model.focus else { return }
-                    DispatchQueue.main.async { proxy.scrollTo(anchorId(focus.slot), anchor: .top) }
+                    .onChange(of: model.tab) { _, _ in
+                        proxy.scrollTo("closet-top", anchor: .top)
+                    }
+                    .onAppear {
+                        // Opened ON an item (a medal's "See it in Flamey's
+                        // Closet", the unlock card): land on its section.
+                        guard scrollable, let focus = model.focus else { return }
+                        DispatchQueue.main.async { proxy.scrollTo(anchorId(focus.slot), anchor: .top) }
+                    }
                 }
             }
         }
@@ -266,7 +290,10 @@ struct FlameyClosetView: View {
 
     private func header(jump: @escaping (FlameySlot) -> Void) -> some View {
         VStack(spacing: 0) {
-            if isCollapsed {
+            if showsDressingRoom {
+                // The stage has its own page.
+                EmptyView()
+            } else if isCollapsed {
                 HStack(alignment: .center, spacing: 10) {
                     stage(size: 80)
                         .frame(width: 142)

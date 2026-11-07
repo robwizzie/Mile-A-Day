@@ -266,6 +266,14 @@ Checked at accessibility-extra-extra-large on the iPhone Duo outer display and i
 
 Known gap: most of the app still uses fixed `.font(.system(size:))` (about 2,500 in `Views/`, against about 700 `madFont`), so Compete and Profile ignore the system text size, and about 380 of those are under 11pt. Share cards keep fixed sizes on purpose. Migrate screen by screen, checking every width, not as one mechanical replace.
 
+### Duo-only features (Nov 2026)
+
+`Views/Duo/` holds the iPhone Duo experiences: Tuck Flamey in (`DuoFlameyMomentsHost`, hinge open/close, each once a day and never mid-workout), Home at a glance (`DuoHomeSplit`), the Closet dressing room (`showsDressingRoom`), Duel view (`DuoDuelCard`, exactly two accepted people and no teams, since there is no head-to-head type), Share Studio's two columns, Flyover cinema (`DuoFlyoverSplitsPanel`) and the buddy command center (`DuoBuddyPanel`).
+
+The gate is two tests: a hinged model AND a window at least `spreadMinWidth` wide. Folded, or narrowed in Split View, the app is the ordinary iPhone app. `.duoSpreadHost()` sits on `RootView` because the Closet's cover is presented from above the tab bar: a host on the `TabView` left it out. `DuoFlameyMomentsHost` must keep a real view (`Color.clear`): an empty body gets no lifecycle, so the hinge observer never attaches.
+
+Testing: Debug builds take `-MADDuoPreview` on a wide simulator, with `TARGETED_DEVICE_FAMILY=1,2` on the xcodebuild command line only, plus `-MADDuoMoment stretch|tuck` and `-MADDuoDemo flyover|share`. `simctl location` drives the buddy route. Screenshots in `docs/duo-screenshots/` came from that iPad stand-in. If a test backend will not bind, check `lsof -iTCP:<port>`: another session's server on that port answers with its own database, which shows up as "No user found" and a 0-day streak.
+
 ## Performance
 
 The app felt slow and the console showed "Gesture: System gesture gate timed out" (the main thread was busy when a touch began). An audit found:

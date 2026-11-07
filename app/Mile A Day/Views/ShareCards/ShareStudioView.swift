@@ -55,6 +55,7 @@ struct ShareStudioView: View {
     /// available.
     var initialTemplate: ShareTemplate? = nil
 
+    @Environment(\.duoSpread) private var duoSpread
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -130,26 +131,47 @@ struct ShareStudioView: View {
 
             VStack(spacing: 0) {
                 header
-                if families.count > 1 {
-                    familyChips
-                        .padding(.top, 2)
-                }
-                carousel
-                    .padding(.top, 10)
-                pageCaption
-                    .padding(.top, 10)
-                options
-                    .padding(.horizontal, 20)
-                    .padding(.top, 12)
-                destinations
-                    .padding(.horizontal, 20)
-                    .padding(.top, 14)
-                    .padding(.bottom, 8)
-                    // Its own node: two presentations on one view race.
-                    .sheet(item: $messageItem) { item in
-                        MessageComposeSheet(image: item.image, link: link) { messageItem = nil }
-                            .ignoresSafeArea()
+                if duoSpread {
+                    // iPhone Duo's inner display: the card on one page, the
+                    // styles and ways to share it on the other.
+                    HStack(spacing: 0) {
+                        VStack(spacing: 0) {
+                            if families.count > 1 {
+                                familyChips
+                                    .padding(.top, 2)
+                            }
+                            carousel
+                                .padding(.top, 10)
+                            pageCaption
+                                .padding(.vertical, 10)
+                        }
+                        .frame(maxWidth: .infinity)
+                        ScrollView(showsIndicators: false) {
+                            VStack(spacing: 14) {
+                                options
+                                destinationsNode
+                            }
+                            .padding(20)
+                        }
+                        .frame(maxWidth: .infinity)
                     }
+                } else {
+                    if families.count > 1 {
+                        familyChips
+                            .padding(.top, 2)
+                    }
+                    carousel
+                        .padding(.top, 10)
+                    pageCaption
+                        .padding(.top, 10)
+                    options
+                        .padding(.horizontal, 20)
+                        .padding(.top, 12)
+                    destinationsNode
+                        .padding(.horizontal, 20)
+                        .padding(.top, 14)
+                        .padding(.bottom, 8)
+                }
             }
 
             if let toast {
@@ -180,6 +202,15 @@ struct ShareStudioView: View {
         .sheet(item: $shareItems) { items in
             ActivityViewController(activityItems: items.items)
         }
+    }
+
+    /// Its own node: two presentations on one view race.
+    private var destinationsNode: some View {
+        destinations
+            .sheet(item: $messageItem) { item in
+                MessageComposeSheet(image: item.image, link: link) { messageItem = nil }
+                    .ignoresSafeArea()
+            }
     }
 
     // MARK: Header

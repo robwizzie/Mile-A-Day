@@ -12,6 +12,10 @@ extension CompetitionDetailView {
     // ring strip (Apple-Fitness style) — taps drill into a per-day sheet.
     var activeContent: some View {
         VStack(spacing: MADTheme.Spacing.xl) {
+            if duoSpread, DuoDuelCard.isDuel(competition) {
+                DuoDuelCard(competition: competition)
+            }
+
             CompetitionMyDailyRings(competition: competition)
 
             mainTabbedCard

@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct CompetitionDetailView: View {
+    @Environment(\.duoSpread) var duoSpread
     @State var competition: Competition
     @ObservedObject var competitionService: CompetitionService
     @Environment(\.dismiss) var dismiss

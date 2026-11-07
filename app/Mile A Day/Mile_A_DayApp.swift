@@ -31,6 +31,7 @@ struct Mile_A_DayApp: App {
     var body: some Scene {
         WindowGroup {
             RootView()
+                .duoSpreadHost()
                 .preferredColorScheme(.dark)
                 .task {
                     await verifyAppleCredentialIfNeeded()

@@ -694,6 +694,7 @@ struct RouteFlyoverPlayerView: View {
     /// advance timer (replay starts, tour yanks to the next leg anyway).
     var showsReplay: Bool = true
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.duoSpread) private var duoSpread
 
     @State private var phase: FlyoverPhase = .loading
     @State private var fraction: Double = 0
@@ -827,6 +828,14 @@ struct RouteFlyoverPlayerView: View {
                 topBar
                 Spacer()
                 hud
+            }
+
+            if duoSpread, !launch.splitBars.isEmpty, phase != .loading {
+                DuoFlyoverSplitsPanel(bars: launch.splitBars, miles: miles)
+                    .padding(.top, 96)
+                    .padding(.bottom, 250)
+                    .padding(.trailing, 14)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
             }
         }
         .animation(.easeOut(duration: 0.5), value: phase == .loading)

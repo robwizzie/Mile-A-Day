@@ -41,6 +41,7 @@ struct WorkoutTrackingView: View {
     // Shared singleton — tracking keeps running when this view is dismissed
     // (e.g. user navigates back to the dashboard mid-workout).
     @ObservedObject private var locationManager = WorkoutLocationManager.shared
+    @Environment(\.duoSpread) private var duoSpread
     // Pre-start wizard, in order: activity → location → race mode → ghost
     // options (only when the race is chosen) → presence consent (once ever) →
     // countdown. Each step owns exactly one question, and every one of these
@@ -852,6 +853,7 @@ struct WorkoutTrackingView: View {
                 // they don't — without ever pushing the Stop button off-screen.
                 // Spacing and ring size adapt to the screen height so compact
                 // devices fit without scrolling while large ones keep the airy look.
+                HStack(spacing: 0) {
                 ScrollView {
                     VStack(spacing: metricSpacing(for: screen.size.height)) {
                         Spacer(minLength: 0)
@@ -864,7 +866,10 @@ struct WorkoutTrackingView: View {
 
                         // Buddy Walk roster sits ABOVE your own metrics: the
                         // crew is context, your distance is still the subject.
-                        if effectiveBuddySessionId != nil, let session = buddyService.session {
+                        if showsBuddyCommandCenter {
+                            // The crew has its own page beside the map.
+                            EmptyView()
+                        } else if effectiveBuddySessionId != nil, let session = buddyService.session {
                             BuddyRosterStrip(
                                 session: session,
                                 currentUserId: buddyService.currentUserId,
@@ -921,6 +926,19 @@ struct WorkoutTrackingView: View {
                             }
                     }
                 )
+                .frame(maxWidth: .infinity)
+
+                if showsBuddyCommandCenter, let session = buddyService.session {
+                    DuoBuddyPanel {
+                        BuddyRosterStrip(
+                            session: session,
+                            currentUserId: buddyService.currentUserId,
+                            myPause: locationManager.isPausedForCrew
+                        )
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                }
 
                 workoutControls
             }
@@ -1406,6 +1424,13 @@ struct WorkoutTrackingView: View {
     }
 
     /// Vertical spacing between the metric blocks, tightened on shorter screens.
+    /// iPhone Duo's inner display, mid-buddy-walk, outdoors: your route and
+    /// the crew on their own page. Indoors there is no route to draw.
+    private var showsBuddyCommandCenter: Bool {
+        duoSpread && effectiveBuddySessionId != nil && buddyService.session != nil
+            && !locationManager.acceptsTreadmill
+    }
+
     private func metricSpacing(for screenHeight: CGFloat) -> CGFloat {
         guard screenHeight > 0 else { return 40 }
         return screenHeight < 700 ? 24 : 40

@@ -81,16 +81,18 @@ struct MainTabView: View {
     var body: some View {
         ZStack(alignment: .bottom) {
         TabView(selection: $selectedTab) {
-            NavigationStack {
-                DashboardView(
-                    healthManager: healthManager,
-                    userManager: userManager,
-                    unreadNotificationCount: $unreadNotificationCount,
-                    showNotificationInbox: $showNotificationInbox
-                )
-                    .environmentObject(notificationService)
-                    .environmentObject(competitionService)
-                    .environmentObject(friendService)
+            DuoHomeSplit(friendService: friendService) {
+                NavigationStack {
+                    DashboardView(
+                        healthManager: healthManager,
+                        userManager: userManager,
+                        unreadNotificationCount: $unreadNotificationCount,
+                        showNotificationInbox: $showNotificationInbox
+                    )
+                        .environmentObject(notificationService)
+                        .environmentObject(competitionService)
+                        .environmentObject(friendService)
+                }
             }
             .tabItem {
                 Label("Dashboard", systemImage: "house.fill")
@@ -407,6 +409,17 @@ struct MainTabView: View {
             // Keep widget data in sync so the willPresent check has fresh data
             WidgetDataStore.save(todayMiles: newDistance, goal: userManager.currentUser.goalMiles)
         }
+
+            if DuoDevice.isDuo {
+                DuoFlameyMomentsHost(
+                    dayDone: ProgressCalculator.isDayComplete(
+                        miles: healthManager.todaysDistance,
+                        goal: userManager.currentUser.goalMiles,
+                        stepGoalMet: StepGoalDayStore.isTodayMet()
+                    ),
+                    isTracking: isTracking
+                )
+            }
 
             // Sync status floats above the tab bar for the same reason as the
             // workout banner below, and above that banner when both show.
