@@ -39,18 +39,59 @@ export default function PrivacyPage() {
 			<Section heading="Information We Collect">
 				<p>
 					<span className="font-semibold text-[#f5f5f5]">Account information.</span> When you sign in with Apple, we
-					receive your name and an Apple-provided identifier. If you choose to hide your email, Apple provides a private
-					relay address instead of your real email. We use this information to create and maintain your account.
+					receive an Apple-provided identifier and, if you share them, your name and email address. If you choose to hide
+					your email, Apple provides a private relay address instead of your real email. We use this information to
+					create and maintain your account.
 				</p>
 				<p>
-					<span className="font-semibold text-[#f5f5f5]">Profile information.</span> Your chosen username, display name,
-					and optional profile photo.
+					<span className="font-semibold text-[#f5f5f5]">Profile information.</span> Your chosen username, first and
+					last name, and optional bio, profile photo, and banner image, plus your daily goal and app personalization
+					such as your Flamey&rsquo;s name and look. Part of your profile is public. See{' '}
+					<span className="font-semibold text-[#f5f5f5]">How We Share Information</span> below.
+				</p>
+				<p>
+					<span className="font-semibold text-[#f5f5f5]">Setup answers.</span> During setup you can tell us how you heard about Mile A Day (and, if you
+					type it, a detail such as a friend&rsquo;s username), what you want from the app, and your experience level.
+					These questions are optional.
 				</p>
 				<p>
 					<span className="font-semibold text-[#f5f5f5]">Health and fitness data.</span> With your explicit permission,
-					the app reads workout and distance data from Apple HealthKit — including walks, runs, distance traveled, and
-					workout dates — to calculate your daily mile, streaks, and personal records. This data is read from HealthKit
-					on your device and synced to our servers to power streaks, leaderboards, and competitions.
+					the app reads your workouts, walking and running distance, active energy, step counts, and workout routes
+					from Apple HealthKit to calculate your daily mile, streaks, and personal records. This data is read on your
+					device and synced to our servers to power streaks, leaderboards, and competitions.
+				</p>
+				<p>What we store on our servers:</p>
+				<ul className="list-disc space-y-2 pl-6">
+					<li>
+						For each workout: its type (such as walk, run, cycle, or hike), date, time zone offset, distance, duration,
+						moving time, mile splits and pace, calories, steps, and whether it was indoors.
+					</li>
+					<li>
+						Which app recorded the workout, such as Apple Workout or another fitness app, as that app&rsquo;s
+						identifier.
+					</li>
+					<li>
+						Your daily step count. The app sends this as you go and for the last 30 days, and it also sends past days
+						on which you reached the step goal, as far back as Health and your account allow.
+					</li>
+					<li>Workouts you enter by hand or import from another service&rsquo;s export file.</li>
+				</ul>
+				<p>
+					Your distance during a tracked workout is also sent to us as you go, so friends can follow along (see{' '}
+					<span className="font-semibold text-[#f5f5f5]">How We Share Information</span>).
+				</p>
+				<p>
+					Some health data stays on your device. On Apple Watch, the app reads your heart rate to show it during a
+					workout and saves it to Apple Health with that workout, but heart rate is not sent to our servers. Body weight
+					is never uploaded. The current app does not read it, and its calorie estimates use a typical adult&rsquo;s
+					weight. The app also saves workouts you complete, with their distance, active energy, and routes, to Apple
+					Health.
+				</p>
+				<p>
+					<span className="font-semibold text-[#f5f5f5]">Motion and treadmill data.</span> For indoor workouts, the app can use your device&rsquo;s
+					motion and pedometer sensors, or read speed and distance from a gym treadmill over Bluetooth. These readings
+					are used on your device to measure the workout. Only the resulting distance and workout details above are
+					uploaded.
 				</p>
 				<p>
 					<span className="font-semibold text-[#f5f5f5]">Location and GPS routes.</span> The precise path of your outdoor walks and
@@ -59,8 +100,26 @@ export default function PrivacyPage() {
 					see it.
 				</p>
 				<p>
-					<span className="font-semibold text-[#f5f5f5]">Social activity.</span> Friend connections, competitions you
-					join, and related activity needed to operate the social features of the app.
+					<span className="font-semibold text-[#f5f5f5]">Posts and photos.</span> The photos you post, including front
+					and back camera pairs, and the captions, stickers, tagged people, and workout stats on them. We also store
+					whether a post&rsquo;s photo came from the camera or your library, and your story highlights. The camera is used only
+					when you take a photo or scan a friend&rsquo;s QR code, and QR scanning stays on your device. If you add a
+					picture from your library, the app shows you photos taken during that workout, and only the one you
+					choose is uploaded. We re-encode uploaded photos, which removes embedded information such as location. Photos
+					you save go to your photo library; we do not see them unless you post them.
+				</p>
+				<p>
+					<span className="font-semibold text-[#f5f5f5]">Social activity.</span> Friend connections and requests, competitions and Buddy Walks you join,
+					comments, reactions and hypes, nudges, who viewed your stories, and related activity needed to operate
+					the social features of the app.
+				</p>
+				<p>
+					<span className="font-semibold text-[#f5f5f5]">Shoes.</span> If you track shoes, we store each shoe&rsquo;s name, brand, colorway, photo, mileage,
+					replacement goal, and the workouts you assign it to.
+				</p>
+				<p>
+					<span className="font-semibold text-[#f5f5f5]">Reports and blocks.</span> If you report a post or comment, we store your report, including the
+					reason and any details you add. We also store who you have blocked.
 				</p>
 				<p>
 					<span className="font-semibold text-[#f5f5f5]">Purchase information.</span> If you buy Mile A Day+ or a gift,
@@ -76,8 +135,43 @@ export default function PrivacyPage() {
 					Email us to be removed at any time.
 				</p>
 				<p>
-					<span className="font-semibold text-[#f5f5f5]">Usage and device data.</span> Basic technical information
-					needed to operate the service, such as app version and authentication tokens.
+					<span className="font-semibold text-[#f5f5f5]">Merch orders.</span> Our store at mileaday.shop checks out on
+					Shopify, not on our systems. Shopify receives what you enter at checkout, and Tapstitch makes and ships orders.
+				</p>
+				<p>
+					<span className="font-semibold text-[#f5f5f5]">Device, usage, and diagnostic data.</span> Information we use to run the service and fix problems:
+				</p>
+				<ul className="list-disc space-y-2 pl-6">
+					<li>
+						<span className="font-semibold text-[#f5f5f5]">Sign-in records.</span> Your IP address and device or browser type (user agent) each time your
+						session is created or renewed, along with authentication tokens.
+					</li>
+					<li>
+						<span className="font-semibold text-[#f5f5f5]">Notifications.</span> Your device&rsquo;s push notification token, which widgets you have
+						installed, and a record of notifications sent to you.
+					</li>
+					<li>
+						<span className="font-semibold text-[#f5f5f5]">Crash and performance reports.</span> The app sends us reports from Apple&rsquo;s MetricKit about
+						crashes, hangs, and how the app is performing. They include your app version, iOS version, device model, and
+						technical traces of what the app was doing, and are linked to your account.
+					</li>
+					<li>
+						<span className="font-semibold text-[#f5f5f5]">Feature usage.</span> Which of certain features you use, such as a share destination or a Mile
+						A Day+ screen, linked to your account.
+					</li>
+					<li>
+						<span className="font-semibold text-[#f5f5f5]">Error logs.</span> When a request fails, we log it with your account ID, the address that was
+						requested (which can include text you searched for), and technical details. A failed sign-in can log the
+						email address it used.
+					</li>
+				</ul>
+				<p>
+					<span className="font-semibold text-[#f5f5f5]">Website visits.</span> Our websites use Vercel Analytics to measure visits. Our public pages do
+					not set cookies, but your browser sends your IP address to any site you visit, including ours.
+				</p>
+				<p>
+					The app contains no advertising or third-party analytics software, and we do not track you across other
+					companies&rsquo; apps or websites.
 				</p>
 			</Section>
 
@@ -85,18 +179,22 @@ export default function PrivacyPage() {
 				<ul className="list-disc space-y-2 pl-6">
 					<li>To create your account and authenticate you when you sign in.</li>
 					<li>To calculate and display your daily mile progress, streaks, and personal records.</li>
-					<li>To power friends, leaderboards, and competitions.</li>
+					<li>To power friends, posts, stories, leaderboards, and competitions.</li>
+					<li>To show your public profile.</li>
 					<li>To draw your routes for you and, depending on your settings, for other people in the app.</li>
 					<li>To send notifications you have enabled, such as streak reminders.</li>
 					<li>To provide Mile A Day+ when you have it, including gifts and Family Sharing.</li>
-					<li>To maintain, troubleshoot, and improve the app.</li>
+					<li>To maintain, troubleshoot, and improve the app, including finding the cause of crashes and errors.</li>
+					<li>To understand which features people use and how they found the app.</li>
+					<li>To keep accounts secure, review reports, and enforce our Terms.</li>
 				</ul>
 			</Section>
 
 			<Section heading="HealthKit Data">
 				<p>
 					Health data accessed through Apple HealthKit is used solely to provide the app&rsquo;s fitness tracking and
-					social features, including the route sharing and the aggregate location view described below. We do not use
+					social features, including the route sharing and the aggregate location view described below and the total
+					miles on your public profile. We do not use
 					HealthKit data for advertising or marketing, and we do not sell it or share it with data brokers. You can
 					review and revoke the app&rsquo;s HealthKit permissions at any time in the iOS Settings app under Privacy
 					&amp; Security &rarr; Health.
@@ -200,7 +298,7 @@ export default function PrivacyPage() {
 				</ul>
 				<p>
 					<span className="font-semibold text-[#f5f5f5]">What is not shared.</span> Friends can see that you are out on a walk right
-					now if you allow it, but never where. Unless you turn on live route sharing for a Buddy Walk, Buddy Walks share
+					now, and your distance so far, if you allow it, but never where. Unless you turn on live route sharing for a Buddy Walk, Buddy Walks share
 					distance and progress during the walk, not your position. Your routes do not appear on our public website pages, including shared profile and post links.
 				</p>
 				<p>
@@ -215,16 +313,53 @@ export default function PrivacyPage() {
 				<p>We do not sell your personal information. We share information only in these limited cases:</p>
 				<ul className="list-disc space-y-2 pl-6">
 					<li>
-						<span className="font-semibold text-[#f5f5f5]">With other users.</span> Your username, profile photo,
-						streak, and competition results are visible to friends and competition participants, as that is the core
-						purpose of the app. Your GPS routes are also visible to other users according to your settings, as described
-						in Location and Route Data. By default, that means your accepted friends.
+						<span className="font-semibold text-[#f5f5f5]">With anyone, without an account.</span> Everyone has a public profile page at
+						mileaday.run/u/your-username, and anyone can open it, whether or not they use Mile A Day. It always shows your
+						name, username, bio, profile photo, banner, and current streak. Unless Who can see my workouts is set to
+						&ldquo;Only me,&rdquo; it also shows your lifetime miles, friend count, and up to five medals. Search engines
+						may list these pages. A link to a post you share shows your name, username, photo, and streak, but
+						not the post&rsquo;s photo, caption, or route. Profile photos, banners, and shoe photos are stored at web
+						addresses that do not need a sign-in.
+					</li>
+					<li>
+						<span className="font-semibold text-[#f5f5f5]">With other Mile A Day users.</span> Anyone signed in can find you by name or username and see
+						your name, username, bio, profile photo, and streak, even if you are not friends.
+					</li>
+					<li>
+						<span className="font-semibold text-[#f5f5f5]">With friends and people in your activities.</span> By default, accepted friends can see your
+						posts, stories, comments, workouts and their stats (such as distance, pace, time, calories, and steps), medals,
+						and streaks. They also appear on leaderboards with you, and can see that you are out
+						on a tracked workout and your distance so far unless you turn that off. People in your competitions and
+						Buddy Walks see your results. Tagged people and people you post with appear on the post. You can
+						see who viewed your stories, and others can see the same for theirs. Setting Who can see my workouts to
+						&ldquo;Everyone&rdquo; lets any Mile A Day user see your posts and workouts. Your GPS routes are visible
+						according to your settings, as described in Location and Route Data. By default, that means your accepted
+						friends.
+					</li>
+					<li>
+						<span className="font-semibold text-[#f5f5f5]">Example posts.</span> We choose a small number of posts to show as examples in the app&rsquo;s
+						onboarding, including to people who are not signed in. These show the post&rsquo;s photo, caption, distance,
+						streak, and date, and the author&rsquo;s username and profile photo. If you would like your post taken
+						out, email us.
 					</li>
 					<li>
 						<span className="font-semibold text-[#f5f5f5]">Service providers.</span> With infrastructure providers
 						that host our servers and deliver the service, who are only permitted to use the data to provide those
-						services. Maps in the app are drawn with Apple Maps, so your device requests map imagery for the area of a
-						route from Apple.
+						services. These include Cloudflare, which carries traffic to our servers, and Vercel, which hosts our websites
+						and provides website analytics. Apple handles Sign in with Apple and purchases, and delivers push notifications,
+						so the text of a notification, which can include a friend&rsquo;s name, passes through Apple. Shopify and
+						Tapstitch handle merch orders. Maps in the app are drawn with Apple Maps, so your device requests map imagery
+						for the area of a route from Apple.
+					</li>
+					<li>
+						<span className="font-semibold text-[#f5f5f5]">Our team and tools.</span> Authorized staff can view account details, posts, reports,
+						diagnostics, and logs to support users, review reports, and run the service. Our team may use AI assistants,
+						currently Anthropic&rsquo;s Claude, to help query and maintain our database, so data they look up can
+						pass through that tool. We do not send your data to AI services as a feature of the app.
+					</li>
+					<li>
+						<span className="font-semibold text-[#f5f5f5]">Things you share yourself.</span> If you export a share card or use the iOS share sheet or
+						Messages, what you send is handled by the app you choose.
 					</li>
 					<li>
 						<span className="font-semibold text-[#f5f5f5]">Legal reasons.</span> When required by law or to protect
@@ -236,8 +371,30 @@ export default function PrivacyPage() {
 			<Section heading="Data Retention and Deletion">
 				<p>
 					We retain your information for as long as your account is active. You can delete your account directly within
-					the app, which removes your profile, fitness history, and social data from our servers. You may also request
-					deletion by contacting us at the email below.
+					the app, which removes your profile, workouts, step counts, shoes, friends, posts, comments, reports, and
+					notification and crash data from our servers. Your profile photo, banner, and shoe photos are deleted right
+					away. Post photos are deleted by a nightly cleanup within a few days. You may also request deletion by
+					contacting us at the email below.
+				</p>
+				<p>Some information stays after you delete your account:</p>
+				<ul className="list-disc space-y-2 pl-6">
+					<li>Purchase and gift records, which we keep for our financial records.</li>
+					<li>
+						Internal logs, including error logs, feature usage, and records of some notifications and database
+						changes. These can include your account ID, and error logs can contain the details described above.
+					</li>
+					<li>Competitions and Buddy Walks you took part in, without your name attached.</li>
+					<li>Anything other people saved, or received from you outside the app.</li>
+				</ul>
+				<p>
+					Deleting content does not always erase it right away. A post or comment you delete disappears from the app,
+					but we keep it, including any photo, until you delete your account, so that it can be restored. A story stops
+					showing after 24 hours, and the post behind it stays stored the same way. A deleted workout is kept marked as
+					deleted. To have specific content permanently removed sooner, contact us.
+				</p>
+				<p>
+					Crash and performance reports are kept for 90 days. Sign-in records are kept until you delete your account.
+					Error logs and feature usage have no set deletion date.
 				</p>
 				<p>
 					GPS routes do not expire: we keep them until they are deleted through Stealth Mode or Hide this route from
@@ -253,6 +410,11 @@ export default function PrivacyPage() {
 					<li>Control HealthKit access in iOS Settings at any time.</li>
 					<li>Control location access in iOS Settings at any time.</li>
 					<li>Choose who can see your routes, or stop routes being stored, in Settings &rarr; Privacy in the app.</li>
+					<li>
+						Hide your lifetime miles, friend count, and medals from your public profile by setting Who can see my
+						workouts to &ldquo;Only me.&rdquo;
+					</li>
+					<li>Report posts and comments, and block other users, within the app.</li>
 					<li>Enable or disable push notifications in iOS Settings or within the app.</li>
 					<li>Delete your account and associated data from within the app.</li>
 				</ul>
