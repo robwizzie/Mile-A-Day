@@ -50,7 +50,17 @@ struct WatchFlameyState: Equatable {
         mood = FlameMoodKind.resolve(phase: phase, progress: goal > 0 ? miles / goal : 0, isAtRisk: isAtRisk,
                                      hasActiveWorkout: false, streak: streak, now: now)
         vigor = !completed && streak > 0
-            ? CGFloat(min(max(secondsToReset / StreakFlameClock.dayLength, 0), 1)) : nil
+            ? Self.wristVigor(min(max(secondsToReset / StreakFlameClock.dayLength, 0), 1)) : nil
+    }
+
+    /// The vigor he bottoms out at on the wrist, about 40% of his full size.
+    private static let vigorFloor = 0.33
+
+    /// The phone's burn-down ends near nothing, which is a speck in a ring this
+    /// small. Squeezing the day into a higher range keeps him shrinking right
+    /// up to midnight, where a plain cutoff would freeze him from mid-afternoon.
+    private static func wristVigor(_ dayLeft: Double) -> CGFloat {
+        CGFloat(vigorFloor + (1 - vigorFloor) * dayLeft)
     }
 
     /// One short line, sized for the wrist.

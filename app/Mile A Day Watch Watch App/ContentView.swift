@@ -111,7 +111,6 @@ struct ContentView: View {
         return healthManager.retroactiveStreak
     }
 
-    private var remainingDistance: Double { max(goalDistance - currentDistance, 0) }
 
     private var flamey: WatchFlameyState {
         #if DEBUG
@@ -134,22 +133,22 @@ struct ContentView: View {
                 .ignoresSafeArea()
 
             ScrollView {
-                VStack(spacing: 8) {
-                    header
-                        .padding(.top, 2)
+                // Status, then the choice, then the action, all on one screen.
+                VStack(spacing: 5) {
+                    HStack(spacing: 8) {
+                        heroRing
+                        todayColumn
+                    }
 
-                    heroRing
-                        .padding(.top, 2)
-
-                    goalStatus
-
-                    streakPill
-
-                    activityButtons
-                        .padding(.top, 4)
+                    Text(flamey.line)
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .foregroundColor(isCompleted ? WatchTheme.success : WatchTheme.textSecondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
 
                     locationToggle
-                        .padding(.top, 2)
+
+                    activityButtons
                         .padding(.bottom, 4)
                 }
                 .padding(.horizontal, 6)
@@ -213,22 +212,10 @@ struct ContentView: View {
         }
     }
 
-    // MARK: - Header
-
-    private var header: some View {
-        HStack(spacing: 6) {
-            Image("mad-logo")
-                .resizable()
-                .scaledToFit()
-                .frame(width: 13, height: 13)
-            Text("MILE A DAY")
-                .font(.system(size: 9, weight: .heavy, design: .rounded))
-                .foregroundColor(WatchTheme.textPrimary.opacity(0.85))
-                .tracking(1.4)
-        }
-    }
-
     // MARK: - Hero Ring
+
+    /// Shares the top row with the numbers, so it follows the watch's width.
+    private var ringSize: CGFloat { min(90, WKInterfaceDevice.current().screenBounds.width * 0.44) }
 
     private var heroRing: some View {
         ZStack {
@@ -238,152 +225,131 @@ struct ContentView: View {
                     ringTint.opacity(ringPulse && !isCompleted ? 0.22 : 0.10),
                     lineWidth: 1
                 )
-                .frame(width: 122, height: 122)
+                .frame(width: ringSize + 8, height: ringSize + 8)
                 .blur(radius: 4)
 
             // Track
             Circle()
-                .stroke(Color.white.opacity(0.08), lineWidth: 10)
-                .frame(width: 112, height: 112)
+                .stroke(Color.white.opacity(0.08), lineWidth: 8)
+                .frame(width: ringSize, height: ringSize)
 
             // Progress arc
             Circle()
                 .trim(from: 0, to: progress)
                 .stroke(
                     isCompleted ? WatchTheme.progressGradientComplete : WatchTheme.progressGradient,
-                    style: StrokeStyle(lineWidth: 10, lineCap: .round)
+                    style: StrokeStyle(lineWidth: 8, lineCap: .round)
                 )
-                .frame(width: 112, height: 112)
+                .frame(width: ringSize, height: ringSize)
                 .rotationEffect(.degrees(-90))
                 .animation(.spring(response: 0.9, dampingFraction: 0.75), value: progress)
                 .shadow(color: ringTint.opacity(0.35), radius: 6, x: 0, y: 0)
 
             // He breathes with the ring, and holds still when the screen dims
             // or the wearer asked for less motion.
-            WatchFlameyView(state: flamey, size: 88, warmth: progress, centred: true)
+            WatchFlameyView(state: flamey, size: ringSize * 0.78, warmth: progress, centred: true)
                 .scaleEffect(ringPulse && !reduceMotion && !isLuminanceReduced ? 1.03 : 1, anchor: .center)
         }
     }
 
-    // MARK: - Goal Status
+    // MARK: - Today
 
-    /// Distance under the ring, then what Flamey has to say, then the clock
-    /// when the streak is on the line.
-    private var goalStatus: some View {
-        VStack(spacing: 2) {
-            HStack(alignment: .firstTextBaseline, spacing: 3) {
+    /// Distance, the streak, and the clock when the streak is on the line.
+    private var todayColumn: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: -2) {
                 Text(String(format: "%.2f", currentDistance))
-                    .font(.system(size: 22, weight: .heavy, design: .rounded))
+                    .font(.system(size: 25, weight: .heavy, design: .rounded))
                     .foregroundColor(WatchTheme.textPrimary)
                     .contentTransition(.numericText())
-                Text(String(format: "/ %.1f mi", goalDistance))
+                Text(String(format: "of %.1f mi", goalDistance))
                     .font(.system(size: 11, weight: .semibold, design: .rounded))
                     .foregroundColor(WatchTheme.textTertiary)
             }
             .lineLimit(1)
             .minimumScaleFactor(0.7)
 
-            Text(flamey.line)
-                .font(.system(size: 12, weight: .semibold, design: .rounded))
-                .foregroundColor(isCompleted ? WatchTheme.success : WatchTheme.textSecondary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
+            HStack(spacing: 4) {
+                Image(systemName: "flame.fill")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: [WatchTheme.warning, WatchTheme.madRedBright],
+                            startPoint: .top, endPoint: .bottom
+                        )
+                    )
+                    .accessibilityHidden(true)
+                Text("\(currentStreak)")
+                    .font(.system(size: 16, weight: .heavy, design: .rounded))
+                    .foregroundColor(WatchTheme.textPrimary)
+                    .contentTransition(.numericText())
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                    .accessibilityLabel(Text("\(currentStreak) day streak"))
+
+                // Held streak tokens, mirrored from the iPhone. Hidden at 0.
+                if healthManager.heldStreakTokens > 0 {
+                    HStack(spacing: 2) {
+                        Image(systemName: "shield.lefthalf.filled")
+                            .font(.system(size: 10, weight: .bold))
+                            .accessibilityHidden(true)
+                        Text("\(healthManager.heldStreakTokens)")
+                            .font(.system(size: 12, weight: .heavy, design: .rounded))
+                    }
+                    .foregroundColor(Color(red: 1.0, green: 0.84, blue: 0.35))
+                }
+            }
 
             if flamey.isAtRisk {
                 Text(flamey.dayEnd, style: .timer)
                     .font(.system(size: 13, weight: .heavy, design: .rounded))
                     .foregroundColor(.red)
                     .monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
                     .accessibilityLabel(Text("Time left today"))
             }
         }
-    }
-
-    // MARK: - Streak Pill
-
-    private var streakPill: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "flame.fill")
-                .font(.system(size: 12, weight: .bold))
-                .foregroundStyle(
-                    LinearGradient(
-                        colors: [WatchTheme.warning, WatchTheme.madRedBright],
-                        startPoint: .top, endPoint: .bottom
-                    )
-                )
-            Text("\(currentStreak)")
-                .font(.system(size: 14, weight: .heavy, design: .rounded))
-                .foregroundColor(WatchTheme.textPrimary)
-                .contentTransition(.numericText())
-            Text(currentStreak == 1 ? "day streak" : "day streak")
-                .font(.system(size: 11, weight: .medium, design: .rounded))
-                .foregroundColor(WatchTheme.textSecondary)
-
-            // Held streak tokens, mirrored from the iPhone — a tiny gold
-            // shield count. Hidden at 0 (feature off or none earned).
-            if healthManager.heldStreakTokens > 0 {
-                HStack(spacing: 3) {
-                    Image(systemName: "shield.lefthalf.filled")
-                        .font(.system(size: 10, weight: .bold))
-                    Text("\(healthManager.heldStreakTokens)")
-                        .font(.system(size: 12, weight: .heavy, design: .rounded))
-                }
-                .foregroundColor(Color(red: 1.0, green: 0.84, blue: 0.35))
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 5)
-        .background(
-            Capsule()
-                .fill(WatchTheme.surface)
-                .overlay(Capsule().stroke(WatchTheme.hairline, lineWidth: 0.5))
-        )
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     // MARK: - Activity Buttons
 
+    /// Side by side, so both starts are on the first screen.
     private var activityButtons: some View {
-        VStack(spacing: 8) {
+        HStack(spacing: 6) {
             Button {
                 start(activity: .running)
             } label: {
-                actionButtonLabel(
-                    icon: "figure.run",
-                    title: "Start Run",
-                    style: .primary
-                )
+                actionButtonLabel(icon: "figure.run", title: "Run", style: .primary)
             }
             .buttonStyle(WatchPressStyle())
+            .accessibilityLabel("Start run")
 
             Button {
                 start(activity: .walking)
             } label: {
-                actionButtonLabel(
-                    icon: "figure.walk",
-                    title: "Start Walk",
-                    style: .secondary
-                )
+                actionButtonLabel(icon: "figure.walk", title: "Walk", style: .secondary)
             }
             .buttonStyle(WatchPressStyle())
+            .accessibilityLabel("Start walk")
         }
     }
 
     private enum ActionButtonStyle { case primary, secondary }
 
     private func actionButtonLabel(icon: String, title: String, style: ActionButtonStyle) -> some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 5) {
             Image(systemName: icon)
-                .font(.system(size: 16, weight: .bold))
+                .font(.system(size: 15, weight: .bold))
             Text(title)
                 .font(.system(size: 15, weight: .bold, design: .rounded))
-            Spacer(minLength: 0)
-            Image(systemName: "chevron.right")
-                .font(.system(size: 11, weight: .heavy))
-                .opacity(0.7)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
         }
         .foregroundColor(.white)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 9)
         .frame(maxWidth: .infinity)
         .background(
             ZStack {
