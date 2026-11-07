@@ -56,6 +56,10 @@ struct ShareStudioView: View {
     var initialTemplate: ShareTemplate? = nil
 
     @Environment(\.duoSpread) private var duoSpread
+    /// This view's own width: presented as a sheet it can be far narrower
+    /// than the window `duoSpread` measures.
+    @State private var ownWidth: CGFloat = 0
+    private var usesTwoPages: Bool { duoSpread && ownWidth >= DuoDevice.spreadMinWidth }
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -131,7 +135,7 @@ struct ShareStudioView: View {
 
             VStack(spacing: 0) {
                 header
-                if duoSpread {
+                if usesTwoPages {
                     // iPhone Duo's inner display: the card on one page, the
                     // styles and ways to share it on the other.
                     HStack(spacing: 0) {
@@ -151,9 +155,10 @@ struct ShareStudioView: View {
                                 options
                                 destinationsNode
                             }
-                            .padding(20)
+                            .padding(16)
                         }
-                        .frame(maxWidth: .infinity)
+                        // Fixed: the stat chips need this to fit on one row.
+                        .frame(width: 370)
                     }
                 } else {
                     if families.count > 1 {
@@ -190,6 +195,13 @@ struct ShareStudioView: View {
                 .allowsHitTesting(false)
             }
         }
+        .background(
+            GeometryReader { geo in
+                Color.clear
+                    .onAppear { ownWidth = geo.size.width }
+                    .onChange(of: geo.size.width) { _, width in ownWidth = width }
+            }
+        )
         .preferredColorScheme(.dark)
         .task { await resolveAssets() }
         .onChange(of: selection) { _, newValue in

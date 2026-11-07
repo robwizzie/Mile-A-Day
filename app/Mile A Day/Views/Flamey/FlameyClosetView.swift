@@ -58,7 +58,9 @@ struct FlameyClosetView: View {
     }
 
     private var columns: [GridItem] {
-        let count = typeSize >= .accessibility1 ? 3 : 4
+        // The dressing room's wardrobe is a narrower page: four columns there
+        // break names mid-word ("Lavende/r").
+        let count = typeSize >= .accessibility1 || showsDressingRoom ? 3 : 4
         return Array(repeating: GridItem(.flexible(), spacing: 8, alignment: .top), count: count)
     }
 
@@ -71,17 +73,19 @@ struct FlameyClosetView: View {
     private var dressingRoomStage: some View {
         VStack(spacing: 12) {
             Spacer(minLength: 0)
-            stage(size: 210)
+            stage(size: 170)
             FlameyNamePlate(name: model.name) {
                 MADHaptics.tap()
                 sheet = .name
             }
             caption
             VStack(spacing: 8) { actionButtons(compact: false) }
-                .padding(.horizontal, 20)
+                .padding(.horizontal, 16)
             Spacer(minLength: 0)
         }
-        .frame(maxWidth: .infinity)
+        // Fixed, so the wardrobe gets the rest: left to share the HStack, the
+        // stage's natural width squeezed the tiles.
+        .frame(width: 290)
     }
 
     var body: some View {

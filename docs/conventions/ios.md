@@ -272,6 +272,8 @@ Known gap: most of the app still uses fixed `.font(.system(size:))` (about 2,500
 
 The gate is two tests: a hinged model AND a window at least `spreadMinWidth` wide. Folded, or narrowed in Split View, the app is the ordinary iPhone app. `.duoSpreadHost()` sits on `RootView` because the Closet's cover is presented from above the tab bar: a host on the `TabView` left it out. `DuoFlameyMomentsHost` must keep a real view (`Color.clear`): an empty body gets no lifecycle, so the hinge observer never attaches.
 
+Two-page layouts fix their side panel's width (Closet stage 290pt, Share Studio options 370pt) and let the other page flex: left to share an HStack at the real 669pt width, wardrobe names broke mid-word and stat chips clipped, none of which showed at the stand-in's 744pt. The wardrobe drops to three columns there. Share Studio also reads its OWN width (`usesTwoPages`), because as a sheet it is narrower than the window `duoSpread` measures. The buddy map follows `duoTrail` at a fixed close distance and shows "Finding your route" until a fix arrives, never MapKit's fallback, which is a whole continent.
+
 Testing: Debug builds take `-MADDuoPreview` on a wide simulator, with `TARGETED_DEVICE_FAMILY=1,2` on the xcodebuild command line only, plus `-MADDuoMoment stretch|tuck` and `-MADDuoDemo flyover|share`. `simctl location` drives the buddy route. Screenshots in `docs/duo-screenshots/` came from that iPad stand-in. If a test backend will not bind, check `lsof -iTCP:<port>`: another session's server on that port answers with its own database, which shows up as "No user found" and a 0-day streak.
 
 ## Performance
