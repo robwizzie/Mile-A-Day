@@ -48,6 +48,7 @@ struct MADSettingsView: View {
     @State private var showingDeleteAccountConfirmation = false
     @State private var isDeletingAccount = false
     @State private var deleteAccountErrorMessage: String?
+    @State private var showingDeleteWithoutAppleConfirmation = false
     /// Recalibrate's live state. The service owns it, so leaving this page
     /// and coming back mid-run still shows it running.
     @ObservedObject private var syncService = WorkoutSyncService.shared
@@ -143,7 +144,15 @@ struct MADSettingsView: View {
             Button("Cancel", role: .cancel) { }
             Button("Delete", role: .destructive) { Task { await performDeleteAccount() } }
         } message: {
-            Text("This permanently deletes your account, workouts, streak history, friendships, and competition data. This cannot be undone.")
+            Text("This permanently deletes your account, workouts, streak history, friendships, and competition data. This cannot be undone. Apple may ask you to confirm with Sign in with Apple.")
+        }
+        .alert("Delete Without Apple Confirmation?", isPresented: $showingDeleteWithoutAppleConfirmation) {
+            Button("Keep Account", role: .cancel) { }
+            Button("Delete Anyway", role: .destructive) {
+                Task { await performDeleteAccount(skippingAppleConfirmation: true) }
+            }
+        } message: {
+            Text("Your Mile A Day account will still be permanently deleted. Mile A Day may stay listed under Sign in with Apple in your Apple Account settings, where you can remove it yourself.")
         }
         .alert(
             "Couldn't Delete Account",
@@ -673,12 +682,14 @@ struct MADSettingsView: View {
 
     // MARK: - Account actions
 
-    private func performDeleteAccount() async {
+    private func performDeleteAccount(skippingAppleConfirmation: Bool = false) async {
         isDeletingAccount = true
         defer { isDeletingAccount = false }
         do {
-            try await userManager.deleteAccount()
+            try await userManager.deleteAccount(skippingAppleConfirmation: skippingAppleConfirmation)
             appStateManager.signOut()
+        } catch AppleSignInManager.AppleSignInError.cancelled {
+            showingDeleteWithoutAppleConfirmation = true
         } catch {
             deleteAccountErrorMessage = error.localizedDescription
         }

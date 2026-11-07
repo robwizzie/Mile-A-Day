@@ -306,11 +306,17 @@ class UserManager: ObservableObject {
     /// friendships, and refresh tokens. On success, performs the same local cleanup as
     /// `signOut()` so the app returns to the unauthenticated state.
     ///
-    /// Throws if the network call fails. Callers should surface the error and leave the
-    /// user signed in so they can retry.
+    /// Asks Apple for a fresh authorization code first, so the backend can revoke the
+    /// Sign in with Apple link on accounts it has no stored token for.
+    ///
+    /// Throws `AppleSignInError.cancelled` if the user dismisses the Apple sheet: nothing
+    /// is deleted, and the caller should offer `skippingAppleConfirmation: true` so the
+    /// sheet can never stand in the way of deletion (Guideline 5.1.1(v)). Any other Apple
+    /// failure deletes without a code. Also throws if the network call fails. Callers
+    /// should surface the error and leave the user signed in so they can retry.
     #if !os(watchOS)
     @MainActor
-    func deleteAccount() async throws {
+    func deleteAccount(skippingAppleConfirmation: Bool = false) async throws {
         guard let userId = currentUser.backendUserId, !userId.isEmpty else {
             throw NSError(
                 domain: "UserManager",
@@ -319,14 +325,37 @@ class UserManager: ObservableObject {
             )
         }
 
+        var body: Data?
+        if !skippingAppleConfirmation, let code = try await appleCodeForDeletion() {
+            body = try? JSONSerialization.data(withJSONObject: ["authorization_code": code])
+        }
+
         let _: [String: String] = try await APIClient.fancyFetch(
             endpoint: "/users/\(userId)",
             method: .DELETE,
-            body: nil,
+            body: body,
             responseType: [String: String].self
         )
 
         signOut()
+    }
+
+    /// The code for `deleteAccount`, or nil when there isn't one to send. Only a
+    /// cancel throws. A revoked or missing credential has nothing left to revoke, and
+    /// prompting then would offer to create a new Apple link for this app.
+    @MainActor
+    private func appleCodeForDeletion() async throws -> String? {
+        let appleId = currentUser.appleId
+        if let appleId, !(await AppleSignInManager.isCredentialValid(forUserID: appleId)) {
+            return nil
+        }
+        do {
+            return try await AppleSignInManager().requestAuthorizationCode(forUserID: appleId)
+        } catch AppleSignInManager.AppleSignInError.cancelled {
+            throw AppleSignInManager.AppleSignInError.cancelled
+        } catch {
+            return nil
+        }
     }
     #endif
 

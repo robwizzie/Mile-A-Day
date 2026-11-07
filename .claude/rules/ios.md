@@ -190,6 +190,7 @@ Details: docs/conventions/ios.md § Auth / Session
 - One Apple ID = one MAD account (signin resolves by email); tell users to use separate Apple IDs.
 - `isAuthenticated` is not proof; never persist a tokens-missing downgrade; `MADWatchBridge` withholds mismatched creds.
 - Background callers of `APIClient.fancyFetch` gate on `TokenStore.hasTokens` first.
+- `UserManager.deleteAccount` sends a fresh Apple `authorization_code`; only `AppleSignInError.cancelled` throws, and every caller must offer `skippingAppleConfirmation: true`. Never let the Apple sheet block deletion.
 
 ## Do NOT
 Details: docs/conventions/ios.md § Do NOT

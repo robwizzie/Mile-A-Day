@@ -10,6 +10,7 @@ class AppleSignInManager: NSObject, ObservableObject {
 
     private let backendURL = AppConfig.baseURL
     private var currentDelegate: AppleSignInDelegate?
+    private var currentController: ASAuthorizationController?
 
     struct AppleUserProfile {
         let id: String
@@ -59,6 +60,38 @@ class AppleSignInManager: NSObject, ObservableObject {
                 }
             }
         }
+    }
+
+    /// Shows the Sign in with Apple sheet and returns a fresh authorization code,
+    /// without signing in. Account deletion sends the code so the backend can
+    /// revoke an account that has no stored Apple token. The code only lives for
+    /// about five minutes, so use it straight away. Throws
+    /// `AppleSignInError.cancelled` if the user dismisses the sheet.
+    @MainActor
+    func requestAuthorizationCode(forUserID userID: String?) async throws -> String {
+        let request = ASAuthorizationAppleIDProvider().createRequest()
+        request.user = userID
+
+        let authorization: ASAuthorization = try await withCheckedThrowingContinuation { continuation in
+            let controller = ASAuthorizationController(authorizationRequests: [request])
+            let delegate = AppleSignInDelegate { [weak self] result in
+                self?.currentDelegate = nil
+                self?.currentController = nil
+                continuation.resume(with: result)
+            }
+            currentDelegate = delegate
+            currentController = controller
+            controller.delegate = delegate
+            controller.presentationContextProvider = delegate
+            controller.performRequests()
+        }
+
+        guard let credential = authorization.credential as? ASAuthorizationAppleIDCredential,
+              let codeData = credential.authorizationCode,
+              let code = String(data: codeData, encoding: .utf8) else {
+            throw AppleSignInError.invalidCredential
+        }
+        return code
     }
 
     func signIn() async throws -> (AppleUserProfile, BackendAuthResponse) {
