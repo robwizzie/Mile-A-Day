@@ -26,7 +26,7 @@ export const metadata: Metadata = {
 
 export default function TermsPage() {
 	return (
-		<LegalPage title="TERMS OF USE" lastUpdated="November 5, 2026">
+		<LegalPage title="TERMS OF USE" lastUpdated="November 6, 2026">
 			<Section heading="Acceptance of Terms">
 				<p>
 					These Terms of Use (&ldquo;Terms&rdquo;) govern your use of the Mile A Day app and related services
@@ -76,10 +76,26 @@ export default function TermsPage() {
 
 			<Section heading="User Content">
 				<p>
-					You retain ownership of content you provide, such as your profile photo and username. By submitting content,
-					you grant us a limited license to display it within the app as needed to operate features like profiles,
-					friends, and competitions. You are responsible for ensuring you have the right to share any content you
-					upload.
+					You retain ownership of content you provide, such as your profile photo, username, posts, and workout routes.
+					By submitting content, you grant us a limited license to display it within the app, according to your privacy
+					settings, as needed to operate features like profiles, friends, the feed, and competitions. You are
+					responsible for ensuring you have the right to share any content you upload.
+				</p>
+			</Section>
+
+			<Section heading="Location and Route Sharing">
+				<p>
+					Mile A Day stores the GPS routes of your workouts, and by default shows them to your friends with the start
+					and end hidden. A route, even a partial one, can reveal where you live, work, or spend time. You are
+					responsible for choosing what you share, and for your own safety when you do. You can change these choices in
+					Settings &rarr; Privacy. Our{' '}
+					<a
+						href="/privacy"
+						className="font-medium text-[#c72554] underline transition-colors hover:text-[#ff4d7d]"
+					>
+						Privacy Policy
+					</a>{' '}
+					explains how route data is collected, shared, and deleted.
 				</p>
 			</Section>
 
