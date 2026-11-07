@@ -264,7 +264,11 @@ Testing: `simctl io screenConfig ... power` does NOT unfold the simulator; it cr
 
 Checked at accessibility-extra-extra-large on the iPhone Duo outer display and iPhone 17e, and default size on an iPad mini test build (`TARGETED_DEVICE_FAMILY=1,2` on the command line only). Fixed there: "Stop Workout" truncating (`stopButton`), the tracker's unit label pushing the timer off screen, `SyncStatusBanner` growing over the tab bar (its text now uses capped `madFont`, and it moved off `.safeAreaInset` into the root ZStack), the token overlay's subtitle, and the dashboard's Apple Health and best-streak text.
 
-Known gap: most of the app still uses fixed `.font(.system(size:))` (about 2,500 in `Views/`, against about 700 `madFont`), so Compete and Profile ignore the system text size, and about 380 of those are under 11pt. Share cards keep fixed sizes on purpose. Migrate screen by screen, checking every width, not as one mechanical replace.
+The follow-up pass moved Compete, Profile, Friends, the post card's chrome, the Dashboard cards and the shared components they draw onto `madFont`, with the surfaces capped at `madCardCap`. Text under 11pt went to 11, and informational white text at 0.4 opacity or lower went to 0.6 (`CompeteDesign.inkFaint` is now 0.55). Checked at default and accessibility-extra-extra-large; the simulators available were iPhone 17e (390pt, the narrowest), 18 Pro Max and Duo outer.
+
+What the pass taught: `lineLimit(1)` names beside a score leave a few characters at AX sizes, so they use `madNameLines()` (two lines at accessibility sizes); uppercase labels in narrow columns break mid-word ("PLAYE/RS") unless they are `lineLimit(1)` + `minimumScaleFactor`; `Text + Text` and functions returning `Text` can't take `madFont` (it returns `some View`), the type-checker finds them. `swiftc -typecheck` fails with "input file was modified" if a source changes while it runs.
+
+Known gap: not migrated are `Views/Challenges`, `Views/Celebrations`, most of `Views/Components`, and Feed outside `PostCardView` (much of it is baked into images: `IndoorWorkoutCard`, `IndoorTrackCard`, `RunStatsStickerView`, `PostStickers`, `StoryFinishFrame`). Share cards keep fixed sizes on purpose.
 
 ## Performance
 

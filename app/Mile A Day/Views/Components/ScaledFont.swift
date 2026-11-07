@@ -210,3 +210,44 @@ struct MADScaledMetric: DynamicProperty {
         return min(max(base, scaled), base * max(maxScale, 1))
     }
 }
+
+// MARK: - Names in rows
+
+/// A person's, team's or competition's name in a row: one line at ordinary
+/// sizes (shrinking a little before it truncates), up to three at the
+/// accessibility sizes, where a single line beside a score leaves only a few characters.
+private struct MADNameLines: ViewModifier {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    func body(content: Content) -> some View {
+        content
+            .lineLimit(dynamicTypeSize.isAccessibilitySize ? 3 : 1)
+            .minimumScaleFactor(0.75)
+    }
+}
+
+extension View {
+    func madNameLines() -> some View {
+        modifier(MADNameLines())
+    }
+}
+
+// MARK: - Inline stack
+
+/// Items that sit on one line at ordinary sizes (a name and its chip) and
+/// stack at the accessibility sizes, where sharing a line squeezes the name
+/// down to a few characters per row.
+struct MADInlineStack<Content: View>: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    var alignment: VerticalAlignment = .center
+    var spacing: CGFloat = 5
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 3))
+            : AnyLayout(HStackLayout(alignment: alignment, spacing: spacing))
+        layout { content }
+    }
+}
