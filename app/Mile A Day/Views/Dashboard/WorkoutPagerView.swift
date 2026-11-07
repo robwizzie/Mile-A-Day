@@ -46,7 +46,9 @@ struct WorkoutPagerView: View {
                 }
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
-            .ignoresSafeArea()
+            // Vertical only: a paging TabView that overlaps a SIDE inset
+            // mis-centres its pages (iPhone Duo's outer display has one).
+            .ignoresSafeArea(edges: .vertical)
 
             // A quiet position hint so the swipe is discoverable without a row
             // of dots (there can be dozens of workouts).

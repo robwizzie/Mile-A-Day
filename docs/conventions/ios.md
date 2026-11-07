@@ -250,6 +250,22 @@ Now:
 - The Health row watches `HealthAccessMonitor` itself and turns orange/red with its problem as the subtitle; the banner is the Dashboard's job.
 - Privacy is the only home of every "who sees what" control; Notifications is alerts only. They still share one stored blob and one server row (`PUT /notifications/preferences`), so the halves are split by owner in `NotificationPreferencesSync.swift`: each screen sends only its keys (`alertPayload` / `sharingPayload`; the endpoint updates only the fields it is given) and writes only its fields over the stored blob (`saveAlerts()` / `saveSharing()`), so neither can push the other's stale copy over a newer value, and `RoutePrivacySettingRow`'s `route_privacy_meters` mirror isn't clobbered. Notifications' "Reset to defaults" carries the privacy half over untouched. Privacy saves as you change it (stored at once, sent after 0.7s, flushed on disappear) because it mixes rows that already saved themselves (hide start & end, Stealth Mode, the local map default); `lastSaved` is set BEFORE adopting server values so adoption never echoes back. "Share route maps" is now "Show route maps" in Privacy → Routes, next to "Map on new posts", hide start & end, flyovers and Stealth Mode.
 
+### iPhone Duo layout (Nov 2026)
+
+Measured on the iOS 27.2 Duo simulator (`iPhone19,4`; it needs a 27.1+ runtime). Outer display: 466×678pt, 1398×2034px. Inner display: 2007×2853px, 669×951pt at 3x. On the outer display the camera, status items and tab bar sit in a rail down the RIGHT edge, so safe content is about 366pt wide with a large trailing inset and almost no top inset. SwiftUI's `TabView` moves into that rail by itself.
+
+The bug class is the side inset. A page-style `TabView` that overlaps it mis-centres its pages: onboarding text was cut off on the left and the next page peeked in on the right. Making only the pages vertical-only was not enough; the `TabView` itself has to stay inside the safe column (`.frame(width: geo.size.width)` + leading/trailing padding when an ancestor ignores the safe area). Backdrops that should run edge to edge become their own layers. `OnboardingIntroView`, `WorkoutPagerView` and `HighlightViews` follow this. Chrome placed inside an `.ignoresSafeArea()` ZStack must pad the side insets by hand or it lands under the camera.
+
+`ringDiameter(for:)` uses its 150pt minimum under 700pt tall so the tracker's timer clears the pinned Stop button; with a health banner showing, the metrics scroll and Stop stays pinned.
+
+Testing: `simctl io screenConfig ... power` does NOT unfold the simulator; it crashed SpringBoard. Folding happens in Device Hub (Xcode 27 replaced Simulator.app). A Debug build can use a local backend via the `devBaseURLOverride` default and `POST /dev/test-token` with `NODE_ENV=development`. A build with `CODE_SIGNING_ALLOWED=NO` loses the HealthKit and App Group entitlements.
+
+### Text-size pass (Nov 2026)
+
+Checked at accessibility-extra-extra-large on the iPhone Duo outer display and iPhone 17e, and default size on an iPad mini test build (`TARGETED_DEVICE_FAMILY=1,2` on the command line only). Fixed there: "Stop Workout" truncating (`stopButton`), the tracker's unit label pushing the timer off screen, `SyncStatusBanner` growing over the tab bar (its text now uses capped `madFont`, and it moved off `.safeAreaInset` into the root ZStack), the token overlay's subtitle, and the dashboard's Apple Health and best-streak text.
+
+Known gap: most of the app still uses fixed `.font(.system(size:))` (about 2,500 in `Views/`, against about 700 `madFont`), so Compete and Profile ignore the system text size, and about 380 of those are under 11pt. Share cards keep fixed sizes on purpose. Migrate screen by screen, checking every width, not as one mechanical replace.
+
 ## Performance
 
 The app felt slow and the console showed "Gesture: System gesture gate timed out" (the main thread was busy when a touch began). An audit found:

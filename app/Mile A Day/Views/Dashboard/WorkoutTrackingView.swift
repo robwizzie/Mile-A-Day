@@ -1412,9 +1412,12 @@ struct WorkoutTrackingView: View {
     }
 
     /// Progress-ring diameter, scaled to the screen so it shrinks on small devices
-    /// (down to 150pt) and caps at the original 200pt on larger ones.
+    /// (down to 150pt) and caps at the original 200pt on larger ones. Under 700pt
+    /// (SE, iPhone Duo's outer display) it takes the minimum, so the timer keeps
+    /// clear of the pinned Stop button.
     private func ringDiameter(for screenHeight: CGFloat) -> CGFloat {
         guard screenHeight > 0 else { return 200 }
+        if screenHeight < 700 { return 150 }
         return min(200, max(150, screenHeight * 0.26))
     }
 
@@ -1432,8 +1435,10 @@ struct WorkoutTrackingView: View {
                 .foregroundColor(.white)
                 .contentTransition(.numericText())
 
+            // Capped: the tracker is read mid-run, where nobody can scroll,
+            // so this label must not push the timer below the fold.
             Text(DistanceUnits.current.plural)
-                .font(.title2)
+                .madFont(size: 22, maxScale: 1.3)
                 .foregroundColor(.white.opacity(0.8))
 
             if startingDistance > 0 {
@@ -1817,7 +1822,8 @@ struct WorkoutTrackingView: View {
                         .fontWeight(.semibold)
                 } else {
                     Image(systemName: "stop.fill")
-                        .font(.title2)
+                        .font(.system(size: 20))
+                        .accessibilityHidden(true)
                     // Shrinks rather than truncates: the pause button now
                     // takes 64pt + spacing out of this row, and "Stop
                     // Workout" at large Dynamic Type on a small screen would
@@ -1828,10 +1834,11 @@ struct WorkoutTrackingView: View {
                         .font(.title3)
                         .fontWeight(.semibold)
                         .lineLimit(1)
-                        .minimumScaleFactor(0.7)
+                        .minimumScaleFactor(0.5)
                 }
             }
             .foregroundColor(.white)
+            .padding(.horizontal, 12)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 20)
             .background(

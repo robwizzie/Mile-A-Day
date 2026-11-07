@@ -69,6 +69,7 @@ struct TokenUnlockOverlay: View {
                         .font(.system(size: 15, weight: .heavy, design: .rounded))
                         .foregroundColor(Color(red: 1.0, green: 0.84, blue: 0.35))
                         .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
                         .multilineTextAlignment(.center)
 
                     // "Who acts" rides the earn moment too, in the same badge

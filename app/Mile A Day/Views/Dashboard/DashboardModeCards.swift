@@ -688,9 +688,10 @@ private struct RecordGhostRow: View {
                     .madFont(size: 10, weight: .heavy, design: .rounded)
                     .tracking(0.4)
                     .monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
             }
-            .foregroundColor(.white.opacity(0.45))
-            .fixedSize()
+            .foregroundColor(.white.opacity(0.6))
             .padding(.horizontal, 10)
             .padding(.vertical, 5)
             .background(

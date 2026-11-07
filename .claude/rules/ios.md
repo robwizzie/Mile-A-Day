@@ -34,6 +34,8 @@ Details: docs/conventions/ios.md § HealthKit
 - `PostGridFilter` is `all`/`collabs`; grid prefs and pins apply to the OWNER's grid only (visitors get defaults); name the filter that emptied a grid; nil server fields mean "not offered"; add FeedEntry CodingKeys cases.
 - First-run import: long-lived stores, `workoutDetails` 6-wide, report `preparedCount`; classify via `SyncFailure`, never show `localizedDescription`; retry via `retryFailedSync()`; gate on `isImportingHistory`.
 - Put `.ignoresSafeArea(.keyboard, edges: .bottom)` on bottom overlays and `GeometryReader` layouts, never on a ZStack holding the TabView.
+- Never size from the screen (`UIScreen.main`): read the window via `GeometryReader`; a paging `TabView` never overlaps a side inset (`.ignoresSafeArea(edges: .vertical)`, never bare) and hand-placed chrome pads `safeAreaInsets.leading/trailing` (`OnboardingIntroView`).
+- Bottom banners never use `.safeAreaInset` on the `TabView` (it draws over the tab bar): bottom-align them in `MainTabView`'s root ZStack, padded above the bar (`SyncStatusBanner`, `InProgressWorkoutBanner`); check new UI at accessibility-extra-extra-large; a label on a must-see button shrinks, never truncates (`stopButton`).
 - A number beside a name needs `lineLimit(1)`; flame+streak is always `StreakFlameChip`.
 - Every new `User` field must be Optional; `restoreFailed` → `hasLostLocalIdentity` signs out; never bake an unvouched name into an image.
 - `.lockedToScrollWidth()` goes LAST on full-bleed scroll content, never the ScrollView or narrow leading content.
@@ -89,7 +91,7 @@ Details: docs/conventions/ios.md § Key Patterns
 - Store/score/sync miles; convert only at the formatter (`DistanceUnits.current`); no bare `"… mi"` literals (widgets keep miles).
 - Icon-only controls get `.accessibilityLabel` on the glyph (`.accessibilityHidden(true)` beside text); guard every loop with `accessibilityReduceMotion`.
 - Dynamic Type via `.madFont(...)`/`@MADScaledMetric`, capped with `.madTypeCap` below any `.sheet`, never `.dynamicTypeSize`; never scale baked images.
-- Every UI change must look right at EVERY iPhone width, 320pt (SE/mini under Display Zoom) to 440pt (Pro Max): no fixed widths summing past 320; flex + `lineLimit`/`minimumScaleFactor`/`ViewThatFits`; mockups show 320, 375 and 440 frames.
+- Every UI change must look right at EVERY iPhone width, 320pt (SE/mini under Display Zoom) to 440pt (Pro Max) plus iPhone Duo (outer 466×678pt with a right-side inset, inner 669×951pt): no fixed widths summing past 320; flex + `lineLimit`/`minimumScaleFactor`/`ViewThatFits`; mockups show 320, 375 and 440 frames.
 - Sharing is one surface, `ShareStudioView`; preview == render (`ShareCardView.render`); cards ImageRenderer-safe; `ShareTemplate.available` decides; empty `MADFacebookAppID` ⇒ system share sheet; mock new cards as HTML first; carousel geometry never depends on `selection` (options reserve the tallest set); a buddy-post share = the on-screen slide + the sharer's own numbers/route (`crewStoryContent`, `coauthors[].workout_id`).
 - Weekly recap: Sunday→Saturday; route `weekly_recap` in all four places via `WeeklyRecapLink`; declare `weeklyRecapV1`; reuse `weeklyRecapEnabled`.
 - Feature views live in `Views/<FeatureName>/` subdirectories.

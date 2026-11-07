@@ -121,16 +121,16 @@ struct FloatingStarsEffect: View {
                         .modifier(FloatingModifier(delay: star.delay, duration: star.duration, height: geometry.size.height))
                 }
             }
-        }
-        .onAppear {
-            generateStars()
+            .onAppear {
+                generateStars(width: geometry.size.width)
+            }
         }
     }
 
-    private func generateStars() {
+    private func generateStars(width: CGFloat) {
         stars = (0..<starCount).map { index in
             FloatingStar(
-                x: CGFloat.random(in: 0...UIScreen.main.bounds.width),
+                x: CGFloat.random(in: 0...max(width, 1)),
                 delay: Double(index) * 0.1,
                 duration: Double.random(in: 2...4),
                 size: CGFloat.random(in: 10...20)

@@ -1732,7 +1732,7 @@ struct DashboardView: View {
                     Text("Turn it on and runs from your Apple Watch, treadmill, and other apps count automatically.")
                         .madFont(size: 12, weight: .medium, design: .rounded)
                         .foregroundColor(.white.opacity(0.55))
-                        .lineLimit(3)
+                        .lineLimit(5)
                 }
                 Spacer()
             }
