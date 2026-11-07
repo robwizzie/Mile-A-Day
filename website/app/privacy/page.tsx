@@ -180,6 +180,11 @@ export default function PrivacyPage() {
 					<li>To create your account and authenticate you when you sign in.</li>
 					<li>To calculate and display your daily mile progress, streaks, and personal records.</li>
 					<li>To power friends, posts, stories, leaderboards, and competitions.</li>
+					<li>
+						To track referrals. If you pick who referred you, they can see your first name, profile photo, and how many
+						days you&rsquo;ve walked until your referral counts.
+					</li>
+					<li>To add your miles to community goals, which only ever show combined totals and your own contribution.</li>
 					<li>To show your public profile.</li>
 					<li>To draw your routes for you and, depending on your settings, for other people in the app.</li>
 					<li>To send notifications you have enabled, such as streak reminders.</li>

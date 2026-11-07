@@ -115,6 +115,8 @@ struct DashboardCardsBlock: View {
                 }
             case .monthlyFlame:
                 MonthlyFlameCard()
+            case .communityGoal:
+                CommunityGoalCard()
             }
         }
     }

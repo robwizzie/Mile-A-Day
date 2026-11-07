@@ -5,16 +5,18 @@ struct HealthAccessView: View {
     @Environment(\.appStateManager) var appStateManager
     @State private var isRequesting = false
     @State private var wasDenied = false
+    /// Flamey's moment before the screen moves on.
+    @State private var connected = false
 
     var body: some View {
         OnboardingStepScaffold(
-            colors: [Color(red: 0.98, green: 0.36, blue: 0.42), Color(red: 0.70, green: 0.14, blue: 0.30)],
+            colors: [Color(red: 0.16, green: 0.72, blue: 0.78), Color(red: 0.05, green: 0.34, blue: 0.48)],
             chip: "Almost there",
             headline: "Connect Apple Health",
             message: wasDenied
                 ? "Health isn't available right now. Turn it on in Settings › Privacy & Security › Health › Mile A Day so your miles count."
                 : "Every walk and run in Apple Health counts: your Watch, a treadmill or any app. Your health data stays private.",
-            art: { height in HealthHeroArt(height: height) },
+            art: { height in HealthHeroArt(height: height, connected: connected) },
             actions: {
                 OnboardingPrimaryButton(title: wasDenied ? "Open Settings" : "Connect Health",
                                         isLoading: isRequesting,
@@ -63,8 +65,11 @@ struct HealthAccessView: View {
                 isRequesting = false
 
                 if success {
-                    withAnimation(MADTheme.Animation.standard) {
-                        appStateManager.completeHealthAccess()
+                    connected = true
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
+                        withAnimation(MADTheme.Animation.standard) {
+                            appStateManager.completeHealthAccess()
+                        }
                     }
                 } else {
                     wasDenied = true
@@ -74,9 +79,10 @@ struct HealthAccessView: View {
     }
 }
 
-/// A heart in a mile ring with the kinds of activity Health brings in.
+/// Flamey in a mile ring with the kinds of activity Health brings in.
 private struct HealthHeroArt: View {
     let height: CGFloat
+    let connected: Bool
     @Environment(\.introArtWidth) private var artWidth
 
     var body: some View {
@@ -92,12 +98,10 @@ private struct HealthHeroArt: View {
                 .rotationEffect(.degrees(-90))
                 .frame(width: ring, height: ring)
                 .introPop(0.05)
-            Image(systemName: "heart.fill")
-                .font(.system(size: ring * 0.34, weight: .bold))
-                .foregroundColor(.white)
+            OnboardingFlamey(items: ["ruby", "heart_bopper"], size: ring * 0.62,
+                             line: connected ? "Connected!" : nil, reaction: connected ? 1 : 0)
+                .frame(width: ring, height: ring)
                 .introPop(0.1)
-                .introBob(4, period: 1.2)
-                .accessibilityHidden(true)
 
             IntroChip(text: "🚶 Walks").introBob(5, period: 3.0, phase: 0.1).introPop(0.2)
                 .offset(x: introClampX(-ring * 0.62, "🚶 Walks", width: artWidth), y: -ring * 0.32)

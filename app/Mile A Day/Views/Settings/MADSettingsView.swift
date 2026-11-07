@@ -195,6 +195,17 @@ struct MADSettingsView: View {
             }
             .buttonStyle(.plain)
 
+            SettingsDivider()
+            NavigationLink(destination: ReferralsView()) {
+                SettingsRow(
+                    icon: "gift.fill",
+                    title: "Invite friends",
+                    subtitle: "Referral rewards, up to free Plus",
+                    tint: MADTheme.Colors.madRed
+                )
+            }
+            .buttonStyle(.plain)
+
             // Flamey lives on the Fun dashboard only, so his Closet does too.
             if selectedStyle == .fun {
                 SettingsDivider()

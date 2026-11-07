@@ -1433,6 +1433,20 @@ export interface PendingSave {
 }
 
 /**
+ * Hands out a Streak Assist as a reward. Token meters are derived, and a user
+ * who has never spent one holds it, so clearing the anchor is the whole grant.
+ * It can't touch a streak, and someone already holding one simply keeps it.
+ */
+export async function grantStreakAssist(userIds: string[]): Promise<void> {
+  if (userIds.length === 0) return;
+  await db.query(
+    `UPDATE users SET streak_assist_last_used = NULL
+      WHERE user_id = ANY($1::text[]) AND streak_assist_last_used IS NOT NULL`,
+    [userIds],
+  );
+}
+
+/**
  * Mirror of `sweepOneUser`'s decision, read-only: which missed day a held Save
  * WILL cover, and on which morning. Same shapes (`pickTargetDay`), same order
  * (an open Double Down window with the token held delays the Save a day).

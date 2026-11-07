@@ -4038,6 +4038,113 @@ export const appleSignInTokens = pgTable("apple_sign_in_tokens", {
     .notNull(),
 }).enableRLS();
 
+// A shared target all users walk toward together (docs/specs/community-goals.md).
+// Rows come from `seedCommunityGoals`; ids are permanent.
+export const communityGoals = pgTable("community_goals", {
+  goalId: text("goal_id").primaryKey().notNull(),
+  title: text("title").notNull(),
+  description: text("description").notNull(),
+  targetMiles: numeric("target_miles").notNull(),
+  startsOn: date("starts_on").notNull(),
+  endsOn: date("ends_on").notNull(),
+  checkpoints: jsonb("checkpoints").notNull().default(sql`'[]'::jsonb`),
+  rewardTiers: jsonb("reward_tiers").notNull().default(sql`'[]'::jsonb`),
+  rewardsGrantedAt: timestamp("rewards_granted_at", {
+    withTimezone: true,
+    mode: "string",
+  }),
+}).enableRLS();
+
+// The public numbers, recomputed by cron so a read never scans every workout.
+export const communityGoalTotals = pgTable("community_goal_totals", {
+  goalId: text("goal_id")
+    .primaryKey()
+    .notNull()
+    .references(() => communityGoals.goalId, { onDelete: "cascade" }),
+  totalMiles: numeric("total_miles").notNull().default("0"),
+  walkers: integer("walkers").notNull().default(0),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" })
+    .defaultNow()
+    .notNull(),
+}).enableRLS();
+
+// One row per push sent, so a cron overlap can never send it twice.
+export const communityGoalPushLog = pgTable(
+  "community_goal_push_log",
+  {
+    goalId: text("goal_id")
+      .notNull()
+      .references(() => communityGoals.goalId, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.userId, { onDelete: "cascade" }),
+    kind: text("kind").notNull(),
+    sentAt: timestamp("sent_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.goalId, table.userId, table.kind],
+      name: "community_goal_push_log_pkey",
+    }),
+  ],
+).enableRLS();
+
+// Who referred whom. One referrer per person, chosen from real accounts. A
+// referral counts only once `status` is 'qualified' (docs/specs/referrals.md).
+export const referrals = pgTable(
+  "referrals",
+  {
+    refereeId: text("referee_id")
+      .primaryKey()
+      .notNull()
+      .references(() => users.userId, { onDelete: "cascade" }),
+    referrerId: text("referrer_id")
+      .notNull()
+      .references(() => users.userId, { onDelete: "cascade" }),
+    status: text("status").notNull().default("pending"),
+    // 'picked' from real accounts, or 'typed' when matched from a name written
+    // at sign-up. Typed links are older or from old app versions.
+    origin: text("origin").notNull().default("picked"),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+    qualifiedAt: timestamp("qualified_at", { withTimezone: true, mode: "string" }),
+  },
+  (table) => [index("idx_referrals_referrer").on(table.referrerId, table.status)],
+).enableRLS();
+
+// Rewards a person has reached. `claimed_at` is set for the ones they collect.
+export const referralRewards = pgTable(
+  "referral_rewards",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.userId, { onDelete: "cascade" }),
+    rewardCount: integer("reward_count").notNull(),
+    earnedAt: timestamp("earned_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+    claimedAt: timestamp("claimed_at", { withTimezone: true, mode: "string" }),
+  },
+  (table) => [
+    primaryKey({ columns: [table.userId, table.rewardCount], name: "referral_rewards_pkey" }),
+  ],
+).enableRLS();
+
+// App Store Connect offer codes waiting to be handed out. Loaded by
+// `scripts/load-offer-codes.mjs`. Never served to anyone but their owner.
+export const referralOfferCodes = pgTable(
+  "referral_offer_codes",
+  {
+    code: text("code").primaryKey().notNull(),
+    assignedTo: text("assigned_to").references(() => users.userId, { onDelete: "set null" }),
+    assignedAt: timestamp("assigned_at", { withTimezone: true, mode: "string" }),
+  },
+  (table) => [index("idx_referral_offer_codes_owner").on(table.assignedTo)],
+).enableRLS();
+
 // Tokens of deleted accounts, waiting on Apple. No user id: the account is gone
 // and a row is removed as soon as Apple answers, or after the last retry.
 export const appleTokenRevocations = pgTable(

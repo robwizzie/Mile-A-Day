@@ -18,6 +18,7 @@ enum DashboardCard: String, CaseIterable, Identifiable {
     case streakHistory
     case routeMap
     case monthlyFlame
+    case communityGoal
 
     var id: String { rawValue }
 
@@ -39,6 +40,7 @@ enum DashboardCard: String, CaseIterable, Identifiable {
         case .streakHistory: return "Hall of Streaks"
         case .routeMap: return "Your routes"
         case .monthlyFlame: return "This month's flame"
+        case .communityGoal: return "Community goal"
         }
     }
 
@@ -66,6 +68,8 @@ enum DashboardCard: String, CaseIterable, Identifiable {
             return "Every walk and run you've mapped, on one map."
         case .monthlyFlame:
             return "Your days so far this month — every one of them unlocks Flamey's Monthly Flame."
+        case .communityGoal:
+            return "The miles everyone is walking together, and your part."
         }
     }
 
@@ -82,6 +86,7 @@ enum DashboardCard: String, CaseIterable, Identifiable {
         case .streakHistory: return "crown.fill"
         case .routeMap: return "map.fill"
         case .monthlyFlame: return "calendar"
+        case .communityGoal: return "map.fill"
         }
     }
 
@@ -90,7 +95,8 @@ enum DashboardCard: String, CaseIterable, Identifiable {
     /// dashboard a long scroll; both are one toggle away in Customize. A user
     /// who customised has a non-empty string and never reads this.
     static func defaults(for style: DashboardStyle) -> [DashboardCard] {
-        [.dailyChallenge]
+        // The goal's card draws nothing between goals, so it costs no space then.
+        [.dailyChallenge, .communityGoal]
     }
 }
 

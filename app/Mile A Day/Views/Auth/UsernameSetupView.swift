@@ -4,27 +4,36 @@ struct UsernameSetupView: View {
     @Environment(\.appStateManager) var appStateManager
     @EnvironmentObject var userManager: UserManager
     @State private var username = ""
+    @State private var isValid = false
+    @State private var reaction = 0
     @State private var isSubmitting = false
     @State private var showError = false
     @State private var errorMessage = ""
     
     var body: some View {
-        ZStack {
-            // Background gradient
-            LinearGradient(
-                colors: [
-                    Color(red: 0.12, green: 0.06, blue: 0.08),
-                    Color(red: 0.06, green: 0.03, blue: 0.04)
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .ignoresSafeArea()
-            
-            UsernameInputView(
-                username: $username,
-                onSubmit: handleUsernameSubmit
-            )
+        OnboardingFormScaffold(
+            colors: [Color(red: 0.47, green: 0.36, blue: 0.95), Color(red: 0.20, green: 0.12, blue: 0.56)],
+            headline: "Pick your username",
+            message: "This is how friends find you, and how they'll pick you when you invite them.",
+            art: { height in
+                OnboardingFlamey(items: ["electric", "bow_tie"], size: min(height * 0.82, 130),
+                                 line: isValid ? "Hi, @\(username)!" : nil, reaction: reaction)
+                    .introPop(0.05)
+            },
+            content: {
+                UsernameInputView(username: $username, isValid: $isValid, onSubmit: handleUsernameSubmit)
+            },
+            actions: {
+                OnboardingPrimaryButton(
+                    title: "Continue",
+                    isLoading: isSubmitting,
+                    isEnabled: isValid,
+                    action: handleUsernameSubmit
+                )
+            }
+        )
+        .onChange(of: isValid) { _, valid in
+            if valid { reaction += 1 }
         }
         .alert("Error", isPresented: $showError) {
             Button("OK") { }

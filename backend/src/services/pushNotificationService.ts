@@ -261,6 +261,10 @@ export type NotificationType =
   // are high-priority, so quiet hours and the daily cap both apply.
   | "weekly_challenge_new"
   | "weekly_challenge_nudge"
+  | "community_goal_start"
+  | "community_goal_final_week"
+  | "community_goal_result"
+  | "referral_qualified"
   | "weekly_challenge_complete"
   // The catch-up: what was queued past quiet hours or the daily cap, named
   // rather than counted, and pointed at the ONE screen that can show it (the

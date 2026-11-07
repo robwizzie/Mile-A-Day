@@ -1,6 +1,5 @@
 // Writes the copy of every skin the app ships with (offline first launch,
-// widgets) from backend/flamey-skins: app/Mile A Day/FlameySkins.json and
-// app/MileADayWidgets/FlameySkins.json, byte-identical, minified.
+// widgets, Watch) from backend/flamey-skins, byte-identical and minified.
 //
 //   node bundle.mjs           write both
 //   node bundle.mjs --check   exit 1 if either is stale (CI)
@@ -10,7 +9,7 @@ import crypto from 'node:crypto';
 
 const ROOT = path.resolve(import.meta.dirname, '../../..');
 const SRC = path.join(ROOT, 'backend/flamey-skins');
-const DESTS = ['app/Mile A Day/FlameySkins.json', 'app/MileADayWidgets/FlameySkins.json'].map((p) => path.join(ROOT, p));
+const DESTS = ['app/Mile A Day/FlameySkins.json', 'app/MileADayWidgets/FlameySkins.json', 'app/Mile A Day Watch Watch App/Flamey/FlameySkins.json'].map((p) => path.join(ROOT, p));
 
 const files = fs.readdirSync(SRC).filter((f) => f.endsWith('.json')).sort();
 const skins = files.map((f) => JSON.parse(fs.readFileSync(path.join(SRC, f), 'utf8')))
