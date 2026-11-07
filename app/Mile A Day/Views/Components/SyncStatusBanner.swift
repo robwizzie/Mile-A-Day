@@ -104,7 +104,7 @@ struct SyncStatusBanner: View {
                             .fontWeight(.semibold)
                             .foregroundColor(.primary)
                             .lineLimit(1)
-                            .minimumScaleFactor(0.85)
+                            .minimumScaleFactor(0.7)
                             .frame(maxWidth: .infinity, alignment: .leading)
 
                         if progress.totalToUpload > 0, !progress.isComplete {
@@ -159,7 +159,7 @@ struct SyncStatusBanner: View {
                     .fontWeight(.semibold)
                     .foregroundColor(.primary)
                     .lineLimit(1)
-                    .minimumScaleFactor(0.85)
+                    .minimumScaleFactor(0.7)
                     .frame(maxWidth: .infinity, alignment: .leading)
 
                 if progress.isRunning {

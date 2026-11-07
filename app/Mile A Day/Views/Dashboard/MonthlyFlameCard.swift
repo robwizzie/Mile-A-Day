@@ -46,7 +46,7 @@ struct MonthlyFlameCard: View {
                     }
                     Spacer(minLength: 0)
                     Image(systemName: "chevron.right")
-                        .font(.system(size: 12, weight: .bold))
+                        .madFont(size: 12, weight: .bold, maxScale: 1.5)
                         .foregroundColor(.white.opacity(0.35))
                         .accessibilityHidden(true)
                 }
