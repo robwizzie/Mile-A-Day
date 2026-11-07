@@ -128,6 +128,15 @@ export default function PrivacyPage() {
 					them to other people. We keep your own routes so you can see them on your maps and across devices.
 				</p>
 				<p>
+					<span className="font-semibold text-[#f5f5f5]">Live route sharing on Buddy Walks.</span> This is off by default. During an
+					outdoor Buddy Walk, you can turn it on for that one walk, and only other people on the walk who also turned
+					it on can see your route as you go. GPS points are uploaded during the walk only once you have moved past them
+					by your Hide start &amp; end distance, so your start and your final stretch are not sent live. It is not
+					available while Stealth Mode is on, while Show route maps is off, or if Who can see my workouts is set to
+					&ldquo;Only me.&rdquo; We delete these live points from our servers when the walk ends. Your finished route is
+					separate: it syncs and is shared under the settings described in this section.
+				</p>
+				<p>
 					<span className="font-semibold text-[#f5f5f5]">Who can see your routes by default.</span> Your accepted friends can see the
 					map of your routes on your posts and workouts, and can play a flyover replay of them. By default, about 1/8
 					mile is hidden from each end of the route, and people you block never see it. If you skip the photo after a
@@ -191,8 +200,8 @@ export default function PrivacyPage() {
 				</ul>
 				<p>
 					<span className="font-semibold text-[#f5f5f5]">What is not shared.</span> Friends can see that you are out on a walk right
-					now if you allow it, but never where. Buddy Walks share distance and progress during the walk, not your live
-					position. Your routes do not appear on our public website pages, including shared profile and post links.
+					now if you allow it, but never where. Unless you turn on live route sharing for a Buddy Walk, Buddy Walks share
+					distance and progress during the walk, not your position. Your routes do not appear on our public website pages, including shared profile and post links.
 				</p>
 				<p>
 					<span className="font-semibold text-[#f5f5f5]">Aggregate use.</span> To understand where our members are, we use the middle
