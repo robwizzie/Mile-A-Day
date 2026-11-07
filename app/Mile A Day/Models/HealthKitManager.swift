@@ -1690,6 +1690,7 @@ final class MADWatchBridge: NSObject {
 
     private var isActivated = false
     private var lastPushedHash: Int = 0
+    private var lastFacePushHash: Int = 0
 
     private override init() { super.init() }
 
@@ -1751,18 +1752,46 @@ final class MADWatchBridge: NSObject {
         } ?? 0
         payload["tokensReady"] = tokensReady
 
+        // What Flamey owns and wears, so he looks the same on the wrist. These
+        // are the same mirrors the home screen widget reads.
+        let flameyOwned = WidgetDataStore.loadFlameyOwnedItems().map(\.rawValue).sorted()
+        let flameyChoice = try? JSONEncoder().encode(WidgetDataStore.loadFlameyChoice())
+        let flameySignup = WidgetDataStore.loadFlameySignupDate()?.timeIntervalSince1970
+        payload["flameyOwned"] = flameyOwned
+        if let flameyChoice { payload["flameyChoice"] = flameyChoice }
+        if let flameySignup { payload["flameySignup"] = flameySignup }
+
         // Hash on the value-bearing fields only (not the timestamp) so we don't
         // re-send identical state. Token + id are included so a token change
         // forces a re-push.
-        let stableHash = "\(payload["streak"] ?? 0)|\(payload["todayMiles"] ?? 0)|\(payload["goalMiles"] ?? 0)|\(payload["firstName"] ?? "")|\(payload["name"] ?? "")|\(authToken ?? "")|\(backendUserId ?? "")|\(tokensReady)".hashValue
+        let stableHash = "\(payload["streak"] ?? 0)|\(payload["todayMiles"] ?? 0)|\(payload["goalMiles"] ?? 0)|\(payload["firstName"] ?? "")|\(payload["name"] ?? "")|\(authToken ?? "")|\(backendUserId ?? "")|\(tokensReady)|\(flameyOwned)|\(flameyChoice?.hashValue ?? 0)|\(flameySignup ?? 0)".hashValue
         if stableHash == lastPushedHash { return }
         lastPushedHash = stableHash
+
+        pushToWatchFace(streak: payload["streak"] as? Int ?? 0, miles: hk.todaysDistance,
+                        goal: payload["goalMiles"] as? Double ?? 1.0)
 
         do {
             try WCSession.default.updateApplicationContext(payload)
         } catch {
             print("[MADWatchBridge] updateApplicationContext failed: \(error.localizedDescription)")
         }
+    }
+
+    /// A plain context waits until the Watch app next runs. With one of our
+    /// complications on the face, this path wakes it, so a mile walked with
+    /// only the phone still reaches the wrist. iOS rations these per day, so
+    /// only what the face shows counts, and tenths of a mile at the finest.
+    /// Numbers only: the auth token never travels this way.
+    private func pushToWatchFace(streak: Int, miles: Double, goal: Double) {
+        let session = WCSession.default
+        guard session.isComplicationEnabled, session.remainingComplicationUserInfoTransfers > 0 else { return }
+        let shown = "\(streak)|\(goal)|\(miles >= goal)|\(Int(miles * 10))".hashValue
+        guard shown != lastFacePushHash else { return }
+        lastFacePushHash = shown
+        session.transferCurrentComplicationUserInfo([
+            "streak": streak, "todayMiles": miles, "goalMiles": goal, "ts": Date().timeIntervalSince1970
+        ])
     }
     #endif
 
@@ -1787,7 +1816,11 @@ final class MADWatchBridge: NSObject {
                     hk.checkInitialDataReady()
                 }
             }
-            if let miles = context["todayMiles"] as? Double, miles >= 0 {
+            // A context can sit undelivered past midnight: yesterday's miles
+            // must not read as today's on Flamey or the watch face.
+            let sentAt = (context["ts"] as? TimeInterval).map(Date.init(timeIntervalSince1970:))
+            let sentToday = sentAt.map(Calendar.current.isDateInToday) ?? true
+            if sentToday, let miles = context["todayMiles"] as? Double, miles >= 0 {
                 // Watch may have its own live workout-in-progress that's farther
                 // along than iPhone's snapshot — keep the larger value so we
                 // never visibly regress mid-workout.
@@ -1813,7 +1846,10 @@ final class MADWatchBridge: NSObject {
             if let tokens = context["tokensReady"] as? Int {
                 hk.heldStreakTokens = tokens
             }
+            WatchFlameyWardrobe.apply(context: context)
             userManager.saveUserData()
+            WatchComplicationSync.update(streak: hk.retroactiveStreak, miles: hk.todaysDistance,
+                                         goal: userManager.currentUser.goalMiles > 0 ? userManager.currentUser.goalMiles : 1.0)
         }
     }
 
@@ -1859,6 +1895,11 @@ extension MADWatchBridge: WCSessionDelegate {
     #if os(watchOS)
     func session(_ session: WCSession, didReceiveApplicationContext applicationContext: [String: Any]) {
         apply(context: applicationContext)
+    }
+
+    /// The watch-face path (`pushToWatchFace`): same fields, a subset of them.
+    func session(_ session: WCSession, didReceiveUserInfo userInfo: [String: Any] = [:]) {
+        apply(context: userInfo)
     }
     #endif
 }

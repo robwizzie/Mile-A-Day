@@ -102,7 +102,9 @@ Details: docs/conventions/ios.md § Key Patterns
 - Weekly recap: Sunday→Saturday; route `weekly_recap` in all four places via `WeeklyRecapLink`; declare `weeklyRecapV1`; reuse `weeklyRecapEnabled`.
 - Feature views live in `Views/<FeatureName>/` subdirectories.
 - Shared UI components in `Views/Components/`.
-- Watch app is a separate target at `Mile A Day Watch App/`.
+- Watch app is a separate target at `Mile A Day Watch Watch App/`, a synchronized folder: files added there join it (no pbxproj). Dual-member files reach Watch-only types only inside `#if os(watchOS)`.
+- Watch Flamey draws the widget's art: `Mile A Day Watch Watch App/Flamey/` holds byte-identical copies of `MileADayWidgets/` (`FlameBuddyFigure`, `CoalLumpView`, `StreakFlameState`, the seven shared files, `FlameySkins.json`), so any edit there is cp + cmp to the Watch too; his look comes from `MADWatchBridge` via `WatchFlameyWardrobe`, mood via `WatchFlameyState`.
+- Complications (target `MileADayWatchWidgets`, embedded in the Watch app, `app/MileADayWatchWidgets/`) read only `WatchDayStore` (byte-identical in both targets), written through `WatchComplicationSync`, which reloads only when a shown value changes; `pushToWatchFace` sends numbers only, never the auth token. `-MADWatchDemo` stays `#if DEBUG`; inline text must fit beside the icon on a real face (the picker's preview doesn't prove it).
 - Notification taps resolve in `NotificationDestination.from(type:data:)`, presented by `.notificationDestinationHost()`; never in the three tap switches.
 - One post opens as `PostDetailView`/`PostDetailLoaderView` via `PostDeepLink`; from a sheet use `openAfterDismiss`; `FeedDeepLink` is for raw workouts only.
 - `SaveFriendStreakView` only OFFERS; accept via root-hosted `StreakAssistOfferSheet`; gate on `donation_budget.remaining`; ask on `my_savable_day`; meter text via `assistCaption`.
@@ -192,7 +194,7 @@ Details: docs/conventions/ios.md § Auth / Session
 Details: docs/conventions/ios.md § Do NOT
 - Hand-edit `.entitlements` without enabling the capability on the App ID (AMFI kills at launch).
 - Change the API base URL without coordinating both client and server.
-- Modify `project.pbxproj` or create Watch-target files; keep dual-membership files (HealthKitManager.swift, CelebrationManager.swift) dependency-free; check with `xcrun swiftc -typecheck -sdk $(xcrun --sdk watchos --show-sdk-path) -target arm64_32-apple-watchos10.0 <file>`.
+- Modify `project.pbxproj`; keep dual-membership files (HealthKitManager.swift, CelebrationManager.swift) dependency-free; check with `xcrun swiftc -typecheck -sdk $(xcrun --sdk watchos --show-sdk-path) -target arm64_32-apple-watchos10.0 <file>`.
 
 ## App Store Review Compliance
 Details: docs/conventions/ios.md § App Store Review Compliance

@@ -25,6 +25,7 @@ struct WorkoutView: View {
     @State private var countdownNumber = 3
     @State private var showCountdown = true
     @State private var pageSelection: Int = 0
+    @State private var celebrating = false
 
     private var currentDistance: Double { workoutManager.distance }
 
@@ -66,7 +67,16 @@ struct WorkoutView: View {
                 trackingPager
                     .transition(.opacity)
             }
+
+            if celebrating && !showRecap {
+                WatchMileCelebration(goal: goalDistance, streakBefore: healthManager.retroactiveStreak) {
+                    celebrating = false
+                }
+                .transition(.opacity)
+                .zIndex(1)
+            }
         }
+        .animation(.easeOut(duration: 0.25), value: celebrating)
         .animation(.easeInOut(duration: 0.35), value: showCountdown)
         .animation(.easeInOut(duration: 0.35), value: showRecap)
         .onAppear {
@@ -78,7 +88,11 @@ struct WorkoutView: View {
         .onChange(of: isCompleted) { _, newValue in
             if newValue && !goalReached {
                 goalReached = true
-                WKInterfaceDevice.current().play(.success)
+                // Its own haptics: a pattern the wrist can't mistake for a tap.
+                celebrating = true
+                // The mile is in, so the face shouldn't wait for the walk to end.
+                WatchComplicationSync.update(streak: healthManager.retroactiveStreak,
+                                             miles: totalDailyDistance, goal: goalDistance)
             }
         }
         .onChange(of: workoutManager.endedWithoutRequest) { _, ended in
@@ -529,12 +543,18 @@ struct WorkoutRecapView: View {
                         .fill(goalReached ? WatchTheme.success.opacity(0.12) : WatchTheme.madRed.opacity(0.12))
                         .frame(width: 82, height: 82)
                         .blur(radius: 4)
-                    Image(systemName: goalReached ? "checkmark.seal.fill" : activityIcon)
-                        .font(.system(size: 26, weight: .heavy))
-                        .foregroundStyle(goalReached ? WatchTheme.successGradient : WatchTheme.primaryButton)
-                        .scaleEffect(celebrate ? 1.0 : 0.6)
-                        .opacity(celebrate ? 1.0 : 0.0)
-                        .animation(.spring(response: 0.55, dampingFraction: 0.6), value: celebrate)
+                    Group {
+                        if goalReached && saved {
+                            WatchFlameyView(mood: .done, health: .blazing, size: 66)
+                        } else {
+                            Image(systemName: goalReached ? "checkmark.seal.fill" : activityIcon)
+                                .font(.system(size: 26, weight: .heavy))
+                                .foregroundStyle(goalReached ? WatchTheme.successGradient : WatchTheme.primaryButton)
+                        }
+                    }
+                    .scaleEffect(celebrate ? 1.0 : 0.6)
+                    .opacity(celebrate ? 1.0 : 0.0)
+                    .animation(.spring(response: 0.55, dampingFraction: 0.6), value: celebrate)
                 }
                 .padding(.top, 6)
 
