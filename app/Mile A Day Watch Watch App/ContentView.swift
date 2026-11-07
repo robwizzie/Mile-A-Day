@@ -86,28 +86,46 @@ struct ContentView: View {
     @State private var locationType: HKWorkoutSessionLocationType = .outdoor
     @State private var ringPulse: Bool = false
     @State private var isRefreshing: Bool = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.isLuminanceReduced) private var isLuminanceReduced
 
     private var goalDistance: Double {
         userManager.currentUser.goalMiles > 0 ? userManager.currentUser.goalMiles : 1.0
     }
 
-    private var currentDistance: Double { healthManager.todaysDistance }
+    private var currentDistance: Double {
+        #if DEBUG
+        if let demo = WatchDemo.current { return demo.miles }
+        #endif
+        return healthManager.todaysDistance
+    }
 
     private var progress: Double { min(currentDistance / goalDistance, 1.0) }
 
     private var isCompleted: Bool { currentDistance >= goalDistance }
 
-    private var currentStreak: Int { healthManager.retroactiveStreak }
+    private var currentStreak: Int {
+        #if DEBUG
+        if let demo = WatchDemo.current { return demo.streak }
+        #endif
+        return healthManager.retroactiveStreak
+    }
 
     private var remainingDistance: Double { max(goalDistance - currentDistance, 0) }
 
-    /// Returns the user's real first name only — never the default `"You"` placeholder.
-    private var realFirstName: String? {
-        let first = userManager.currentUser.firstName?.trimmingCharacters(in: .whitespaces) ?? ""
-        if !first.isEmpty { return first }
-        let storedName = userManager.currentUser.name.trimmingCharacters(in: .whitespaces)
-        guard !storedName.isEmpty, storedName.lowercased() != "you" else { return nil }
-        return storedName.split(separator: " ").first.map(String.init)
+    private var flamey: WatchFlameyState {
+        #if DEBUG
+        WatchFlameyState(streak: currentStreak, miles: currentDistance, goal: goalDistance,
+                         now: WatchDemo.current?.now ?? Date())
+        #else
+        WatchFlameyState(streak: currentStreak, miles: currentDistance, goal: goalDistance)
+        #endif
+    }
+
+    /// Finished, at risk, or on the way: one colour for the ring and its glow.
+    private var ringTint: Color {
+        if isCompleted { return WatchTheme.success }
+        return flamey.isAtRisk ? .red : WatchTheme.madRedBright
     }
 
     var body: some View {
@@ -116,7 +134,7 @@ struct ContentView: View {
                 .ignoresSafeArea()
 
             ScrollView {
-                VStack(spacing: 12) {
+                VStack(spacing: 8) {
                     header
                         .padding(.top, 2)
 
@@ -137,6 +155,13 @@ struct ContentView: View {
                 .padding(.horizontal, 6)
             }
         }
+        #if DEBUG
+        .overlay {
+            if WatchDemo.current?.celebrate == true {
+                WatchMileCelebration(goal: 1, streakBefore: currentStreak) { }
+            }
+        }
+        #endif
         .fullScreenCover(isPresented: $showWorkoutView) {
             WorkoutView(
                 healthManager: healthManager,
@@ -157,6 +182,9 @@ struct ContentView: View {
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active { refreshAll() }
         }
+        .onChange(of: currentDistance) { syncComplications() }
+        .onChange(of: currentStreak) { syncComplications() }
+        .onChange(of: goalDistance) { syncComplications() }
         .onChange(of: showWorkoutView) { oldValue, newValue in
             if oldValue && !newValue {
                 // HK takes a beat to finalize the finished workout before it shows
@@ -168,8 +196,15 @@ struct ContentView: View {
         }
     }
 
+    private func syncComplications() {
+        WatchComplicationSync.update(streak: currentStreak, miles: currentDistance, goal: goalDistance)
+    }
+
     /// Re-pulls today's distance and recomputes the streak from HealthKit.
     private func refreshAll() {
+        #if DEBUG
+        if WatchDemo.current != nil { return }
+        #endif
         guard !isRefreshing else { return }
         isRefreshing = true
         healthManager.refreshWatchSummary()
@@ -181,48 +216,15 @@ struct ContentView: View {
     // MARK: - Header
 
     private var header: some View {
-        VStack(spacing: 3) {
-            // Top brand row — small wordmark + weekday/date, single line.
-            HStack(spacing: 6) {
-                Image("mad-logo")
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 13, height: 13)
-                Text("MILE A DAY")
-                    .font(.system(size: 9, weight: .heavy, design: .rounded))
-                    .foregroundColor(WatchTheme.textPrimary.opacity(0.85))
-                    .tracking(1.4)
-            }
-
-            // Personal line — uses the real first name only; defaults to a clean
-            // date string when no name is configured (avoids the "Hey, You" look).
-            Group {
-                if let name = realFirstName {
-                    (
-                        Text(greetingPrefix())
-                            .foregroundColor(WatchTheme.textSecondary)
-                        + Text(", \(name)")
-                            .foregroundColor(WatchTheme.textPrimary)
-                    )
-                } else {
-                    Text(Date(), format: .dateTime.weekday(.wide).month(.abbreviated).day())
-                        .foregroundColor(WatchTheme.textSecondary)
-                }
-            }
-            .font(.system(size: 12, weight: .semibold, design: .rounded))
-            .lineLimit(1)
-            .minimumScaleFactor(0.7)
-        }
-    }
-
-    /// Time-of-day greeting prefix so the personal line doesn't always say "Hey".
-    private func greetingPrefix() -> String {
-        let hour = Calendar.current.component(.hour, from: Date())
-        switch hour {
-        case 5..<12: return "Good morning"
-        case 12..<17: return "Good afternoon"
-        case 17..<22: return "Good evening"
-        default: return "Hi"
+        HStack(spacing: 6) {
+            Image("mad-logo")
+                .resizable()
+                .scaledToFit()
+                .frame(width: 13, height: 13)
+            Text("MILE A DAY")
+                .font(.system(size: 9, weight: .heavy, design: .rounded))
+                .foregroundColor(WatchTheme.textPrimary.opacity(0.85))
+                .tracking(1.4)
         }
     }
 
@@ -233,79 +235,66 @@ struct ContentView: View {
             // Outer soft glow that breathes when not complete
             Circle()
                 .stroke(
-                    (isCompleted ? WatchTheme.success : WatchTheme.madRedBright)
-                        .opacity(ringPulse && !isCompleted ? 0.22 : 0.10),
+                    ringTint.opacity(ringPulse && !isCompleted ? 0.22 : 0.10),
                     lineWidth: 1
                 )
-                .frame(width: 132, height: 132)
+                .frame(width: 122, height: 122)
                 .blur(radius: 4)
 
             // Track
             Circle()
-                .stroke(Color.white.opacity(0.08), lineWidth: 11)
-                .frame(width: 122, height: 122)
+                .stroke(Color.white.opacity(0.08), lineWidth: 10)
+                .frame(width: 112, height: 112)
 
             // Progress arc
             Circle()
                 .trim(from: 0, to: progress)
                 .stroke(
                     isCompleted ? WatchTheme.progressGradientComplete : WatchTheme.progressGradient,
-                    style: StrokeStyle(lineWidth: 11, lineCap: .round)
+                    style: StrokeStyle(lineWidth: 10, lineCap: .round)
                 )
-                .frame(width: 122, height: 122)
+                .frame(width: 112, height: 112)
                 .rotationEffect(.degrees(-90))
                 .animation(.spring(response: 0.9, dampingFraction: 0.75), value: progress)
-                .shadow(
-                    color: (isCompleted ? WatchTheme.success : WatchTheme.madRedBright).opacity(0.35),
-                    radius: 6, x: 0, y: 0
-                )
+                .shadow(color: ringTint.opacity(0.35), radius: 6, x: 0, y: 0)
 
-            // Center content
-            VStack(spacing: 0) {
-                if isCompleted {
-                    Image(systemName: "checkmark.seal.fill")
-                        .font(.system(size: 14, weight: .bold))
-                        .foregroundStyle(WatchTheme.successGradient)
-                        .padding(.bottom, 2)
-                }
-                Text(String(format: "%.2f", currentDistance))
-                    .font(.system(size: 30, weight: .heavy, design: .rounded))
-                    .foregroundColor(WatchTheme.textPrimary)
-                    .contentTransition(.numericText())
-                    .minimumScaleFactor(0.6)
-                    .lineLimit(1)
-                HStack(spacing: 2) {
-                    Text("/")
-                    Text(String(format: "%.1f", goalDistance))
-                    Text("mi")
-                }
-                .font(.system(size: 10, weight: .semibold, design: .rounded))
-                .foregroundColor(WatchTheme.textTertiary)
-            }
+            // He breathes with the ring, and holds still when the screen dims
+            // or the wearer asked for less motion.
+            WatchFlameyView(state: flamey, size: 88, warmth: progress, centred: true)
+                .scaleEffect(ringPulse && !reduceMotion && !isLuminanceReduced ? 1.03 : 1, anchor: .center)
         }
     }
 
     // MARK: - Goal Status
 
+    /// Distance under the ring, then what Flamey has to say, then the clock
+    /// when the streak is on the line.
     private var goalStatus: some View {
-        Group {
-            if isCompleted {
-                HStack(spacing: 5) {
-                    Image(systemName: "sparkles")
-                        .font(.system(size: 10, weight: .bold))
-                    Text("Goal complete!")
-                        .font(.system(size: 12, weight: .semibold, design: .rounded))
-                }
-                .foregroundStyle(WatchTheme.successGradient)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 4)
-                .background(
-                    Capsule().fill(WatchTheme.success.opacity(0.16))
-                )
-            } else {
-                Text(String(format: "%.2f mi to goal", remainingDistance))
-                    .font(.system(size: 11, weight: .medium, design: .rounded))
-                    .foregroundColor(WatchTheme.textSecondary)
+        VStack(spacing: 2) {
+            HStack(alignment: .firstTextBaseline, spacing: 3) {
+                Text(String(format: "%.2f", currentDistance))
+                    .font(.system(size: 22, weight: .heavy, design: .rounded))
+                    .foregroundColor(WatchTheme.textPrimary)
+                    .contentTransition(.numericText())
+                Text(String(format: "/ %.1f mi", goalDistance))
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .foregroundColor(WatchTheme.textTertiary)
+            }
+            .lineLimit(1)
+            .minimumScaleFactor(0.7)
+
+            Text(flamey.line)
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .foregroundColor(isCompleted ? WatchTheme.success : WatchTheme.textSecondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+
+            if flamey.isAtRisk {
+                Text(flamey.dayEnd, style: .timer)
+                    .font(.system(size: 13, weight: .heavy, design: .rounded))
+                    .foregroundColor(.red)
+                    .monospacedDigit()
+                    .accessibilityLabel(Text("Time left today"))
             }
         }
     }

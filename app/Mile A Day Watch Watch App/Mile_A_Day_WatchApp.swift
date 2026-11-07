@@ -12,6 +12,11 @@ struct Mile_A_Day_Watch_Watch_AppApp: App {
         // of after a delegate round-trip.
         MADWatchBridge.shared.activate()
         MADWatchBridge.shared.hydrateFromCachedContext()
+        #if DEBUG
+        if let demo = WatchDemo.current {
+            WatchComplicationSync.update(streak: demo.streak, miles: demo.miles, goal: 1)
+        }
+        #endif
     }
 
     var body: some Scene {
@@ -21,6 +26,9 @@ struct Mile_A_Day_Watch_Watch_AppApp: App {
                 .environmentObject(userManager)
                 .preferredColorScheme(.dark)
                 .onAppear {
+                    #if DEBUG
+                    if WatchDemo.current != nil { return }
+                    #endif
                     healthManager.requestAuthorization { authorized in
                         if !authorized {
                             print("HealthKit authorization denied on Apple Watch")
