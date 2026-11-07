@@ -392,15 +392,15 @@ struct CreateCompetitionView: View {
         } label: {
             HStack(spacing: 12) {
                 Image(systemName: "slider.horizontal.3")
-                    .font(.system(size: 14, weight: .bold))
+                    .madFont(size: 14, weight: .bold, maxScale: 1.5)
                     .foregroundColor(MADTheme.Colors.madRed)
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Customize")
-                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .madFont(size: 15, weight: .bold, design: .rounded)
                         .foregroundColor(.white)
                     Text(presetSummary)
-                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .madFont(size: 12, weight: .medium, design: .rounded)
                         .foregroundColor(.white.opacity(0.6))
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
@@ -409,7 +409,7 @@ struct CreateCompetitionView: View {
                 Spacer(minLength: 4)
 
                 Image(systemName: "chevron.down")
-                    .font(.system(size: 12, weight: .bold))
+                    .madFont(size: 12, weight: .bold, maxScale: 1.5)
                     .foregroundColor(.white.opacity(0.35))
             }
             .padding(MADTheme.Spacing.md)
@@ -467,7 +467,7 @@ struct CreateCompetitionView: View {
     var nameSection: some View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
             Text("Competition Name")
-                .font(CompeteDesign.eyebrow)
+                .competeFont(CompeteDesign.eyebrow)
                 .tracking(CompeteDesign.eyebrowTracking)
                 .textCase(.uppercase)
                 .foregroundColor(CompeteDesign.inkFaint)
@@ -477,9 +477,9 @@ struct CreateCompetitionView: View {
                 "",
                 text: $competitionName,
                 prompt: Text(autoCompetitionName)
-                    .foregroundColor(.white.opacity(0.4))
+                    .foregroundColor(.white.opacity(0.6))
             )
-            .font(MADTheme.Typography.headline)
+            .madFont(size: 17, weight: .semibold, design: .rounded)
             .foregroundColor(.white)
             .textInputAutocapitalization(.words)
             .submitLabel(.done)
@@ -507,7 +507,7 @@ struct CreateCompetitionView: View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
             HStack {
                 Text("Competitors")
-                    .font(CompeteDesign.eyebrow)
+                    .competeFont(CompeteDesign.eyebrow)
                     .tracking(CompeteDesign.eyebrowTracking)
                     .textCase(.uppercase)
                     .foregroundColor(CompeteDesign.inkFaint)
@@ -547,7 +547,7 @@ struct CreateCompetitionView: View {
                             .frame(width: 80, height: 80) // Extra space for proper alignment
 
                             Text("Add")
-                                .font(MADTheme.Typography.caption)
+                                .madFont(size: 12, design: .rounded)
                                 .foregroundColor(.white.opacity(0.7))
                         }
                     }
@@ -583,9 +583,9 @@ struct CreateCompetitionView: View {
                             .padding(.top, 4) // Extra padding at top
 
                             Text(friend.displayName)
-                                .font(MADTheme.Typography.caption)
+                                .madFont(size: 12, design: .rounded)
                                 .foregroundColor(.white)
-                                .lineLimit(1)
+                                .madNameLines()
                                 .frame(width: 74)
                                 .truncationMode(.tail)
                         }
@@ -601,7 +601,7 @@ struct CreateCompetitionView: View {
     var competitionTypeSection: some View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
             Text("Competition Type")
-                .font(CompeteDesign.eyebrow)
+                .competeFont(CompeteDesign.eyebrow)
                 .tracking(CompeteDesign.eyebrowTracking)
                 .textCase(.uppercase)
                 .foregroundColor(CompeteDesign.inkFaint)
@@ -629,11 +629,11 @@ struct CreateCompetitionView: View {
 
                     VStack(alignment: .leading, spacing: 4) {
                         Text(selectedType.displayName)
-                            .font(MADTheme.Typography.headline)
+                            .madFont(size: 17, weight: .semibold, design: .rounded, maxScale: 1.3)
                             .foregroundColor(.white)
 
                         Text(selectedType.description)
-                            .font(MADTheme.Typography.caption)
+                            .madFont(size: 12, design: .rounded)
                             .foregroundColor(.white.opacity(0.7))
                             .lineLimit(2)
                     }
@@ -666,14 +666,14 @@ struct CreateCompetitionView: View {
         return VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Allowed Activities")
-                    .font(CompeteDesign.eyebrow)
+                    .competeFont(CompeteDesign.eyebrow)
                     .tracking(CompeteDesign.eyebrowTracking)
                     .textCase(.uppercase)
                     .foregroundColor(CompeteDesign.inkFaint)
 
                 if isStepsUnit {
                     Text("Steps include all activity")
-                        .font(MADTheme.Typography.caption)
+                        .madFont(size: 12, design: .rounded)
                         .foregroundColor(.white.opacity(0.5))
                 }
             }
@@ -709,13 +709,13 @@ struct CreateCompetitionView: View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Distance Unit")
-                    .font(CompeteDesign.eyebrow)
+                    .competeFont(CompeteDesign.eyebrow)
                     .tracking(CompeteDesign.eyebrowTracking)
                     .textCase(.uppercase)
                     .foregroundColor(CompeteDesign.inkFaint)
 
                 Text(unitOnlyDescription)
-                    .font(MADTheme.Typography.caption)
+                    .madFont(size: 12, design: .rounded)
                     .foregroundColor(.white.opacity(0.5))
             }
             .padding(.horizontal, MADTheme.Spacing.sm)
@@ -736,7 +736,7 @@ struct CreateCompetitionView: View {
                     unit = unitOption
                 } label: {
                     Text(unitOption == .steps ? "Steps" : unitOption.rawValue.capitalized)
-                        .font(MADTheme.Typography.callout)
+                        .madFont(size: 16, design: .rounded)
                         .fontWeight(isSelected ? .semibold : .regular)
                         .foregroundColor(isSelected ? .white : .white.opacity(0.6))
                         .frame(maxWidth: .infinity)
@@ -764,13 +764,13 @@ struct CreateCompetitionView: View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(goalLabel)
-                    .font(CompeteDesign.eyebrow)
+                    .competeFont(CompeteDesign.eyebrow)
                     .tracking(CompeteDesign.eyebrowTracking)
                     .textCase(.uppercase)
                     .foregroundColor(CompeteDesign.inkFaint)
 
                 Text(goalDescription)
-                    .font(MADTheme.Typography.caption)
+                    .madFont(size: 12, design: .rounded)
                     .foregroundColor(.white.opacity(0.5))
             }
             .padding(.horizontal, MADTheme.Spacing.sm)
@@ -809,7 +809,7 @@ struct CreateCompetitionView: View {
                         TextField("", value: $goal, format: .number)
                             .keyboardType(unit == .steps ? .numberPad : .decimalPad)
                             .multilineTextAlignment(.center)
-                            .font(.system(size: 56, weight: .bold, design: .rounded))
+                            .madFont(size: 56, weight: .bold, design: .rounded)
                             .foregroundColor(.white)
                             .lineLimit(1)
                             .minimumScaleFactor(0.5)
@@ -822,7 +822,7 @@ struct CreateCompetitionView: View {
                             }
 
                         Text(unit.shortDisplayName)
-                            .font(MADTheme.Typography.title2)
+                            .madFont(size: 22, weight: .bold, design: .rounded)
                             .foregroundColor(.white.opacity(0.7))
                     }
 
@@ -869,7 +869,7 @@ struct CreateCompetitionView: View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
             VStack(alignment: .leading, spacing: 4) {
                 Text("End Condition")
-                    .font(CompeteDesign.eyebrow)
+                    .competeFont(CompeteDesign.eyebrow)
                     .tracking(CompeteDesign.eyebrowTracking)
                     .textCase(.uppercase)
                     .foregroundColor(CompeteDesign.inkFaint)
@@ -877,7 +877,7 @@ struct CreateCompetitionView: View {
                 Text(targetsUseFirstTo
                     ? "Ends when someone reaches the point target"
                     : "Ends after a fixed length of time")
-                    .font(MADTheme.Typography.caption)
+                    .madFont(size: 12, design: .rounded)
                     .foregroundColor(.white.opacity(0.5))
             }
             .padding(.horizontal, MADTheme.Spacing.sm)
@@ -907,13 +907,13 @@ struct CreateCompetitionView: View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Competition Length")
-                    .font(CompeteDesign.eyebrow)
+                    .competeFont(CompeteDesign.eyebrow)
                     .tracking(CompeteDesign.eyebrowTracking)
                     .textCase(.uppercase)
                     .foregroundColor(CompeteDesign.inkFaint)
 
                 Text(hasEndDate ? "Choose when the competition ends" : "Competition runs until manually ended")
-                    .font(MADTheme.Typography.caption)
+                    .madFont(size: 12, design: .rounded)
                     .foregroundColor(.white.opacity(0.5))
             }
             .padding(.horizontal, MADTheme.Spacing.sm)
@@ -975,7 +975,7 @@ struct CreateCompetitionView: View {
                 if isCustomDuration && hasEndDate {
                     VStack(spacing: MADTheme.Spacing.md) {
                         Text("Tap to select end date")
-                            .font(MADTheme.Typography.caption)
+                            .madFont(size: 12, design: .rounded)
                             .foregroundColor(.white.opacity(0.6))
 
                         DatePicker(
@@ -1007,7 +1007,7 @@ struct CreateCompetitionView: View {
                         // Show calculated duration
                         let days = Calendar.current.dateComponents([.day], from: Date(), to: customEndDate).day ?? 1
                         Text("\(max(1, days)) day\(max(1, days) == 1 ? "" : "s") from now")
-                            .font(MADTheme.Typography.callout)
+                            .madFont(size: 16, design: .rounded)
                             .foregroundColor(MADTheme.Colors.primary)
                             .padding(.horizontal, MADTheme.Spacing.md)
                             .padding(.vertical, MADTheme.Spacing.sm)
@@ -1028,13 +1028,13 @@ struct CreateCompetitionView: View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Scoring Interval")
-                    .font(CompeteDesign.eyebrow)
+                    .competeFont(CompeteDesign.eyebrow)
                     .tracking(CompeteDesign.eyebrowTracking)
                     .textCase(.uppercase)
                     .foregroundColor(CompeteDesign.inkFaint)
 
                 Text("How often to tally points or progress")
-                    .font(MADTheme.Typography.caption)
+                    .madFont(size: 12, design: .rounded)
                     .foregroundColor(.white.opacity(0.5))
             }
             .padding(.horizontal, MADTheme.Spacing.sm)
@@ -1058,7 +1058,7 @@ struct CreateCompetitionView: View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(selectedType == .streaks ? "Breaks to Lose" : "Points to Win")
-                    .font(CompeteDesign.eyebrow)
+                    .competeFont(CompeteDesign.eyebrow)
                     .tracking(CompeteDesign.eyebrowTracking)
                     .textCase(.uppercase)
                     .foregroundColor(CompeteDesign.inkFaint)
@@ -1066,7 +1066,7 @@ struct CreateCompetitionView: View {
                 Text(selectedType == .streaks
                     ? (firstTo == 1 ? "Miss one day and you're out" : "Miss \(firstTo) days and you're out")
                     : "First to reach this score wins")
-                    .font(MADTheme.Typography.caption)
+                    .madFont(size: 12, design: .rounded)
                     .foregroundColor(.white.opacity(0.5))
             }
             .padding(.horizontal, MADTheme.Spacing.sm)
@@ -1099,7 +1099,7 @@ struct CreateCompetitionView: View {
                 TextField("", value: $firstTo, format: .number)
                     .keyboardType(.numberPad)
                     .multilineTextAlignment(.center)
-                    .font(.system(size: 48, weight: .bold, design: .rounded))
+                    .madFont(size: 48, weight: .bold, design: .rounded)
                     .foregroundColor(.white)
                     .frame(minWidth: 80)
                     .onChange(of: firstTo) { oldValue, newValue in
@@ -1159,14 +1159,14 @@ struct CreateCompetitionView: View {
                 }
 
                 Text("Create Competition")
-                    .font(MADTheme.Typography.headline)
+                    .madFont(size: 17, weight: .semibold, design: .rounded)
                     .foregroundColor(.black)
 
                 Spacer()
 
                 if selectedFriends.count > 0 {
                     Text("\(selectedFriends.count) competitor\(selectedFriends.count == 1 ? "" : "s")")
-                        .font(MADTheme.Typography.callout)
+                        .madFont(size: 16, design: .rounded)
                         .foregroundColor(.black.opacity(0.6))
                 }
 
@@ -1206,15 +1206,15 @@ struct CreateCompetitionView: View {
             if friendService.friends.isEmpty {
                 VStack(spacing: MADTheme.Spacing.lg) {
                     Image(systemName: "person.2.slash")
-                        .font(.system(size: 50))
+                        .madFont(size: 50, maxScale: 1.5)
                         .foregroundColor(.white.opacity(0.3))
 
                     Text("No Friends Yet")
-                        .font(MADTheme.Typography.title2)
+                        .madFont(size: 22, weight: .bold, design: .rounded)
                         .foregroundColor(.white)
 
                     Text("Add friends to compete with")
-                        .font(MADTheme.Typography.callout)
+                        .madFont(size: 16, design: .rounded)
                         .foregroundColor(.white.opacity(0.7))
                 }
             } else {
@@ -1222,16 +1222,16 @@ struct CreateCompetitionView: View {
                     // Always-visible filter — no hidden pull-down search.
                     HStack(spacing: MADTheme.Spacing.sm) {
                         Image(systemName: "magnifyingglass")
-                            .font(.system(size: 15, weight: .semibold))
+                            .madFont(size: 15, weight: .semibold, maxScale: 1.5)
                             .foregroundColor(.white.opacity(0.45))
 
                         TextField(
                             "",
                             text: $friendPickerFilter,
                             prompt: Text("Filter friends")
-                                .foregroundColor(.white.opacity(0.4))
+                                .foregroundColor(.white.opacity(0.6))
                         )
-                        .font(MADTheme.Typography.body)
+                        .madFont(size: 17, design: .rounded)
                         .foregroundColor(.white)
                         .autocorrectionDisabled()
                         .textInputAutocapitalization(.never)
@@ -1241,7 +1241,7 @@ struct CreateCompetitionView: View {
                                 friendPickerFilter = ""
                             } label: {
                                 Image(systemName: "xmark.circle.fill")
-                                    .font(.system(size: 16))
+                                    .madFont(size: 16, maxScale: 1.5)
                                     .foregroundColor(.white.opacity(0.4))
                             }
                             .buttonStyle(.plain)
@@ -1264,7 +1264,7 @@ struct CreateCompetitionView: View {
                         VStack(spacing: MADTheme.Spacing.md) {
                             if filteredPickerFriends.isEmpty {
                                 Text("No friends match \"\(friendPickerFilter)\"")
-                                    .font(MADTheme.Typography.callout)
+                                    .madFont(size: 16, design: .rounded)
                                     .foregroundColor(.white.opacity(0.6))
                                     .padding(.top, MADTheme.Spacing.xl)
                             } else {

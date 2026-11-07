@@ -52,7 +52,7 @@ struct CompetitionTeamIntervalView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
             Text(title)
-                .font(CompeteDesign.eyebrow)
+                .competeFont(CompeteDesign.eyebrow)
                 .tracking(CompeteDesign.eyebrowTracking)
                 .textCase(.uppercase)
                 .foregroundColor(CompeteDesign.inkFaint)
@@ -108,9 +108,9 @@ struct CompetitionTeamIntervalView: View {
                         .frame(width: 24)
                 } else {
                     Text("\(rank)")
-                        .font(MADTheme.Typography.caption)
+                        .madFont(size: 12, design: .rounded)
                         .foregroundColor(.white.opacity(0.5))
-                        .frame(width: 24)
+                        .frame(minWidth: 24)
                 }
 
                 Circle()
@@ -118,19 +118,19 @@ struct CompetitionTeamIntervalView: View {
                     .frame(width: 10, height: 10)
 
                 Text(team.name)
-                    .font(MADTheme.Typography.callout)
+                    .madFont(size: 16, design: .rounded, maxScale: 1.3)
                     .foregroundColor(.white)
-                    .lineLimit(1)
+                    .madNameLines()
 
                 Spacer(minLength: 0)
 
                 if goal != nil {
                     Text("\(competition.options.formatQuantity(value))/\(competition.options.goalFormatted) \(competition.options.unit.shortDisplayName)")
-                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .madFont(size: 15, weight: .bold, design: .rounded)
                         .foregroundColor(hitGoal ? .green : .white.opacity(0.8))
                 } else {
                     Text(competition.options.formatQuantityWithUnit(value))
-                        .font(.system(size: 16, weight: .bold, design: .rounded))
+                        .madFont(size: 16, weight: .bold, design: .rounded)
                         .foregroundColor(isLeading ? .green : .white.opacity(0.8))
                 }
             }
@@ -158,8 +158,8 @@ struct CompetitionTeamIntervalView: View {
                 }
                 if members.isEmpty {
                     Text("No members yet")
-                        .font(.system(size: 12, weight: .medium, design: .rounded))
-                        .foregroundColor(.white.opacity(0.4))
+                        .madFont(size: 12, weight: .medium, design: .rounded)
+                        .foregroundColor(.white.opacity(0.6))
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
@@ -184,13 +184,15 @@ struct CompetitionTeamIntervalView: View {
             AvatarView(name: member.displayName, imageURL: member.profile_image_url, size: 22)
 
             Text(member.displayName)
-                .font(.system(size: 12, weight: .medium, design: .rounded))
+                .madFont(size: 12, weight: .medium, design: .rounded)
                 .foregroundColor(.white.opacity(0.75))
-                .lineLimit(1)
+                .madNameLines()
 
             if isMe {
                 Text("YOU")
-                    .font(.system(size: 7, weight: .bold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+                    .madFont(size: 11, weight: .bold)
                     .foregroundColor(.white)
                     .padding(.horizontal, 4)
                     .padding(.vertical, 1)
@@ -200,7 +202,7 @@ struct CompetitionTeamIntervalView: View {
             Spacer(minLength: 0)
 
             Text(competition.options.formatQuantityWithUnit(value))
-                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .madFont(size: 12, weight: .semibold, design: .rounded)
                 .foregroundColor(.white.opacity(value > 0 ? 0.6 : 0.3))
         }
     }
@@ -210,11 +212,11 @@ struct CompetitionTeamIntervalView: View {
     private var unassignedFootnote: some View {
         HStack(spacing: 6) {
             Image(systemName: "person.fill.questionmark")
-                .font(.system(size: 10))
+                .madFont(size: 10, maxScale: 1.5)
                 .foregroundColor(.white.opacity(0.35))
             Text("\(competition.unassignedUsers.count) competing without a team")
-                .font(.system(size: 11, weight: .medium, design: .rounded))
-                .foregroundColor(.white.opacity(0.4))
+                .madFont(size: 11, weight: .medium, design: .rounded)
+                .foregroundColor(.white.opacity(0.6))
             Spacer()
         }
         .padding(.horizontal, 10)

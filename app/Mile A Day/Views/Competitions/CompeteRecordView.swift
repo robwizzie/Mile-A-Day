@@ -134,10 +134,10 @@ struct CompeteRecordView: View {
             if let strongest = strongestMode, strongest.wins > 0 {
                 HStack(spacing: 8) {
                     Image(systemName: "sparkles")
-                        .font(.system(size: 12, weight: .bold))
+                        .madFont(size: 12, weight: .bold, maxScale: 1.5)
                         .foregroundColor(.yellow)
                     Text("\(strongest.type.displayName) is your best mode — \(strongest.wins)–\(strongest.losses).")
-                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+                        .madFont(size: 13, weight: .semibold, design: .rounded)
                         .foregroundColor(.white.opacity(0.7))
                         .fixedSize(horizontal: false, vertical: true)
                     Spacer(minLength: 0)
@@ -179,7 +179,7 @@ struct CompeteRecordView: View {
     private func medalCell(count: Int, label: String, colors: [Color]) -> some View {
         VStack(spacing: 6) {
             Image(systemName: "medal.fill")
-                .font(.system(size: 22, weight: .bold))
+                .madFont(size: 22, weight: .bold, maxScale: 1.5)
                 .foregroundStyle(
                     count > 0
                         ? LinearGradient(colors: colors, startPoint: .top, endPoint: .bottom)
@@ -187,11 +187,13 @@ struct CompeteRecordView: View {
                 )
 
             Text("\(count)")
-                .font(.system(size: 18, weight: .heavy, design: .rounded))
+                .madFont(size: 18, weight: .heavy, design: .rounded)
                 .foregroundColor(count > 0 ? .white : .white.opacity(0.3))
 
             Text(label.uppercased())
-                .font(.system(size: 10, weight: .bold, design: .rounded))
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+                .madFont(size: 11, weight: .bold, design: .rounded)
                 .tracking(0.6)
                 .foregroundColor(.white.opacity(0.45))
         }
@@ -219,15 +221,15 @@ struct CompeteRecordView: View {
     private var emptyState: some View {
         VStack(spacing: 12) {
             Image(systemName: "trophy")
-                .font(.system(size: 34, weight: .medium))
+                .madFont(size: 34, weight: .medium, maxScale: 1.5)
                 .foregroundColor(MADTheme.Colors.madRed.opacity(0.5))
 
             Text("No record yet")
-                .font(.system(size: 16, weight: .bold, design: .rounded))
+                .madFont(size: 16, weight: .bold, design: .rounded)
                 .foregroundColor(.white)
 
             Text("Finish a competition and your wins, losses and medals will show up here.")
-                .font(.system(size: 13, weight: .medium, design: .rounded))
+                .madFont(size: 13, weight: .medium, design: .rounded)
                 .foregroundColor(.white.opacity(0.55))
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 24)

@@ -107,18 +107,20 @@ extension CompetitionDetailView {
                 VStack(alignment: .leading, spacing: 14) {
                     HStack(spacing: 8) {
                         Image(systemName: "checkmark.seal.fill")
-                            .font(.system(size: 13))
+                            .madFont(size: 13, maxScale: 1.5)
                             .foregroundColor(CompeteDesign.inkFaint)
                             .accessibilityHidden(true)
                         Text("FINAL RESULT")
-                            .font(CompeteDesign.eyebrow)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.6)
+                            .competeFont(CompeteDesign.eyebrow)
                             .tracking(CompeteDesign.eyebrowTracking)
                             .foregroundColor(CompeteDesign.inkFaint)
                         Spacer()
                         if let ended = competition.endDateFormatted {
                             Text(ended.formatted(date: .abbreviated, time: .omitted))
-                                .font(CompeteDesign.caption)
-                                .foregroundColor(CompeteDesign.inkGhost)
+                                .competeFont(CompeteDesign.caption)
+                                .foregroundColor(CompeteDesign.inkFaint)
                                 .lineLimit(1)
                         }
                     }
@@ -129,19 +131,19 @@ extension CompetitionDetailView {
 
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(winnerName)
-                                    .font(.system(size: 27, weight: .heavy, design: .rounded))
+                                    .madFont(size: 27, weight: .heavy, design: .rounded)
                                     .foregroundColor(CompeteDesign.ink)
                                     .lineLimit(2)
                                     .minimumScaleFactor(0.7)
                                 Text(winningTeam == nil ? "Winner" : "Winning team")
-                                    .font(CompeteDesign.caption)
+                                    .competeFont(CompeteDesign.caption)
                                     .foregroundColor(CompeteDesign.inkFaint)
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
 
                             if let winnerScore {
                                 Text(winnerScore)
-                                    .font(.system(size: 20, weight: .heavy, design: .rounded))
+                                    .madFont(size: 20, weight: .heavy, design: .rounded)
                                     .foregroundColor(CompeteDesign.medal(1) ?? .yellow)
                                     .monospacedDigit()
                                     .lineLimit(1)
@@ -153,7 +155,7 @@ extension CompetitionDetailView {
                     CompeteRowRule()
 
                     Text(myResultSentence(myPlace: myPlace, fieldSize: standings.count, iWon: iWon))
-                        .font(CompeteDesign.detail)
+                        .competeFont(CompeteDesign.detail)
                         .foregroundColor(iWon ? (CompeteDesign.medal(1) ?? .yellow) : CompeteDesign.inkMuted)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -261,7 +263,7 @@ extension CompetitionDetailView {
                     VStack(alignment: .leading, spacing: 0) {
                         if isTeamComp {
                             Text("Every walker's own miles. \(competition.rankedTeams.first?.name ?? "The winning team") won on the TEAM totals above.")
-                                .font(CompeteDesign.caption)
+                                .competeFont(CompeteDesign.caption)
                                 .foregroundColor(CompeteDesign.inkFaint)
                                 .fixedSize(horizontal: false, vertical: true)
                                 .padding(.bottom, 12)
@@ -444,7 +446,7 @@ extension CompetitionDetailView {
                     .font(.title3)
 
                 Text("Invite Friends")
-                    .font(MADTheme.Typography.callout)
+                    .madFont(size: 16, design: .rounded)
                     .fontWeight(.semibold)
             }
             .foregroundColor(.white)

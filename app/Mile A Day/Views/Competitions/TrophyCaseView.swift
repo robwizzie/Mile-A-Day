@@ -90,12 +90,14 @@ struct TrophyCaseView: View {
     private var statsHeader: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text("\(trophyService.totalCompetitions)")
-                .font(.system(size: 46, weight: .heavy, design: .rounded))
+                .madFont(size: 46, weight: .heavy, design: .rounded)
                 .foregroundColor(CompeteDesign.ink)
                 .monospacedDigit()
 
             Text(trophyService.totalCompetitions == 1 ? "COMPETITION COMPLETED" : "COMPETITIONS COMPLETED")
-                .font(CompeteDesign.eyebrow)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+                .competeFont(CompeteDesign.eyebrow)
                 .tracking(CompeteDesign.eyebrowTracking)
                 .foregroundColor(CompeteDesign.inkFaint)
         }
@@ -136,16 +138,17 @@ struct TrophyCaseView: View {
                     .frame(width: 8, height: 8)
                     .accessibilityHidden(true)
                 Text("\(count)")
-                    .font(.system(size: 22, weight: .heavy, design: .rounded))
+                    .madFont(size: 22, weight: .heavy, design: .rounded, maxScale: 1.3)
                     .foregroundColor(CompeteDesign.ink)
                     .monospacedDigit()
                     .lineLimit(1)
+                    .minimumScaleFactor(0.75)
             }
             Text(medal.displayName.uppercased())
-                .font(.system(size: 9, weight: .bold, design: .rounded))
+                .madFont(size: 11, weight: .bold, design: .rounded)
                 .tracking(0.8)
                 .foregroundColor(CompeteDesign.inkFaint)
-                .lineLimit(1)
+                .madNameLines()
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .combine)
@@ -158,12 +161,14 @@ struct TrophyCaseView: View {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(alignment: .firstTextBaseline) {
                     Text("WIN RATE")
-                        .font(CompeteDesign.eyebrow)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.6)
+                        .competeFont(CompeteDesign.eyebrow)
                         .tracking(CompeteDesign.eyebrowTracking)
                         .foregroundColor(CompeteDesign.inkFaint)
                     Spacer()
                     Text(ProgressCalculator.formatWholePercent(trophyService.winRate))
-                        .font(.system(size: 26, weight: .heavy, design: .rounded))
+                        .madFont(size: 26, weight: .heavy, design: .rounded)
                         .foregroundColor(CompeteDesign.ink)
                         .monospacedDigit()
                         .lineLimit(1)
@@ -183,16 +188,16 @@ struct TrophyCaseView: View {
     private var emptyState: some View {
         VStack(spacing: MADTheme.Spacing.lg) {
             Image(systemName: "trophy")
-                .font(.system(size: 60))
+                .madFont(size: 60, maxScale: 1.5)
                 .foregroundColor(.white.opacity(0.2))
 
             Text("No Trophies Yet")
-                .font(MADTheme.Typography.title3)
+                .madFont(size: 20, weight: .semibold, design: .rounded)
                 .foregroundColor(.white.opacity(0.6))
 
             Text("Complete competitions to earn trophies and medals!")
-                .font(MADTheme.Typography.body)
-                .foregroundColor(.white.opacity(0.4))
+                .madFont(size: 17, design: .rounded)
+                .foregroundColor(.white.opacity(0.6))
                 .multilineTextAlignment(.center)
         }
         .padding(.vertical, MADTheme.Spacing.xxl)
@@ -208,7 +213,7 @@ struct TrophyCaseView: View {
 
             HStack {
                 Text("History")
-                    .font(MADTheme.Typography.headline)
+                    .madFont(size: 17, weight: .semibold, design: .rounded)
                     .foregroundColor(.white.opacity(0.85))
                 Spacer()
             }
@@ -235,23 +240,23 @@ struct TrophyCaseView: View {
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(trophy.competitionName)
-                    .font(CompeteDesign.nameSmall)
+                    .competeFont(CompeteDesign.nameSmall)
                     .foregroundColor(CompeteDesign.ink)
                     .lineLimit(1)
                     .truncationMode(.tail)
 
                 HStack(spacing: 5) {
                     Text(trophy.competitionType.displayName.uppercased())
-                        .font(.system(size: 10, weight: .heavy, design: .rounded))
+                        .madFont(size: 11, weight: .heavy, design: .rounded)
                         .tracking(0.9)
                         .foregroundColor(Color(hex: trophy.competitionType.gradient[0]))
                     Text("·").foregroundColor(CompeteDesign.inkGhost)
                     Text(placementText(trophy))
-                        .font(CompeteDesign.caption)
+                        .competeFont(CompeteDesign.caption)
                         .foregroundColor(accentColor)
                     Text("·").foregroundColor(CompeteDesign.inkGhost)
                     Text(formattedDate(trophy.completedDate))
-                        .font(CompeteDesign.caption)
+                        .competeFont(CompeteDesign.caption)
                         .foregroundColor(CompeteDesign.inkFaint)
                 }
                 .lineLimit(1)
@@ -260,20 +265,22 @@ struct TrophyCaseView: View {
 
             VStack(alignment: .trailing, spacing: 0) {
                 Text(formatScore(trophy))
-                    .font(.system(size: 17, weight: .heavy, design: .rounded))
+                    .madFont(size: 17, weight: .heavy, design: .rounded)
                     .foregroundColor(CompeteDesign.ink)
                     .monospacedDigit()
                     .lineLimit(1)
+                    .minimumScaleFactor(0.75)
                 Text(scoreUnitLabel(trophy).uppercased())
-                    .font(.system(size: 9, weight: .bold, design: .rounded))
+                    .madFont(size: 11, weight: .bold, design: .rounded)
                     .tracking(0.6)
                     .foregroundColor(CompeteDesign.inkFaint)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.75)
             }
             .fixedSize()
 
             Image(systemName: "chevron.right")
-                .font(.system(size: 11, weight: .bold))
+                .madFont(size: 11, weight: .bold, maxScale: 1.5)
                 .foregroundColor(CompeteDesign.inkGhost)
                 .accessibilityHidden(true)
         }

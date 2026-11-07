@@ -16,14 +16,14 @@ struct InfoRow: View {
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: MADTheme.Spacing.md) {
             Text(title)
-                .font(CompeteDesign.detail)
+                .competeFont(CompeteDesign.detail)
                 .foregroundColor(CompeteDesign.inkFaint)
                 .lineLimit(1)
 
             Spacer(minLength: MADTheme.Spacing.sm)
 
             Text(value)
-                .font(.system(size: 14, weight: .semibold, design: .rounded))
+                .madFont(size: 14, weight: .semibold, design: .rounded)
                 .foregroundColor(CompeteDesign.ink)
                 .multilineTextAlignment(.trailing)
                 .lineLimit(2)
@@ -42,7 +42,7 @@ struct ActivitiesInfoRow: View {
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: MADTheme.Spacing.md) {
             Text("Activities")
-                .font(CompeteDesign.detail)
+                .competeFont(CompeteDesign.detail)
                 .foregroundColor(CompeteDesign.inkFaint)
                 .lineLimit(1)
 
@@ -52,11 +52,11 @@ struct ActivitiesInfoRow: View {
                 ForEach(activities, id: \.self) { activity in
                     HStack(spacing: 4) {
                         Image(systemName: activity.icon)
-                            .font(.system(size: 9, weight: .bold))
+                            .madFont(size: 9, weight: .bold, maxScale: 1.5)
                             .accessibilityHidden(true)
                         Text(activity.displayName)
-                            .font(.system(size: 11, weight: .bold, design: .rounded))
-                            .lineLimit(1)
+                            .madFont(size: 11, weight: .bold, design: .rounded)
+                            .madNameLines()
                     }
                     .foregroundColor(activity.color)
                     .padding(.horizontal, 8)
@@ -121,11 +121,11 @@ struct InviteFriendView: View {
                     if filteredFriends.isEmpty {
                         VStack(spacing: MADTheme.Spacing.md) {
                             Image(systemName: "person.2.slash")
-                                .font(.system(size: 50))
+                                .madFont(size: 50, maxScale: 1.5)
                                 .foregroundColor(.white.opacity(0.5))
 
                             Text(searchText.isEmpty ? "All friends are already invited" : "No friends found")
-                                .font(MADTheme.Typography.body)
+                                .madFont(size: 17, design: .rounded)
                                 .foregroundColor(.white.opacity(0.7))
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -209,12 +209,12 @@ struct FriendInviteRow: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(friend.displayName)
-                    .font(MADTheme.Typography.callout)
+                    .madFont(size: 16, design: .rounded)
                     .foregroundColor(.white)
 
                 if let username = friend.username {
                     Text("@\(username)")
-                        .font(MADTheme.Typography.caption)
+                        .madFont(size: 12, design: .rounded)
                         .foregroundColor(.white.opacity(0.7))
                 }
             }
@@ -223,7 +223,7 @@ struct FriendInviteRow: View {
 
             Button(action: onInvite) {
                 Text("Invite")
-                    .font(MADTheme.Typography.callout)
+                    .madFont(size: 16, design: .rounded)
                     .fontWeight(.semibold)
                     .foregroundColor(.white)
                     .padding(.horizontal, MADTheme.Spacing.lg)
@@ -381,7 +381,7 @@ struct EditCompetitionSettingsView: View {
                         settingsGroup(title: "Competition Name") {
                             TextField("Competition name", text: $name)
                                 .foregroundColor(.white)
-                                .font(MADTheme.Typography.body)
+                                .madFont(size: 17, design: .rounded)
                                 .padding(MADTheme.Spacing.md)
                                 .background(
                                     RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
@@ -406,7 +406,7 @@ struct EditCompetitionSettingsView: View {
                                     TextField("", value: $goal, format: .number)
                                         .keyboardType(.decimalPad)
                                         .multilineTextAlignment(.center)
-                                        .font(.system(size: 36, weight: .bold, design: .rounded))
+                                        .madFont(size: 36, weight: .bold, design: .rounded, maxScale: 1.3)
                                         .foregroundColor(.white)
                                         .frame(minWidth: 80)
 
@@ -428,7 +428,7 @@ struct EditCompetitionSettingsView: View {
                                             unit = u
                                         } label: {
                                             Text(u == .steps ? "Steps" : u.rawValue.capitalized)
-                                                .font(MADTheme.Typography.callout)
+                                                .madFont(size: 16, design: .rounded)
                                                 .fontWeight(unit == u ? .semibold : .regular)
                                                 .foregroundColor(unit == u ? .white : .white.opacity(0.5))
                                                 .frame(maxWidth: .infinity)
@@ -450,7 +450,7 @@ struct EditCompetitionSettingsView: View {
                                             unit = u
                                         } label: {
                                             Text(u == .steps ? "Steps" : u.rawValue.capitalized)
-                                                .font(MADTheme.Typography.callout)
+                                                .madFont(size: 16, design: .rounded)
                                                 .fontWeight(unit == u ? .semibold : .regular)
                                                 .foregroundColor(unit == u ? .white : .white.opacity(0.5))
                                                 .frame(maxWidth: .infinity)
@@ -474,7 +474,7 @@ struct EditCompetitionSettingsView: View {
                                             interval = i
                                         } label: {
                                             Text(i.displayName)
-                                                .font(MADTheme.Typography.callout)
+                                                .madFont(size: 16, design: .rounded)
                                                 .fontWeight(interval == i ? .semibold : .regular)
                                                 .foregroundColor(interval == i ? .white : .white.opacity(0.5))
                                                 .frame(maxWidth: .infinity)
@@ -504,7 +504,7 @@ struct EditCompetitionSettingsView: View {
                                     }
 
                                     Text("\(firstTo)")
-                                        .font(.system(size: 36, weight: .bold, design: .rounded))
+                                        .madFont(size: 36, weight: .bold, design: .rounded, maxScale: 1.3)
                                         .foregroundColor(.white)
                                         .frame(minWidth: 60)
 
@@ -596,7 +596,7 @@ struct EditCompetitionSettingsView: View {
     private func settingsGroup<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
             Text(title)
-                .font(MADTheme.Typography.subheadline)
+                .madFont(size: 15, design: .rounded)
                 .foregroundColor(.white.opacity(0.6))
 
             content()

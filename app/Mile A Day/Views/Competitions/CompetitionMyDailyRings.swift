@@ -196,16 +196,18 @@ struct CompetitionMyDailyRings: View {
     private var header: some View {
         HStack(spacing: 8) {
             Image(systemName: "circle.hexagongrid.fill")
-                .font(.system(size: 12, weight: .heavy))
+                .madFont(size: 12, weight: .heavy, maxScale: 1.5)
                 .foregroundStyle(LinearGradient(colors: gradientColors, startPoint: .top, endPoint: .bottom))
             Text("\(myTeam == nil ? "YOUR" : "YOUR TEAM'S") LAST 7 \(interval == .day ? "DAYS" : interval == .week ? "WEEKS" : "MONTHS")")
-                .font(.system(size: 11, weight: .black, design: .rounded))
+                .lineLimit(2)
+                .minimumScaleFactor(0.6)
+                .madFont(size: 11, weight: .black, design: .rounded)
                 .tracking(1.4)
                 .foregroundColor(.white.opacity(0.55))
             Spacer()
             Text("Tap a ring for the matchup")
-                .font(.system(size: 10, weight: .medium, design: .rounded))
-                .foregroundColor(.white.opacity(0.35))
+                .madFont(size: 11, weight: .medium, design: .rounded)
+                .foregroundColor(.white.opacity(0.6))
         }
     }
 
@@ -246,16 +248,17 @@ struct CompetitionMyDailyRings: View {
 
             // Day label
             Text(dayLabel(for: date))
-                .font(.system(size: 10, weight: .heavy, design: .rounded))
+                .madFont(size: 11, weight: .heavy, design: .rounded)
                 .foregroundColor(isToday ? MADTheme.Colors.madRed : .white.opacity(0.55))
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
 
             // Miles number — the actual quantitative value
             Text(myMiles > 0 ? String(format: "%.1f", myMiles) : "—")
-                .font(.system(size: 10, weight: .bold, design: .rounded))
+                .madFont(size: 11, weight: .bold, design: .rounded)
                 .foregroundColor(myMiles > 0 ? .white : .white.opacity(0.25))
                 .lineLimit(1)
+                .minimumScaleFactor(0.75)
         }
     }
 
@@ -298,7 +301,7 @@ struct CompetitionMyDailyRings: View {
         case .clash:
             if isWinner {
                 Image(systemName: "crown.fill")
-                    .font(.system(size: 16))
+                    .madFont(size: 16, maxScale: 1.5)
                     .foregroundStyle(LinearGradient(colors: [.yellow, .orange], startPoint: .top, endPoint: .bottom))
             } else if myMiles > 0 {
                 Circle()
@@ -314,25 +317,25 @@ struct CompetitionMyDailyRings: View {
         case .streaks:
             if myMiles >= goal {
                 Image(systemName: "heart.fill")
-                    .font(.system(size: 14))
+                    .madFont(size: 14, maxScale: 1.5)
                     .foregroundColor(.red)
             } else if isToday {
                 Image(systemName: "heart")
-                    .font(.system(size: 14))
+                    .madFont(size: 14, maxScale: 1.5)
                     .foregroundColor(.white.opacity(0.35))
             } else {
                 Image(systemName: "heart.slash.fill")
-                    .font(.system(size: 12))
+                    .madFont(size: 12, maxScale: 1.5)
                     .foregroundColor(.red.opacity(0.4))
             }
         case .targets:
             if myMiles >= goal {
                 Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 16))
+                    .madFont(size: 16, maxScale: 1.5)
                     .foregroundColor(.green)
             } else if isToday {
                 Image(systemName: "target")
-                    .font(.system(size: 14))
+                    .madFont(size: 14, maxScale: 1.5)
                     .foregroundColor(.orange)
             } else if myMiles > 0 {
                 Circle()
@@ -344,7 +347,7 @@ struct CompetitionMyDailyRings: View {
         case .apex:
             if isWinner {
                 Image(systemName: "arrow.up.circle.fill")
-                    .font(.system(size: 14))
+                    .madFont(size: 14, maxScale: 1.5)
                     .foregroundColor(.green)
             } else if myMiles > 0 {
                 Circle()
@@ -356,7 +359,7 @@ struct CompetitionMyDailyRings: View {
         case .race:
             if myMiles > 0 {
                 Image(systemName: "figure.run")
-                    .font(.system(size: 14))
+                    .madFont(size: 14, maxScale: 1.5)
                     .foregroundColor(gradientColors.first ?? .white)
             } else {
                 Text("")

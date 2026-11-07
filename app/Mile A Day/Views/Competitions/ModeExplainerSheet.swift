@@ -67,10 +67,10 @@ struct ModeExplainerSheet: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(type.displayName)
-                    .font(.system(size: 24, weight: .heavy, design: .rounded))
+                    .madFont(size: 24, weight: .heavy, design: .rounded, maxScale: 1.3)
                     .foregroundColor(.white)
                 Text(type.tagline)
-                    .font(.system(size: 15, weight: .semibold, design: .rounded))
+                    .madFont(size: 15, weight: .semibold, design: .rounded)
                     .foregroundStyle(
                         LinearGradient(colors: gradientColors, startPoint: .leading, endPoint: .trailing)
                     )
@@ -90,7 +90,7 @@ struct ModeExplainerSheet: View {
                 ForEach(Array(type.howItWorks.enumerated()), id: \.offset) { index, step in
                     HStack(alignment: .top, spacing: 12) {
                         Text("\(index + 1)")
-                            .font(.system(size: 12, weight: .black, design: .rounded))
+                            .madFont(size: 12, weight: .black, design: .rounded, maxScale: 1.3)
                             .foregroundColor(.white)
                             .frame(width: 22, height: 22)
                             .background(
@@ -100,7 +100,7 @@ struct ModeExplainerSheet: View {
                             )
 
                         Text(step)
-                            .font(.system(size: 15, weight: .medium, design: .rounded))
+                            .madFont(size: 15, weight: .medium, design: .rounded, maxScale: 1.3)
                             .foregroundColor(.white.opacity(0.9))
                             .fixedSize(horizontal: false, vertical: true)
 
@@ -121,11 +121,11 @@ struct ModeExplainerSheet: View {
 
             HStack(alignment: .top, spacing: 12) {
                 Image(systemName: "quote.opening")
-                    .font(.system(size: 14, weight: .bold))
+                    .madFont(size: 14, weight: .bold, maxScale: 1.5)
                     .foregroundColor(gradientColors[0].opacity(0.8))
 
                 Text(type.example)
-                    .font(.system(size: 15, weight: .medium, design: .rounded))
+                    .madFont(size: 15, weight: .medium, design: .rounded)
                     .foregroundColor(.white.opacity(0.85))
                     .fixedSize(horizontal: false, vertical: true)
 
@@ -139,11 +139,11 @@ struct ModeExplainerSheet: View {
     private var bestForRow: some View {
         HStack(spacing: 10) {
             Image(systemName: "sparkles")
-                .font(.system(size: 13, weight: .bold))
+                .madFont(size: 13, weight: .bold, maxScale: 1.5)
                 .foregroundColor(gradientColors[0])
 
             Text(type.bestFor)
-                .font(.system(size: 14, weight: .semibold, design: .rounded))
+                .madFont(size: 14, weight: .semibold, design: .rounded)
                 .foregroundColor(.white.opacity(0.75))
                 .fixedSize(horizontal: false, vertical: true)
 
@@ -164,7 +164,7 @@ struct ModeExplainerSheet: View {
                 Image(systemName: "plus.circle.fill")
                 Text("Start a \(type.displayName) competition")
             }
-            .font(.system(size: 16, weight: .bold, design: .rounded))
+            .madFont(size: 16, weight: .bold, design: .rounded)
             .foregroundColor(.white)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 16)
@@ -192,7 +192,7 @@ struct ModeExplainerSheet: View {
 
     private func sectionLabel(_ text: String) -> some View {
         Text(text)
-            .font(.system(size: 11, weight: .black, design: .rounded))
+            .madFont(size: 11, weight: .black, design: .rounded)
             .tracking(1.4)
             .foregroundColor(.white.opacity(0.5))
     }

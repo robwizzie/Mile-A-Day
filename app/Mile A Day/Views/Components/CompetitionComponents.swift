@@ -37,11 +37,11 @@ struct CompetitionTypeCard: View {
                 }
 
                 Text(type.displayName)
-                    .font(MADTheme.Typography.title3)
+                    .madFont(size: 20, weight: .semibold, design: .rounded)
                     .foregroundColor(.white)
 
                 Text(type.description)
-                    .font(MADTheme.Typography.callout)
+                    .madFont(size: 16, design: .rounded)
                     .foregroundColor(.white.opacity(0.7))
                     .fixedSize(horizontal: false, vertical: true)
                     .lineLimit(4)
@@ -166,11 +166,11 @@ struct CompetitionCard: View {
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(competition.competition_name)
-                    .font(.system(size: 16, weight: .bold, design: .rounded))
+                    .madFont(size: 16, weight: .bold, design: .rounded)
                     .foregroundColor(.white)
-                    .lineLimit(1)
+                    .madNameLines()
                 Text(competition.type.displayName)
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .madFont(size: 12, weight: .semibold, design: .rounded)
                     .foregroundColor(.white.opacity(0.55))
             }
 
@@ -352,18 +352,18 @@ struct CompetitionCard: View {
     private func todayProgressBubble(myToday: Double, otherLabel: String, gap: Double, unit: String, primaryEmoji: String, accent: Color) -> some View {
         HStack(spacing: 8) {
             Text(primaryEmoji)
-                .font(.system(size: 14))
+                .madFont(size: 14)
 
             Text("You: \(String(format: "%.2f", myToday)) \(unit)")
-                .font(.system(size: 12, weight: .heavy, design: .rounded))
+                .madFont(size: 12, weight: .heavy, design: .rounded)
                 .foregroundColor(.white)
 
             Text("·")
-                .font(.system(size: 12, weight: .heavy))
-                .foregroundColor(.white.opacity(0.3))
+                .madFont(size: 12, weight: .heavy)
+                .foregroundColor(.white.opacity(0.6))
 
             Text(otherLabel)
-                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                .madFont(size: 11, weight: .semibold, design: .rounded)
                 .foregroundColor(accent)
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
@@ -407,19 +407,20 @@ struct CompetitionCard: View {
     private func rivalryHintRow(_ hint: RivalryHint) -> some View {
         HStack(spacing: 8) {
             Image(systemName: "arrow.up.right.circle.fill")
-                .font(.system(size: 14, weight: .bold))
+                .madFont(size: 14, weight: .bold, maxScale: 1.5)
                 .foregroundStyle(
                     LinearGradient(colors: [.orange, .yellow], startPoint: .topLeading, endPoint: .bottomTrailing)
                 )
 
             Text(hint.gapText)
-                .font(.system(size: 12, weight: .heavy, design: .rounded))
+                .madFont(size: 12, weight: .heavy, design: .rounded)
                 .foregroundColor(.orange)
 
             Text(hint.actionSuffix)
-                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                .madFont(size: 11, weight: .semibold, design: .rounded)
                 .foregroundColor(.white.opacity(0.7))
                 .lineLimit(1)
+                .minimumScaleFactor(0.75)
 
             Spacer(minLength: 4)
         }
@@ -450,7 +451,7 @@ struct CompetitionCard: View {
 
             if competition.users.count > 4 {
                 Text("+\(competition.users.count - 4)")
-                    .font(.system(size: 11, weight: .heavy, design: .rounded))
+                    .madFont(size: 11, weight: .heavy, design: .rounded)
                     .foregroundColor(.white.opacity(0.7))
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
@@ -482,9 +483,10 @@ struct CompetitionCard: View {
                 .fill(accent)
                 .frame(width: 6, height: 6)
             Text(label)
-                .font(.system(size: 11, weight: .bold, design: .rounded))
+                .madFont(size: 11, weight: .bold, design: .rounded, maxScale: 1.3)
                 .foregroundColor(accent)
                 .lineLimit(1)
+                .minimumScaleFactor(0.75)
         }
         .padding(.horizontal, 9)
         .padding(.vertical, 5)
@@ -543,10 +545,10 @@ struct StatChip: View {
     var body: some View {
         HStack(spacing: 4) {
             Image(systemName: icon)
-                .font(.system(size: 10, weight: .bold))
+                .madFont(size: 10, weight: .bold, maxScale: 1.5)
                 .foregroundColor(accent ?? .white.opacity(0.7))
             Text(text)
-                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .madFont(size: 12, weight: .semibold, design: .rounded)
                 .foregroundColor(.white.opacity(0.8))
         }
         .padding(.horizontal, MADTheme.Spacing.sm)
@@ -586,21 +588,25 @@ struct LivesChip: View {
             if isEliminated {
                 // OUT pill — no hearts, just the bad-news state.
                 Image(systemName: "heart.slash.fill")
-                    .font(.system(size: 10, weight: .bold))
+                    .madFont(size: 10, weight: .bold, maxScale: 1.5)
                 Text("OUT")
-                    .font(.system(size: 10, weight: .heavy, design: .rounded))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+                    .madFont(size: 11, weight: .heavy, design: .rounded)
                     .tracking(0.4)
             } else {
                 // ♥ N — clear count with a single heart glyph. Better than
                 // a row of tiny heart icons that read as decoration rather
                 // than data (especially when total is 1).
                 Image(systemName: "heart.fill")
-                    .font(.system(size: 10, weight: .bold))
+                    .madFont(size: 10, weight: .bold, maxScale: 1.5)
                 Text("\(remaining)")
-                    .font(.system(size: 11, weight: .heavy, design: .rounded))
+                    .madFont(size: 11, weight: .heavy, design: .rounded)
                 if isLastLife {
                     Text("LAST")
-                        .font(.system(size: 9, weight: .heavy, design: .rounded))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.6)
+                        .madFont(size: 11, weight: .heavy, design: .rounded)
                         .tracking(0.5)
                         .opacity(0.85)
                 }
@@ -706,24 +712,24 @@ struct InviteCard: View {
 
                     VStack(alignment: .leading, spacing: 2) {
                         Text(competition.competition_name)
-                            .font(MADTheme.Typography.headline)
+                            .madFont(size: 17, weight: .semibold, design: .rounded, maxScale: 1.3)
                             .foregroundColor(.white)
-                            .lineLimit(1)
+                            .madNameLines()
 
                         HStack(spacing: MADTheme.Spacing.xs) {
                             Text(competition.type.displayName)
-                                .font(MADTheme.Typography.caption)
+                                .madFont(size: 12, design: .rounded)
                                 .foregroundColor(.white.opacity(0.5))
 
                             Text("\u{00B7}")
-                                .foregroundColor(.white.opacity(0.3))
+                                .foregroundColor(.white.opacity(0.6))
 
                             HStack(spacing: 2) {
                                 Image(systemName: "person.fill")
-                                    .font(.system(size: 9))
+                                    .madFont(size: 9, maxScale: 1.5)
                                 Text("from \(ownerUsername ?? "someone")")
                             }
-                            .font(MADTheme.Typography.caption)
+                            .madFont(size: 12, design: .rounded)
                             .foregroundColor(.white.opacity(0.5))
                         }
                     }
@@ -803,9 +809,9 @@ struct InviteCard: View {
                     Button(action: onDecline) {
                         HStack(spacing: MADTheme.Spacing.xs) {
                             Image(systemName: "xmark")
-                                .font(.system(size: 12, weight: .semibold))
+                                .madFont(size: 12, weight: .semibold, maxScale: 1.5)
                             Text("Decline")
-                                .font(MADTheme.Typography.callout)
+                                .madFont(size: 16, design: .rounded)
                                 .fontWeight(.semibold)
                         }
                         .foregroundColor(.white.opacity(0.7))
@@ -825,9 +831,9 @@ struct InviteCard: View {
                     Button(action: onAccept) {
                         HStack(spacing: MADTheme.Spacing.xs) {
                             Image(systemName: "checkmark")
-                                .font(.system(size: 12, weight: .semibold))
+                                .madFont(size: 12, weight: .semibold, maxScale: 1.5)
                             Text("Accept")
-                                .font(MADTheme.Typography.callout)
+                                .madFont(size: 16, design: .rounded)
                                 .fontWeight(.semibold)
                         }
                         .foregroundColor(.white)
@@ -874,7 +880,7 @@ struct LobbyParticipantRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: MADTheme.Spacing.xs) {
                     Text(user.displayName)
-                        .font(MADTheme.Typography.callout)
+                        .madFont(size: 16, design: .rounded)
                         .foregroundColor(.white)
 
                     if isOwner {
@@ -885,7 +891,7 @@ struct LobbyParticipantRow: View {
                 }
 
                 Text(user.invite_status.displayName)
-                    .font(MADTheme.Typography.caption)
+                    .madFont(size: 12, design: .rounded)
                     .foregroundColor(statusColor)
             }
 
@@ -1021,7 +1027,7 @@ struct CompetitionLeaderboardRow: View {
                         )
                         .frame(width: 30, height: 30)
                     Text("\(rank)")
-                        .font(.system(size: 14, weight: .bold, design: .rounded))
+                        .madFont(size: 14, weight: .bold, design: .rounded)
                         .foregroundStyle(
                             LinearGradient(
                                 colors: rankGradient,
@@ -1032,9 +1038,9 @@ struct CompetitionLeaderboardRow: View {
                 }
             } else {
                 Text("\(rank)")
-                    .font(.system(size: 14, weight: .bold, design: .rounded))
-                    .foregroundColor(.white.opacity(0.4))
-                    .frame(width: 30)
+                    .madFont(size: 14, weight: .bold, design: .rounded)
+                    .foregroundColor(.white.opacity(0.6))
+                    .frame(minWidth: 30)
             }
 
             // Avatar
@@ -1058,14 +1064,16 @@ struct CompetitionLeaderboardRow: View {
                 // badge cluster can't push the name into an ugly wrap.
                 HStack(spacing: 5) {
                     Text(user.displayName)
-                        .font(.system(size: 15, weight: .semibold, design: .rounded))
+                        .madFont(size: 15, weight: .semibold, design: .rounded)
                         .foregroundColor(.white.opacity(isEliminated ? 0.4 : 1.0))
-                        .lineLimit(1)
+                        .madNameLines()
                         .truncationMode(.tail)
 
                     if isCurrentUser {
                         Text("YOU")
-                            .font(.system(size: 8, weight: .bold))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.6)
+                            .madFont(size: 11, weight: .bold)
                             .foregroundColor(.white)
                             .padding(.horizontal, 4)
                             .padding(.vertical, 1)
@@ -1074,7 +1082,9 @@ struct CompetitionLeaderboardRow: View {
 
                     if isEliminated {
                         Text("OUT")
-                            .font(.system(size: 8, weight: .heavy, design: .rounded))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.6)
+                            .madFont(size: 11, weight: .heavy, design: .rounded)
                             .foregroundColor(.white.opacity(0.7))
                             .padding(.horizontal, 5)
                             .padding(.vertical, 1)
@@ -1091,13 +1101,13 @@ struct CompetitionLeaderboardRow: View {
                     HStack(spacing: 2) {
                         ForEach(0..<min(totalLives, 6), id: \.self) { i in
                             Image(systemName: i < lives ? "heart.fill" : "heart")
-                                .font(.system(size: 8))
+                                .madFont(size: 8, maxScale: 1.5)
                                 .foregroundColor(i < lives ? .red : .white.opacity(0.15))
                         }
                         if totalLives > 6 {
                             Text("+\(totalLives - 6)")
-                                .font(.system(size: 8, weight: .medium))
-                                .foregroundColor(.white.opacity(0.3))
+                                .madFont(size: 11, weight: .medium)
+                                .foregroundColor(.white.opacity(0.6))
                         }
                     }
                 }
@@ -1107,10 +1117,10 @@ struct CompetitionLeaderboardRow: View {
                 if showsTotalDistance {
                     HStack(spacing: 3) {
                         Image(systemName: "point.topleft.down.curvedto.point.bottomright.up")
-                            .font(.system(size: 8, weight: .bold))
+                            .madFont(size: 8, weight: .bold, maxScale: 1.5)
                             .foregroundColor(.white.opacity(isEliminated ? 0.2 : 0.35))
                         Text(totalDistanceText)
-                            .font(.system(size: 10, weight: .semibold, design: .rounded))
+                            .madFont(size: 11, weight: .semibold, design: .rounded)
                             .foregroundColor(.white.opacity(isEliminated ? 0.3 : 0.5))
                             .lineLimit(1)
                             .minimumScaleFactor(0.8)
@@ -1149,11 +1159,11 @@ struct CompetitionLeaderboardRow: View {
             HStack(spacing: 3) {
                 if competitionType == .streaks {
                     Image(systemName: "flame.fill")
-                        .font(.system(size: 11))
+                        .madFont(size: 11, maxScale: 1.5)
                         .foregroundColor(isEliminated ? .gray.opacity(0.3) : .orange)
                 }
                 Text(scoreText)
-                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                    .madFont(size: 15, weight: .bold, design: .rounded)
                     .foregroundColor(.white.opacity(isEliminated ? 0.4 : 0.9))
                     .lineLimit(1)
                     .fixedSize(horizontal: true, vertical: false)
@@ -1207,7 +1217,7 @@ struct ManualWorkoutsInfoSheet: View {
                         dismiss()
                     } label: {
                         Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 24))
+                            .madFont(size: 24, maxScale: 1.5)
                             .foregroundColor(.white.opacity(0.4))
                     }
                     .buttonStyle(.plain)
@@ -1217,15 +1227,15 @@ struct ManualWorkoutsInfoSheet: View {
 
                 VStack(spacing: 12) {
                     Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.system(size: 36))
+                        .madFont(size: 36, maxScale: 1.5)
                         .foregroundStyle(LinearGradient(colors: [.orange, .yellow], startPoint: .top, endPoint: .bottom))
 
                     Text("Manual workouts")
-                        .font(.system(size: 22, weight: .bold, design: .rounded))
+                        .madFont(size: 22, weight: .bold, design: .rounded)
                         .foregroundColor(.white)
 
                     Text("\(user.displayName) entered or edited at least one workout by hand in this competition.")
-                        .font(.system(size: 14, weight: .medium, design: .rounded))
+                        .madFont(size: 14, weight: .medium, design: .rounded)
                         .foregroundColor(.white.opacity(0.7))
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, 24)
@@ -1254,15 +1264,15 @@ struct ManualWorkoutsInfoSheet: View {
     private func infoRow(icon: String, title: String, body: String) -> some View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: icon)
-                .font(.system(size: 16))
+                .madFont(size: 16, maxScale: 1.5)
                 .foregroundColor(.orange)
                 .frame(width: 22)
             VStack(alignment: .leading, spacing: 3) {
                 Text(title)
-                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                    .madFont(size: 14, weight: .bold, design: .rounded)
                     .foregroundColor(.white)
                 Text(body)
-                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .madFont(size: 12, weight: .medium, design: .rounded)
                     .foregroundColor(.white.opacity(0.6))
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -1294,7 +1304,7 @@ struct ActivityToggle: View {
                     .font(.caption)
 
                 Text(activity.displayName)
-                    .font(MADTheme.Typography.callout)
+                    .madFont(size: 16, design: .rounded)
             }
             .foregroundColor(isSelected ? .white : .white.opacity(0.7))
             .padding(.horizontal, MADTheme.Spacing.md)
@@ -1327,12 +1337,12 @@ struct CompetitionTabButton: View {
             VStack(spacing: MADTheme.Spacing.xs) {
                 HStack(spacing: MADTheme.Spacing.xs) {
                     Text(title)
-                        .font(MADTheme.Typography.headline)
+                        .madFont(size: 17, weight: .semibold, design: .rounded)
                         .foregroundColor(isSelected ? MADTheme.Colors.madRed : MADTheme.Colors.secondaryText)
 
                     if count > 0 {
                         Text("\(count)")
-                            .font(MADTheme.Typography.caption)
+                            .madFont(size: 12, design: .rounded)
                             .foregroundColor(.white)
                             .padding(.horizontal, MADTheme.Spacing.sm)
                             .padding(.vertical, 2)

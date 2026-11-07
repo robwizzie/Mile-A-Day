@@ -66,7 +66,7 @@ struct CompetitionTeamResults: View {
     private var unassignedFootnote: some View {
         let count = competition.unassignedUsers.count
         return Text("\(count) \(count == 1 ? "person" : "people") competed without a team — they're in the list below.")
-            .font(CompeteDesign.caption)
+            .competeFont(CompeteDesign.caption)
             .foregroundColor(CompeteDesign.inkFaint)
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -146,9 +146,9 @@ struct CompeteTeamBlock: View {
                     .accessibilityHidden(true)
 
                 Text(team.name)
-                    .font(.system(size: 17, weight: .heavy, design: .rounded))
+                    .madFont(size: 17, weight: .heavy, design: .rounded, maxScale: 1.3)
                     .foregroundColor(CompeteDesign.ink)
-                    .lineLimit(1)
+                    .madNameLines()
                     .truncationMode(.tail)
 
                 if place == 1 && isFinished && (team.score ?? 0) > 0 {
@@ -162,7 +162,7 @@ struct CompeteTeamBlock: View {
                 Spacer(minLength: 6)
 
                 Text(competition.teamScoreLabel(team))
-                    .font(.system(size: 18, weight: .heavy, design: .rounded))
+                    .madFont(size: 18, weight: .heavy, design: .rounded)
                     .foregroundColor(place == 1 ? (CompeteDesign.medal(1) ?? .yellow) : CompeteDesign.ink)
                     .monospacedDigit()
                     .lineLimit(1)
@@ -170,7 +170,7 @@ struct CompeteTeamBlock: View {
 
                 if rosterMode == .collapsible {
                     Image(systemName: "chevron.down")
-                        .font(.system(size: 10, weight: .bold))
+                        .madFont(size: 10, weight: .bold, maxScale: 1.5)
                         .foregroundColor(CompeteDesign.inkGhost)
                         .rotationEffect(.degrees(isExpanded ? 180 : 0))
                         .accessibilityHidden(true)
@@ -191,17 +191,17 @@ struct CompeteTeamBlock: View {
             HStack(spacing: 4) {
                 if let combinedQuantity {
                     Text(competition.options.formatQuantityWithUnit(combinedQuantity))
-                        .font(CompeteDesign.detail)
+                        .competeFont(CompeteDesign.detail)
                         .foregroundColor(CompeteDesign.inkMuted)
                         .monospacedDigit()
                     Text("together")
-                        .font(CompeteDesign.detail)
+                        .competeFont(CompeteDesign.detail)
                         .foregroundColor(CompeteDesign.inkFaint)
                     Text("·")
                         .foregroundColor(CompeteDesign.inkGhost)
                 }
                 Text("\(members.count) \(members.count == 1 ? "member" : "members")")
-                    .font(CompeteDesign.detail)
+                    .competeFont(CompeteDesign.detail)
                     .foregroundColor(CompeteDesign.inkFaint)
             }
             .lineLimit(1)
@@ -215,7 +215,7 @@ struct CompeteTeamBlock: View {
         VStack(spacing: 0) {
             if members.isEmpty {
                 Text("Nobody joined this team.")
-                    .font(CompeteDesign.detail)
+                    .competeFont(CompeteDesign.detail)
                     .foregroundColor(CompeteDesign.inkFaint)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.vertical, 6)
@@ -257,9 +257,9 @@ struct CompeteTeamBlock: View {
                 )
 
             Text(member.displayName)
-                .font(CompeteDesign.nameSmall)
+                .competeFont(CompeteDesign.nameSmall)
                 .foregroundColor(CompeteDesign.ink.opacity(0.92))
-                .lineLimit(1)
+                .madNameLines()
                 .truncationMode(.tail)
 
             if isMe { CompeteTag(text: "YOU", color: CompeteDesign.accent(competition.type)) }
@@ -275,7 +275,7 @@ struct CompeteTeamBlock: View {
             // Each member's own distance — the thing a team result is asked
             // for and the reason these rows exist.
             Text(competition.memberScoreLabel(member))
-                .font(.system(size: 13, weight: .bold, design: .rounded))
+                .madFont(size: 13, weight: .bold, design: .rounded)
                 .foregroundColor(CompeteDesign.inkMuted)
                 .monospacedDigit()
                 .lineLimit(1)

@@ -89,20 +89,20 @@ struct ActiveCompetitionRow: View {
         HStack(alignment: .top, spacing: 10) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(competition.competition_name)
-                    .font(.system(size: 17, weight: .heavy, design: .rounded))
+                    .madFont(size: 17, weight: .heavy, design: .rounded)
                     .foregroundColor(CompeteDesign.ink)
-                    .lineLimit(1)
+                    .madNameLines()
                     .truncationMode(.tail)
 
                 HStack(spacing: 5) {
                     Text(competition.type.displayName.uppercased())
-                        .font(.system(size: 10, weight: .heavy, design: .rounded))
+                        .madFont(size: 11, weight: .heavy, design: .rounded)
                         .tracking(0.9)
                         .foregroundColor(accent)
                     if let standing = standingText {
                         Text("·").foregroundColor(CompeteDesign.inkGhost)
                         Text(standing)
-                            .font(CompeteDesign.caption)
+                            .competeFont(CompeteDesign.caption)
                             .foregroundColor(CompeteDesign.inkMuted)
                     }
                 }
@@ -112,7 +112,7 @@ struct ActiveCompetitionRow: View {
 
             if let timeLeft = CompeteFormat.timeLeft(for: competition) {
                 Text(timeLeft)
-                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                    .madFont(size: 11, weight: .bold, design: .rounded)
                     .foregroundColor(CompeteDesign.inkFaint)
                     .monospacedDigit()
                     // Data-driven text in a fixed row: let the NAME truncate
@@ -128,13 +128,14 @@ struct ActiveCompetitionRow: View {
     private var focusLine: some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(focus.pill)
-                .font(.system(size: 10, weight: .heavy, design: .rounded))
+                .madFont(size: 11, weight: .heavy, design: .rounded)
                 .tracking(0.9)
                 .foregroundColor(focus.level.color)
                 .lineLimit(1)
+                .minimumScaleFactor(0.75)
 
             Text(focus.detail)
-                .font(CompeteDesign.detail)
+                .competeFont(CompeteDesign.detail)
                 .foregroundColor(CompeteDesign.inkMuted)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -146,7 +147,7 @@ struct ActiveCompetitionRow: View {
     private func rivalryRow(_ hint: RivalryHint) -> some View {
         HStack(spacing: 6) {
             Text("\(hint.gapText) \(hint.actionSuffix)")
-                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .madFont(size: 12, weight: .semibold, design: .rounded)
                 .foregroundColor(MADTheme.Colors.madRed)
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
@@ -221,11 +222,11 @@ struct ModeGalleryCard: View {
                     )
 
                 Text(type.displayName)
-                    .font(.system(size: 16, weight: .heavy, design: .rounded))
+                    .madFont(size: 16, weight: .heavy, design: .rounded, maxScale: 1.3)
                     .foregroundColor(.white)
 
                 Text(type.tagline)
-                    .font(.system(size: 13, weight: .medium, design: .rounded))
+                    .madFont(size: 13, weight: .medium, design: .rounded)
                     .foregroundColor(.white.opacity(0.7))
                     .fixedSize(horizontal: false, vertical: true)
 
@@ -234,9 +235,9 @@ struct ModeGalleryCard: View {
                 HStack(spacing: 4) {
                     Text("How it works")
                     Image(systemName: "chevron.right")
-                        .font(.system(size: 9, weight: .bold))
+                        .madFont(size: 9, weight: .bold, maxScale: 1.5)
                 }
-                .font(.system(size: 11, weight: .bold, design: .rounded))
+                .madFont(size: 11, weight: .bold, design: .rounded)
                 .foregroundColor(gradientColors[0])
             }
             .frame(width: 168, alignment: .leading)
@@ -289,18 +290,19 @@ struct PresetCard: View {
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(preset.title)
-                        .font(.system(size: 14, weight: .bold, design: .rounded))
+                        .madFont(size: 14, weight: .bold, design: .rounded, maxScale: 1.3)
                         .foregroundColor(.white)
                     Text(preset.blurb)
-                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .madFont(size: 12, weight: .medium, design: .rounded)
                         .foregroundColor(.white.opacity(0.6))
                         .lineLimit(1)
+                        .minimumScaleFactor(0.75)
                 }
 
                 Spacer(minLength: 4)
 
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 11, weight: .bold))
+                    .madFont(size: 11, weight: .bold, maxScale: 1.5)
                     .foregroundColor(.white.opacity(0.35))
             }
             .padding(.horizontal, MADTheme.Spacing.md)
@@ -323,6 +325,9 @@ struct PresetCard: View {
 /// A finished competition, small. Used both by the Compete tab's "just
 /// wrapped" strip and by the Record tab's history list.
 struct FinishedCompetitionRow: View {
+    /// Grows with the text: the metadata line sits on one row and would
+    /// otherwise truncate all three of its parts.
+    @MADScaledMetric(relativeTo: .caption2, maxScale: 1.4) private var compactWidth: CGFloat = 240
     let competition: Competition
     var compact: Bool = false
     let action: () -> Void
@@ -380,9 +385,9 @@ struct FinishedCompetitionRow: View {
 
                 VStack(alignment: .leading, spacing: 3) {
                     Text(competition.competition_name)
-                        .font(CompeteDesign.nameSmall)
+                        .competeFont(CompeteDesign.nameSmall)
                         .foregroundColor(CompeteDesign.ink)
-                        .lineLimit(1)
+                        .madNameLines()
                         .truncationMode(.tail)
 
                     HStack(spacing: 5) {
@@ -397,13 +402,13 @@ struct FinishedCompetitionRow: View {
                                 .foregroundColor(CompeteDesign.inkFaint)
                         }
                     }
-                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .madFont(size: 11, weight: .semibold, design: .rounded)
                     .lineLimit(1)
                 }
 
                 Spacer(minLength: 0)
             }
-            .frame(width: compact ? 240 : nil, alignment: .leading)
+            .frame(width: compact ? compactWidth : nil, alignment: .leading)
             .padding(.horizontal, 13)
             .padding(.vertical, 12)
             .background(
@@ -448,14 +453,14 @@ struct RecordHeroCard: View {
                 Text("\(wins)")
                     .foregroundColor(.white)
                 Text("–")
-                    .foregroundColor(.white.opacity(0.4))
+                    .foregroundColor(.white.opacity(0.6))
                 Text("\(losses)")
                     .foregroundColor(.white.opacity(0.55))
             }
-            .font(.system(size: 46, weight: .heavy, design: .rounded))
+            .madFont(size: 46, weight: .heavy, design: .rounded)
 
             Text(total == 0 ? "No finished competitions yet" : "\(ProgressCalculator.formatWholePercent(Double(winRate))) win rate · \(total) finished")
-                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                .madFont(size: 13, weight: .semibold, design: .rounded)
                 .foregroundColor(.white.opacity(0.6))
 
             if total > 0 {
@@ -471,8 +476,8 @@ struct RecordHeroCard: View {
 
             if isPartial && total > 0 {
                 Text("From your recent competitions")
-                    .font(.system(size: 11, weight: .medium, design: .rounded))
-                    .foregroundColor(.white.opacity(0.35))
+                    .madFont(size: 11, weight: .medium, design: .rounded)
+                    .foregroundColor(.white.opacity(0.6))
             }
         }
         .frame(maxWidth: .infinity)
@@ -501,10 +506,10 @@ struct RecordHeroCard: View {
     private func statCell(value: String, label: String, tint: Color) -> some View {
         VStack(spacing: 3) {
             Text(value)
-                .font(.system(size: 18, weight: .heavy, design: .rounded))
+                .madFont(size: 18, weight: .heavy, design: .rounded)
                 .foregroundColor(tint)
             Text(label)
-                .font(.system(size: 10, weight: .bold, design: .rounded))
+                .madFont(size: 11, weight: .bold, design: .rounded)
                 .tracking(0.6)
                 .foregroundColor(.white.opacity(0.45))
         }
@@ -534,12 +539,12 @@ struct ModeRecordRow: View {
     var body: some View {
         HStack(spacing: 12) {
             Image(systemName: record.type.icon)
-                .font(.system(size: 12, weight: .bold))
+                .madFont(size: 12, weight: .bold, maxScale: 1.5)
                 .foregroundColor(record.total > 0 ? gradientColors[0] : .white.opacity(0.25))
                 .frame(width: 26)
 
             Text(record.type.displayName)
-                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                .madFont(size: 13, weight: .semibold, design: .rounded)
                 .foregroundColor(record.total > 0 ? .white.opacity(0.9) : .white.opacity(0.35))
                 .frame(width: 62, alignment: .leading)
 
@@ -557,7 +562,7 @@ struct ModeRecordRow: View {
             .frame(height: 6)
 
             Text(record.total > 0 ? "\(record.wins)–\(record.losses)" : "—")
-                .font(.system(size: 12, weight: .bold, design: .rounded))
+                .madFont(size: 12, weight: .bold, design: .rounded)
                 .foregroundColor(record.total > 0 ? .white.opacity(0.75) : .white.opacity(0.3))
                 .frame(width: 38, alignment: .trailing)
         }
@@ -601,20 +606,21 @@ struct RivalRow: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(rival.displayName)
-                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                    .madFont(size: 14, weight: .bold, design: .rounded)
                     .foregroundColor(.white)
-                    .lineLimit(1)
+                    .madNameLines()
 
                 Text(subtitle)
-                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .madFont(size: 11, weight: .semibold, design: .rounded)
                     .foregroundColor(.white.opacity(0.5))
                     .lineLimit(1)
+                    .minimumScaleFactor(0.75)
             }
 
             Spacer(minLength: 4)
 
             Text(rival.recordText)
-                .font(.system(size: 15, weight: .heavy, design: .rounded))
+                .madFont(size: 15, weight: .heavy, design: .rounded)
                 .foregroundColor(tint)
                 // Data-driven, but short and bounded — never let it truncate in
                 // favour of the name.
@@ -648,7 +654,7 @@ struct CompeteSectionHeader: View {
     var body: some View {
         HStack(spacing: 8) {
             Text(title.uppercased())
-                .font(CompeteDesign.eyebrow)
+                .competeFont(CompeteDesign.eyebrow)
                 .tracking(CompeteDesign.eyebrowTracking)
                 .foregroundColor(CompeteDesign.inkFaint)
                 .lineLimit(1)
@@ -660,10 +666,10 @@ struct CompeteSectionHeader: View {
                     HStack(spacing: 3) {
                         Text(actionTitle)
                         Image(systemName: "chevron.right")
-                            .font(.system(size: 9, weight: .bold))
+                            .madFont(size: 9, weight: .bold, maxScale: 1.5)
                             .accessibilityHidden(true)
                     }
-                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .madFont(size: 12, weight: .bold, design: .rounded)
                     .foregroundColor(MADTheme.Colors.madRed)
                 }
                 .fixedSize()
