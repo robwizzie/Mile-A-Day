@@ -295,6 +295,16 @@ struct FriendsListView: View {
 
             Spacer(minLength: MADTheme.Spacing.sm)
 
+            NavigationLink(destination: ReferralsView()) {
+                Image(systemName: "gift.fill")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundColor(.white)
+                    .frame(width: 40, height: 40)
+                    .background(Circle().fill(Color.white.opacity(0.08)))
+                    .accessibilityLabel("Invite friends and rewards")
+            }
+            .buttonStyle(.plain)
+
             // ONE labelled action. Three unlabelled rimmed circles (search /
             // close friends / requests) used to sit here: requests are now a
             // row at the top of the list when there are any, and Close

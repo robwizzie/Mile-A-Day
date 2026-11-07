@@ -45,6 +45,33 @@ struct HelpAndSupportView: View {
                         )
                     }
 
+                    SettingsSection("Referrals") {
+                        NavigationLink(destination: ReferralsView()) {
+                            SettingsRow(
+                                icon: "gift.fill",
+                                title: "Invite friends and rewards",
+                                subtitle: "How referrals work and your progress",
+                                tint: MADTheme.Colors.madRed
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        SettingsDivider()
+                        if let url = ReferralService.supportURL(username: UserManager.shared.currentUser.username) {
+                            Button {
+                                UIApplication.shared.open(url)
+                            } label: {
+                                SettingsRow(
+                                    icon: "person.crop.circle.badge.exclamationmark",
+                                    title: "Referral not connected?",
+                                    subtitle: "Email us and we'll fix it",
+                                    tint: .orange,
+                                    accessory: .external
+                                )
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+
                     SettingsSection("Contact", footer: "A question, or found a bug? We'd love to hear from you.") {
                         Button {
                             if let url = URL(string: "mailto:support@mileaday.run?subject=Mile%20A%20Day%20Support%20-%20v\(appVersion)") {

@@ -1,0 +1,86 @@
+{
+  "format": 1,
+  "id": "trail_cap",
+  "order": 133,
+  "slot": "head",
+  "name": "Trail Cap",
+  "family": "firsts",
+  "unlock": {
+    "badge": "community_coast_to_coast_2026"
+  },
+  "unlock_copy": "Walk 15 days of Coast to Coast, December 2026",
+  "holidays": [],
+  "mood_prop": false,
+  "compact": true,
+  "tier": 40,
+  "auto_eligible": false,
+  "rules": {
+    "hides": [],
+    "clashes": [],
+    "head_rise": 0.1,
+    "head_scale": 1.04
+  },
+  "art": {
+    "front": {
+      "clips": [
+        {
+          "d": "M-.1766 -.4303C-.1922 -.7295 .1609 -.748 .1766 -.4489Z"
+        }
+      ],
+      "ops": [
+        {
+          "d": "M-.1766 -.4303C-.1922 -.7295 .1609 -.748 .1766 -.4489Z",
+          "op": "fill",
+          "paint": "#2F7D5BFF"
+        },
+        {
+          "clip": [
+            0
+          ],
+          "d": "M-.15 -.45Q-.1 -.61 -.02 -.69",
+          "op": "stroke",
+          "paint": "#3F9C74FF",
+          "w": 0.012
+        },
+        {
+          "d": "M-.052 -.485L.004 -.585L.06 -.49Z",
+          "op": "fill",
+          "paint": "#F6EBD0FF"
+        },
+        {
+          "d": "M-.018 -.525L.006 -.585L.03 -.522L.006 -.54Z",
+          "op": "fill",
+          "paint": "#FFFFFFFF"
+        },
+        {
+          "d": "M-.1766 -.4303C-.1922 -.7295 .1609 -.748 .1766 -.4489Z",
+          "op": "stroke",
+          "paint": "#2A1410FF",
+          "w": 0.0104
+        },
+        {
+          "d": "M-.183 -.452L.183 -.471L.187 -.4L-.179 -.381Z",
+          "op": "fill",
+          "paint": "#E9A23BFF"
+        },
+        {
+          "d": "M-.183 -.452L.183 -.471L.187 -.4L-.179 -.381Z",
+          "op": "stroke",
+          "paint": "#2A1410FF",
+          "w": 0.0104
+        },
+        {
+          "d": "M-.195 -.40C-.10 -.335 .13 -.35 .30 -.455C.31 -.465 .30 -.475 .285 -.47L-.19 -.445C-.205 -.44 -.205 -.41 -.195 -.40Z",
+          "op": "fill",
+          "paint": "#24644AFF"
+        },
+        {
+          "d": "M-.195 -.40C-.10 -.335 .13 -.35 .30 -.455C.31 -.465 .30 -.475 .285 -.47L-.19 -.445C-.205 -.44 -.205 -.41 -.195 -.40Z",
+          "op": "stroke",
+          "paint": "#2A1410FF",
+          "w": 0.0104
+        }
+      ]
+    }
+  }
+}

@@ -101,6 +101,12 @@ export const CLIENT_FEATURES = {
    */
   weeklyChallengeV1: "weekly_challenge_v1",
 
+  /** The build routes `community_goal_*` pushes to the goal screen. */
+  communityGoalV1: "community_goal_v1",
+
+  /** The build routes `referral_*` pushes to the referrals screen. */
+  referralsV1: "referrals_v1",
+
   /**
    * The build renders a buddy walk as ONE group post: it draws every credited
    * participant's route on a single combined map, shows each of their photos

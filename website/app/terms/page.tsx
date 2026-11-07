@@ -225,6 +225,16 @@ export default function TermsPage() {
 				</p>
 			</Section>
 
+			<Section heading="Referral and Community Rewards">
+				<p>
+					A referral counts when a new user picks your account at sign-up and then walks at least a mile on 7 different
+					days within 30 days. Referring yourself, using fake accounts, or otherwise gaming referrals or community goals
+					can cost you the reward. Free Mile A Day+ rewards are redeemed through Apple and renew at the regular price
+					afterward unless you cancel. Rewards have no cash value, can&rsquo;t be transferred, and may change for future
+					referrals or goals. Community goal rewards are limited to the goal they belong to.
+				</p>
+			</Section>
+
 			<Section heading="Changes to These Terms">
 				<p>
 					We may update these Terms from time to time. When we do, we will revise the &ldquo;Last updated&rdquo; date

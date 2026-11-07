@@ -18,6 +18,8 @@ import blocksRoutes from "./routes/blocksRoutes.js";
 import badgesRoutes, { publicBadgesRouter } from "./routes/badgesRoutes.js";
 import dailyChallengesRoutes from "./routes/dailyChallengesRoutes.js";
 import weeklyChallengeRoutes from "./routes/weeklyChallengeRoutes.js";
+import communityGoalRoutes from "./routes/communityGoalRoutes.js";
+import referralRoutes from "./routes/referralRoutes.js";
 import dailyStepsRoutes from "./routes/dailyStepsRoutes.js";
 import shoesRoutes from "./routes/shoesRoutes.js";
 import leaderboardRoutes from "./routes/leaderboardRoutes.js";
@@ -51,6 +53,8 @@ import { startPendingSendCron } from "./cron/pendingSendCron.js";
 import { startWeeklyRecapCron } from "./cron/weeklyRecapCron.js";
 import { startBuddySessionCron } from "./cron/buddySessionCron.js";
 import { startWeeklyChallengeCron } from "./cron/weeklyChallengeCron.js";
+import { startCommunityGoalCron } from "./cron/communityGoalCron.js";
+import { startReferralCron } from "./cron/referralCron.js";
 import { startH2hChallengeCron } from "./cron/h2hChallengeCron.js";
 import { startStreakFeaturesCron } from "./cron/streakFeaturesCron.js";
 import { startDeskPushCron } from "./cron/deskPushCron.js";
@@ -61,6 +65,7 @@ import { healUncomputedStreaks } from "./services/streakFeatureCore.js";
 import { seedExtraBadges } from "./services/badgeService.js";
 import { seedExtraChallenges } from "./services/dailyChallengeService.js";
 import { seedWeeklyChallenges } from "./services/weeklyChallengeService.js";
+import { seedCommunityGoals } from "./services/communityGoalService.js";
 import { PostgresService } from "./services/DbService.js";
 import { getPublicProfile } from "./services/publicProfileService.js";
 import {
@@ -357,6 +362,8 @@ app.use("/users", userRoutes);
 app.use("/users", badgesRoutes);
 app.use("/users", dailyChallengesRoutes);
 app.use("/users", weeklyChallengeRoutes);
+app.use("/users", communityGoalRoutes);
+app.use("/users", referralRoutes);
 app.use("/users", dailyStepsRoutes);
 app.use("/users", shoesRoutes);
 app.use("/friends", friendRoutes);
@@ -484,6 +491,8 @@ function startCrons() {
   startDeskPushCron();
   startBuddySessionCron();
   startWeeklyChallengeCron();
+  startCommunityGoalCron();
+  startReferralCron();
   startLastCallCron();
   startDiagnosticsCron();
   startAppleRevocationCron();
@@ -494,4 +503,5 @@ function startCrons() {
   // Weekly challenge catalog. Seeded here rather than in a migration so a
   // failure logs instead of boot-looping, and copy edits need no migration.
   seedWeeklyChallenges();
+  seedCommunityGoals();
 }

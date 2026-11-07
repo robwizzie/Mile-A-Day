@@ -67,6 +67,12 @@ enum ClientFeatures {
     /// this gate an older install would get a banner that does nothing.
     static let weeklyChallengeV1 = "weekly_challenge_v1"
 
+    /// This build routes `community_goal_*` pushes to the goal screen.
+    static let communityGoalV1 = "community_goal_v1"
+
+    /// This build routes `referral_*` pushes to the referrals screen.
+    static let referralsV1 = "referrals_v1"
+
     /// This build treats a buddy walk as ONE post: it draws the crew's routes
     /// on a single combined map, shows each participant's photo as its own
     /// slide, and — the half that matters — asks the SERVER whether the walk
@@ -142,7 +148,7 @@ enum ClientFeatures {
 
     static let supported: [String] = [
         friendRequestV2, collabTagV1, ghostFriendRaceV1, postWindowV1, buddyWalksV1,
-        weeklyChallengeV1, buddyGroupPostV1, buddyJoinRequestV1, activityDigestV1,
+        weeklyChallengeV1, communityGoalV1, referralsV1, buddyGroupPostV1, buddyJoinRequestV1, activityDigestV1,
         widgetRefreshPushV1,
         weeklyRecapV1,
         liveAutoCardV1,

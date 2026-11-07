@@ -99,7 +99,7 @@ private struct AuthHeroArt: View {
     var body: some View {
         let flame = min(height * 0.7, 220)
         ZStack {
-            FlameBuddyView(health: .blazing, size: flame, showsMoodBubble: false)
+            OnboardingFlamey(items: [], size: flame)
                 .frame(width: flame, height: flame)
                 .introPop(0.05)
                 .introBob(5, period: 3.6)

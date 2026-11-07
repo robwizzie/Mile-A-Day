@@ -19,11 +19,15 @@ enum NotificationDestination: Identifiable, Equatable {
     case challenges
     case friendMedal(FriendMedalRef)
     case friendChallenge(FriendChallengeRef)
+    case communityGoal
+    case referrals
 
     var id: String {
         switch self {
         case .myMedal(let id, let count): return "my-medal-\(id)-\(count)"
         case .challenges: return "challenges"
+        case .communityGoal: return "community-goal"
+        case .referrals: return "referrals"
         case .friendMedal(let ref): return "friend-medal-\(ref.userId)-\(ref.badgeId)"
         case .friendChallenge(let ref): return "friend-challenge-\(ref.userId)-\(ref.localDate ?? "")"
         }
@@ -39,6 +43,10 @@ enum NotificationDestination: Identifiable, Equatable {
             return .myMedal(badgeId: badgeId, count: Int(data["count"] ?? "") ?? 1)
         case "challenge_won":
             return .challenges
+        case "community_goal_start", "community_goal_final_week", "community_goal_result":
+            return .communityGoal
+        case "referral_qualified":
+            return .referrals
         case "daily_reminder":
             // Only the reminder that NAMES today's challenge; a plain, duel or
             // win-back reminder keeps going to the Dashboard.
@@ -124,6 +132,10 @@ private struct NotificationDestinationScreen: View {
                     MyMedalDestination(badgeId: badgeId, count: count)
                 case .challenges:
                     DailyChallengesView(healthManager: .shared, userManager: .shared)
+                case .communityGoal:
+                    CommunityGoalView()
+                case .referrals:
+                    ReferralsView()
                 case .friendMedal(let ref):
                     FriendMedalView(ref: ref)
                 case .friendChallenge(let ref):

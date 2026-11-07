@@ -4,14 +4,15 @@ struct UsernameInputView: View {
     @Binding var username: String
     @State private var isValidating = false
     @State private var validationMessage = ""
-    @State private var isValid = false
+    @Binding var isValid: Bool
     @State private var validationTimer: Timer?
     
     let onSubmit: () -> Void
     let onCancel: (() -> Void)?
     
-    init(username: Binding<String>, onSubmit: @escaping () -> Void, onCancel: (() -> Void)? = nil) {
+    init(username: Binding<String>, isValid: Binding<Bool>, onSubmit: @escaping () -> Void, onCancel: (() -> Void)? = nil) {
         self._username = username
+        self._isValid = isValid
         self.onSubmit = onSubmit
         self.onCancel = onCancel
     }
@@ -19,164 +20,56 @@ struct UsernameInputView: View {
     @FocusState private var isTextFieldFocused: Bool
 
     var body: some View {
-        VStack(spacing: 0) {
-            // Dismiss keyboard toolbar
-            if isTextFieldFocused {
-                HStack {
-                    Spacer()
-                    Button("Done") {
-                        isTextFieldFocused = false
-                    }
-                    .font(MADTheme.Typography.headline)
-                    .foregroundColor(MADTheme.Colors.madRed)
-                    .padding(.trailing, MADTheme.Spacing.lg)
-                    .padding(.vertical, MADTheme.Spacing.sm)
-                }
-                .background(.ultraThinMaterial)
-            }
-
-            ScrollView {
-                VStack(spacing: MADTheme.Spacing.xl) {
-                    Spacer(minLength: 40)
-
-                    // Header
-                    VStack(spacing: MADTheme.Spacing.md) {
-                        Image(systemName: "person.circle.fill")
-                            .font(.system(size: 60))
-                            .foregroundColor(MADTheme.Colors.madRed)
-
-                        Text("Choose Your Username")
-                            .font(MADTheme.Typography.title1)
-                            .fontWeight(.bold)
-                            .foregroundColor(MADTheme.Colors.primaryText)
-                            .multilineTextAlignment(.center)
-                            .lineLimit(2)
-                            .minimumScaleFactor(0.8)
-
-                        Text("This will be how friends can find and add you")
-                            .font(MADTheme.Typography.body)
-                            .foregroundColor(MADTheme.Colors.secondaryText)
-                            .multilineTextAlignment(.center)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-
-                    // Username Input
-                    VStack(spacing: MADTheme.Spacing.md) {
-                        VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
-                            Text("Username")
-                                .font(MADTheme.Typography.headline)
-                                .foregroundColor(MADTheme.Colors.primaryText)
-
-                            HStack {
-                                Text("@")
-                                    .font(MADTheme.Typography.body)
-                                    .foregroundColor(MADTheme.Colors.secondaryText)
-                                    .padding(.leading, MADTheme.Spacing.md)
-
-                                TextField("Enter username", text: $username)
-                                    .font(MADTheme.Typography.body)
-                                    .textFieldStyle(.plain)
-                                    .autocapitalization(.none)
-                                    .disableAutocorrection(true)
-                                    .focused($isTextFieldFocused)
-                                    .onChange(of: username) { oldValue, newValue in
-                                        validateUsername(newValue)
-                                    }
-                            }
-                            .padding(MADTheme.Spacing.md)
-                            .background(
-                                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
-                                    .fill(MADTheme.Colors.cardBackground)
-                                    .stroke(validationBorderColor, lineWidth: 2)
-                            )
-
-                            // Validation Message
-                            if !validationMessage.isEmpty {
-                                HStack {
-                                    Image(systemName: validationIcon)
-                                        .foregroundColor(validationColor)
-                                    Text(validationMessage)
-                                        .font(MADTheme.Typography.caption)
-                                        .foregroundColor(validationColor)
-                                }
-                            }
-                        }
-
-                        // Username Requirements
-                        VStack(alignment: .leading, spacing: MADTheme.Spacing.xs) {
-                            Text("Username Requirements:")
-                                .font(MADTheme.Typography.caption)
-                                .fontWeight(.medium)
-                                .foregroundColor(MADTheme.Colors.secondaryText)
-
-                            VStack(alignment: .leading, spacing: MADTheme.Spacing.xs) {
-                                RequirementRow(
-                                    text: "3-20 characters long",
-                                    isMet: username.count >= 3 && username.count <= 20
-                                )
-                                RequirementRow(
-                                    text: "Only letters, numbers, and underscores",
-                                    isMet: username.isEmpty || username.allSatisfy { $0.isLetter || $0.isNumber || $0 == "_" }
-                                )
-                                RequirementRow(
-                                    text: "Must start with a letter",
-                                    isMet: username.isEmpty || username.first?.isLetter == true
-                                )
-                                RequirementRow(
-                                    text: "Must be available",
-                                    isMet: isValid && !isValidating
-                                )
-                            }
-                        }
-                        .padding(MADTheme.Spacing.md)
-                        .background(
-                            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.small)
-                                .fill(MADTheme.Colors.secondaryBackground)
-                        )
-                    }
-
-                    Spacer(minLength: 40)
-                }
-                .padding(.horizontal, MADTheme.Spacing.lg)
-            }
-            .scrollDismissesKeyboard(.interactively)
-
-            // Action Buttons pinned to bottom
-            VStack(spacing: MADTheme.Spacing.md) {
-                Button(action: onSubmit) {
-                    HStack {
-                        if isValidating {
-                            ProgressView()
-                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                                .scaleEffect(0.8)
-                        } else {
-                            Text("Continue")
-                                .font(MADTheme.Typography.headline)
-                                .fontWeight(.semibold)
-                        }
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, MADTheme.Spacing.md)
-                    .background(
-                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
-                            .fill(isValid && !isValidating ? MADTheme.Colors.madRed : Color.gray)
-                    )
+        VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
+            HStack(spacing: 4) {
+                Text("@")
+                    .madFont(size: 17, weight: .bold, design: .rounded, maxScale: 1.3)
+                    .foregroundColor(.white.opacity(0.5))
+                TextField("", text: $username, prompt: Text("username").foregroundColor(.white.opacity(0.35)))
+                    .font(.system(size: 17, weight: .semibold, design: .rounded))
                     .foregroundColor(.white)
-                }
-                .disabled(!isValid || isValidating)
-
-                if let onCancel = onCancel {
-                    Button("Skip for now", action: onCancel)
-                        .font(MADTheme.Typography.body)
-                        .foregroundColor(MADTheme.Colors.secondaryText)
-                }
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .submitLabel(.done)
+                    .focused($isTextFieldFocused)
+                    .onSubmit { isTextFieldFocused = false }
+                    .onChange(of: username) { _, newValue in
+                        validateUsername(newValue)
+                    }
             }
-            .padding(.horizontal, MADTheme.Spacing.lg)
-            .padding(.bottom, MADTheme.Spacing.lg)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 15)
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(Color.white.opacity(0.06))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .strokeBorder(validationBorderColor, lineWidth: 1.5)
+                    )
+            )
+
+            if !validationMessage.isEmpty {
+                HStack(spacing: 6) {
+                    Image(systemName: validationIcon)
+                        .accessibilityHidden(true)
+                    Text(validationMessage)
+                        .madFont(size: 13, weight: .semibold, design: .rounded, maxScale: 1.3)
+                }
+                .foregroundColor(validationColor)
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                RequirementRow(text: "3 to 20 characters", isMet: username.count >= 3 && username.count <= 20)
+                RequirementRow(
+                    text: "Letters, numbers and underscores",
+                    isMet: !username.isEmpty && username.allSatisfy { $0.isLetter || $0.isNumber || $0 == "_" }
+                )
+                RequirementRow(text: "Starts with a letter", isMet: username.first?.isLetter == true)
+                RequirementRow(text: "Available", isMet: isValid && !isValidating)
+            }
         }
-        .background(MADTheme.Colors.secondaryBackground)
     }
-    
+
     // MARK: - Validation Logic
     
     private var validationBorderColor: Color {
@@ -388,6 +281,7 @@ enum UsernameError: Error, LocalizedError {
 #Preview {
     UsernameInputView(
         username: .constant(""),
+        isValid: .constant(false),
         onSubmit: { },
         onCancel: { }
     )

@@ -1,19 +1,22 @@
 import SwiftUI
 
-/// Optional "about you" onboarding step, shown once right after username setup
-/// and before the welcome celebration. Captures light personalization —
-/// how the user heard about us, their main goal, and running experience — to
-/// power referral analytics and future tailoring.
-///
-/// Everything here is optional (App Store 5.1.1(i): don't require non-essential
-/// personal info to use the app). "Skip" and "Continue" both advance; a pure
-/// skip still records the step as complete on the backend so it never re-shows.
+/// The "about you" onboarding step, one question per screen, right after
+/// username setup. How someone found us is required, so every new account has
+/// a source; "Somewhere else" and "They're not on the app yet" mean nobody is
+/// ever stuck or has to give anything personal (App Store 5.1.1). The rest can
+/// be skipped.
 struct PersonalizationView: View {
     @Environment(\.appStateManager) var appStateManager
     @EnvironmentObject var userManager: UserManager
 
+    private enum Step: Int, CaseIterable { case source, goal, experience, units }
+
+    @State private var step: Step = .source
     @State private var selectedReferral: String?
     @State private var referralDetail: String = ""
+    /// Only ever a real account chosen from search, never typed text.
+    @State private var referrer: BackendUser?
+    @State private var friendNotOnApp = false
     @State private var selectedGoal: String?
     @State private var selectedExperience: String?
     // Preselected from the device's measurement system, so a plain Continue
@@ -21,103 +24,206 @@ struct PersonalizationView: View {
     @State private var selectedUnit: String? = DisplayDistanceUnit.systemDefault.rawValue
     @State private var isSubmitting = false
     @FocusState private var detailFieldFocused: Bool
+    /// Goes up with each answer, which makes Flamey react.
+    @State private var reaction = 0
+
+    /// A skin for Flamey and his line, per answer.
+    private static let reactions: [String: (item: String, line: String)] = [
+        "app_store": ("star_glasses", "Nice find!"),
+        "friend": ("flamey_jr", "Better together!"),
+        "developer": ("star_hat", "You know us!"),
+        "instagram": ("polaroid", "Say cheese!"),
+        "tiktok": ("spotlight", "Lights on!"),
+        "reddit": ("round_specs", "Well researched."),
+        "google": ("aviators", "Good search!"),
+        "youtube": ("directors_beret", "And action!"),
+        "ai_chat": ("cyber_visor", "Beep boop!"),
+        "social_ad": ("megaphone", "It worked!"),
+        "flyer": ("foam_finger", "Poster fan!"),
+        "other": ("safari_hat", "An explorer!"),
+        "habit": ("stopwatch", "Every single day."),
+        "active": ("lightning_kicks", "Let's move!"),
+        "race": ("checkered_flag", "Race day!"),
+        "weight": ("heart_bopper", "Feeling good!"),
+        "fun": ("confetti_cannon", "Party walk!"),
+        "beginner": ("canvas_sneakers", "Everyone starts here."),
+        "casual": ("trainers", "Nice pace."),
+        "regular": ("racing_flats", "Speedy!"),
+        DisplayDistanceUnit.miles.rawValue: ("dust_puffs", "Miles it is."),
+        DisplayDistanceUnit.kilometers.rawValue: ("speed_lines", "Kilometers it is.")
+    ]
+
+    private var selectionForStep: String? {
+        switch step {
+        case .source: return selectedReferral
+        case .goal: return selectedGoal
+        case .experience: return selectedExperience
+        case .units: return selectedUnit
+        }
+    }
+
+    /// He starts each step with something new and keeps what you chose.
+    private var flameyItems: [String] {
+        // A new skin each step, picked to stand out against that step's hero.
+        let base: [String]
+        switch step {
+        case .source: base = ["ocean", "bandana"]
+        case .goal: base = ["teal", "sweatband"]
+        case .experience: base = ["sunflower", "star_badge"]
+        case .units: base = ["rose_gold", "visor"]
+        }
+        var items = base
+        items += [selectedReferral, selectedGoal, selectedExperience].compactMap { $0 }.compactMap { Self.reactions[$0]?.item }
+        if step == .units, let selectedUnit, let unit = Self.reactions[selectedUnit]?.item { items.append(unit) }
+        if referrer != nil { items.append("heart_glasses") }
+        return items
+    }
+
+    private var flameyLine: String? {
+        if step == .source {
+            if let referrer { return "Thanks, \(referrer.first_name ?? referrer.username ?? "friend")!" }
+            if friendNotOnApp { return "We'll save them a spot!" }
+        }
+        return selectionForStep.flatMap { Self.reactions[$0]?.line }
+    }
+
+    /// The first step can't be passed without an answer, and picking "Friend
+    /// or family" needs their account or a clear "they're not on it yet".
+    private var canContinue: Bool {
+        guard step == .source else { return true }
+        guard let selectedReferral else { return false }
+        return selectedReferral != "friend" || referrer != nil || friendNotOnApp
+    }
+
+    private var isLastStep: Bool { step == Step.allCases.last }
 
     var body: some View {
-        ZStack {
-            LinearGradient(
-                colors: [
-                    Color(red: 0.12, green: 0.06, blue: 0.08),
-                    Color(red: 0.06, green: 0.03, blue: 0.04)
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .ignoresSafeArea()
-
-            ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: MADTheme.Spacing.xl) {
-                    header
-
-                    section(
-                        title: "How did you hear about us?",
-                        options: Self.referralOptions,
-                        selection: $selectedReferral
-                    )
-
-                    if Self.detailPromptingSources.contains(selectedReferral ?? "") {
-                        detailField
-                            .transition(.opacity.combined(with: .move(edge: .top)))
-                    }
-
-                    section(
-                        title: "What's your main goal?",
-                        options: Self.goalOptions,
-                        selection: $selectedGoal
-                    )
-
-                    section(
-                        title: "How would you describe your running?",
-                        options: Self.experienceOptions,
-                        selection: $selectedExperience
-                    )
-
-                    section(
-                        title: "Show distances in",
-                        options: Self.unitOptions,
-                        selection: $selectedUnit
-                    )
-
-                    Color.clear.frame(height: 8)
+        OnboardingFormScaffold(
+            colors: colors,
+            step: (step.rawValue, Step.allCases.count),
+            headline: headline,
+            message: message,
+            art: { height in
+                OnboardingFlamey(items: flameyItems, size: min(height * 0.82, 130), line: flameyLine, reaction: reaction)
+                    .introPop(0.05)
+            },
+            content: { questions },
+            actions: {
+                OnboardingPrimaryButton(
+                    title: isLastStep ? "Continue" : "Next",
+                    isLoading: isSubmitting,
+                    isEnabled: canContinue,
+                    action: advance
+                )
+                if step == .goal || step == .experience {
+                    OnboardingSecondaryButton(title: "Skip", action: advance)
                 }
-                .padding(.horizontal, MADTheme.Spacing.xl)
-                .padding(.top, MADTheme.Spacing.xl)
-                .padding(.bottom, MADTheme.Spacing.lg)
             }
-            .scrollDismissesKeyboard(.interactively)
-        }
-        .overlay(alignment: .topTrailing) { skipButton }
-        .safeAreaInset(edge: .bottom) { continueButton }
+        )
         .animation(.easeInOut(duration: 0.25), value: selectedReferral)
-    }
-
-    // MARK: - Header
-
-    private var header: some View {
-        VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
-            Text("A little about you")
-                .font(.system(size: 30, weight: .bold, design: .rounded))
-                .foregroundColor(.white)
-
-            Text("Optional, but it helps us make Mile A Day yours.")
-                .font(.system(size: 16, weight: .regular, design: .rounded))
-                .foregroundColor(.white.opacity(0.6))
-                .fixedSize(horizontal: false, vertical: true)
+        .animation(.easeInOut(duration: 0.25), value: step)
+        .onChange(of: referrer?.user_id) { _, picked in
+            if picked != nil { reaction += 1 }
         }
-        .padding(.trailing, 44) // clear the Skip button
     }
 
-    // MARK: - Section
+    private var colors: [Color] {
+        switch step {
+        case .source: return [Color(red: 0.97, green: 0.40, blue: 0.64), Color(red: 0.60, green: 0.12, blue: 0.44)]
+        case .goal: return [Color(red: 0.98, green: 0.62, blue: 0.24), Color(red: 0.80, green: 0.28, blue: 0.20)]
+        case .experience: return [Color(red: 0.30, green: 0.66, blue: 0.86), Color(red: 0.16, green: 0.30, blue: 0.62)]
+        case .units: return [Color(red: 0.36, green: 0.74, blue: 0.56), Color(red: 0.12, green: 0.42, blue: 0.40)]
+        }
+    }
 
-    private func section(title: String, options: [PersonalizationOption], selection: Binding<String?>) -> some View {
-        VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
-            Text(title)
-                .font(.system(size: 18, weight: .semibold, design: .rounded))
-                .foregroundColor(.white.opacity(0.9))
+    private var headline: String {
+        switch step {
+        case .source: return "How did you find us?"
+        case .goal: return "What's your main goal?"
+        case .experience: return "How would you describe your running?"
+        case .units: return "Show distances in"
+        }
+    }
 
-            FlowLayout(spacing: 10) {
-                ForEach(options) { option in
-                    ChipView(
-                        option: option,
-                        isSelected: selection.wrappedValue == option.code
-                    ) {
-                        let wasSelected = selection.wrappedValue == option.code
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            selection.wrappedValue = wasSelected ? nil : option.code
-                        }
-                        UISelectionFeedbackGenerator().selectionChanged()
+    private var message: String {
+        switch step {
+        case .source: return "This helps us grow, and friends get credit for bringing you."
+        case .goal: return "We'll keep this in mind."
+        case .experience: return "No wrong answers. Walkers very welcome."
+        case .units: return "You can change this anytime in Settings."
+        }
+    }
+
+    @ViewBuilder
+    private var questions: some View {
+        switch step {
+        case .source:
+            // One choice made, the rest fold away so search clears the keyboard.
+            // Tapping it again brings them back.
+            chips(selectedReferral == "friend" ? Self.referralOptions.filter { $0.code == "friend" } : Self.referralOptions,
+                  selection: $selectedReferral)
+            if selectedReferral == "friend" {
+                friendPicker.transition(.opacity.combined(with: .move(edge: .top)))
+            } else if Self.detailPromptingSources.contains(selectedReferral ?? "") {
+                detailField.transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        case .goal:
+            chips(Self.goalOptions, selection: $selectedGoal)
+        case .experience:
+            chips(Self.experienceOptions, selection: $selectedExperience)
+        case .units:
+            chips(Self.unitOptions, selection: $selectedUnit)
+        }
+    }
+
+    private var friendPicker: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Who sent you? Pick their account so they get credit.")
+                .madFont(size: 14, weight: .semibold, design: .rounded, maxScale: 1.3)
+                .foregroundColor(.white.opacity(0.85))
+                .fixedSize(horizontal: false, vertical: true)
+            ReferrerPicker(selection: $referrer)
+            if referrer == nil {
+                Button {
+                    friendNotOnApp.toggle()
+                    if friendNotOnApp { reaction += 1 }
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: friendNotOnApp ? "checkmark.circle.fill" : "circle")
+                            .foregroundColor(friendNotOnApp ? MADTheme.Colors.madRed : .white.opacity(0.5))
+                            .accessibilityHidden(true)
+                        Text("They're not on Mile A Day yet")
+                            .madFont(size: 14, weight: .semibold, design: .rounded, maxScale: 1.3)
+                            .foregroundColor(.white.opacity(0.8))
                     }
                 }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(friendNotOnApp ? .isSelected : [])
             }
+        }
+    }
+
+    private func chips(_ options: [PersonalizationOption], selection: Binding<String?>) -> some View {
+        FlowLayout(spacing: 10) {
+            ForEach(options) { option in
+                ChipView(option: option, isSelected: selection.wrappedValue == option.code) {
+                    let wasSelected = selection.wrappedValue == option.code
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        selection.wrappedValue = wasSelected ? nil : option.code
+                    }
+                    if !wasSelected { reaction += 1 }
+                }
+            }
+        }
+    }
+
+    private func advance() {
+        detailFieldFocused = false
+        if isLastStep {
+            submitAndContinue()
+        } else if let next = Step(rawValue: step.rawValue + 1) {
+            MADHaptics.tap()
+            step = next
         }
     }
 
@@ -126,7 +232,7 @@ struct PersonalizationView: View {
     /// Sources that ask a follow-up. `friend` and `developer` both resolve the
     /// answer against real usernames server-side, so they take handle-style
     /// input; `other` is free text about a channel.
-    static let detailPromptingSources: Set<String> = ["friend", "developer", "other"]
+    static let detailPromptingSources: Set<String> = ["developer", "other"]
 
     private var detailField: some View {
         let wantsHandle = selectedReferral == "friend" || selectedReferral == "developer"
@@ -163,46 +269,6 @@ struct PersonalizationView: View {
         }
     }
 
-    // MARK: - Buttons
-
-    private var skipButton: some View {
-        Button {
-            submitAndContinue()
-        } label: {
-            Text("Skip")
-                .font(.system(size: 16, weight: .semibold, design: .rounded))
-                .foregroundColor(.white.opacity(0.55))
-                .padding(.horizontal, MADTheme.Spacing.lg)
-                .padding(.vertical, MADTheme.Spacing.md)
-        }
-        .disabled(isSubmitting)
-    }
-
-    private var continueButton: some View {
-        Button(action: submitAndContinue) {
-            Group {
-                if isSubmitting {
-                    ProgressView()
-                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                } else {
-                    Text("Continue")
-                }
-            }
-            .font(.system(size: 17, weight: .bold, design: .rounded))
-            .foregroundColor(.white)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 16)
-            .background(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(MADTheme.Colors.madRed)
-            )
-            .shadow(color: MADTheme.Colors.madRed.opacity(0.3), radius: 12, x: 0, y: 6)
-        }
-        .disabled(isSubmitting)
-        .padding(.horizontal, MADTheme.Spacing.xl)
-        .padding(.bottom, MADTheme.Spacing.md)
-    }
-
     // MARK: - Submit
 
     private func submitAndContinue() {
@@ -211,11 +277,13 @@ struct PersonalizationView: View {
         isSubmitting = true
 
         // Only send the referral detail when it's relevant to the selected source.
-        let showsDetail = selectedReferral == "friend" || selectedReferral == "other"
+        let showsDetail = selectedReferral == "other"
         let trimmedDetail = referralDetail.trimmingCharacters(in: .whitespacesAndNewlines)
-        let detailToSend: String? = (showsDetail && !trimmedDetail.isEmpty)
-            ? trimmedDetail.hasPrefix("@") ? String(trimmedDetail.dropFirst()) : trimmedDetail
+        let referrerUsername = selectedReferral == "friend" ? referrer?.username : nil
+        let typedDetail: String? = (showsDetail && !trimmedDetail.isEmpty)
+            ? (trimmedDetail.hasPrefix("@") ? String(trimmedDetail.dropFirst()) : trimmedDetail)
             : nil
+        let detailToSend = referrerUsername ?? typedDetail
 
         let userId = userManager.currentUser.backendUserId
 
@@ -241,6 +309,11 @@ struct PersonalizationView: View {
                 } catch {
                     print("[PersonalizationView] onboarding submit failed (non-blocking): \(error)")
                 }
+            }
+
+            // Best-effort too: Invite friends lets them add it for 14 days.
+            if let referrerUsername {
+                try? await ReferralService.shared.setReferrer(username: referrerUsername)
             }
 
             await MainActor.run {

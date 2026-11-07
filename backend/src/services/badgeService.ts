@@ -973,6 +973,69 @@ const EXTRA_BADGES: Array<{
   requirement: number | null;
   sortOrder: number;
 }> = [
+  // Community Goals and referrals. Granted by their own services, never
+  // evaluated: a null requirement earns nothing, and "competition" isn't
+  // workout-derived, so a later deletion can't take one back.
+  {
+    badgeId: "community_coast_to_coast_walker",
+    category: "competition",
+    name: "Coast Walker",
+    description: "Walked 5 days of Coast to Coast, December 2026.",
+    icon: "map.fill",
+    rarity: "common",
+    requirement: null,
+    sortOrder: 900,
+  },
+  {
+    badgeId: "community_coast_to_coast_2026",
+    category: "competition",
+    name: "Coast to Coast",
+    description: "Walked 15 days of Coast to Coast, December 2026.",
+    icon: "map.fill",
+    rarity: "rare",
+    requirement: null,
+    sortOrder: 901,
+  },
+  {
+    badgeId: "community_coast_to_coast_trailblazer",
+    category: "competition",
+    name: "Trailblazer",
+    description: "Walked 25 days of Coast to Coast, December 2026.",
+    icon: "flame.fill",
+    rarity: "legendary",
+    requirement: null,
+    sortOrder: 902,
+  },
+  {
+    badgeId: "referral_buddy",
+    category: "competition",
+    name: "Trail Buddy",
+    description: "Brought a friend who stuck with it, or joined through one.",
+    icon: "person.2.fill",
+    rarity: "common",
+    requirement: null,
+    sortOrder: 910,
+  },
+  {
+    badgeId: "referral_guide",
+    category: "competition",
+    name: "Trail Guide",
+    description: "5 friends joined through you and kept walking.",
+    icon: "person.3.fill",
+    rarity: "rare",
+    requirement: null,
+    sortOrder: 911,
+  },
+  {
+    badgeId: "referral_pathfinder",
+    category: "competition",
+    name: "Pathfinder",
+    description: "50 friends joined through you and kept walking.",
+    icon: "star.fill",
+    rarity: "legendary",
+    requirement: null,
+    sortOrder: 912,
+  },
   // Stories
   {
     badgeId: "story_1",

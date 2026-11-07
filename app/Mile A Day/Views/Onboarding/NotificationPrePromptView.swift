@@ -7,20 +7,22 @@ import SwiftUI
 struct NotificationPrePromptView: View {
     @Environment(\.appStateManager) var appStateManager
     @State private var isRequesting = false
+    @State private var flameyLine: String?
+    @State private var reaction = 0
 
     var body: some View {
         OnboardingStepScaffold(
-            colors: [Color(red: 1.0, green: 0.58, blue: 0.24), Color(red: 0.85, green: 0.25, blue: 0.27)],
+            colors: [Color(red: 1.0, green: 0.80, blue: 0.28), Color(red: 0.93, green: 0.46, blue: 0.12)],
             chip: "Last step",
             headline: "Let Flamey nudge you",
             message: "A reminder before your streak runs out, and a heads-up when friends hype or nudge you. Change it any time in Settings.",
-            art: { height in NotificationHeroArt(height: height) },
+            art: { height in NotificationHeroArt(height: height, line: flameyLine, reaction: reaction) },
             actions: {
                 VStack(spacing: 6) {
                     OnboardingPrimaryButton(title: "Turn on reminders", isLoading: isRequesting, action: turnOn)
                     OnboardingSecondaryButton(title: "Not now") {
                         NotificationPrePrompt.notNow()
-                        appStateManager.completeNotifications()
+                        Task { await finish("Maybe later!") }
                     }
                 }
             }
@@ -35,14 +37,25 @@ struct NotificationPrePromptView: View {
             MADNotificationService.shared.registerForRemoteNotifications()
             await MADNotificationService.shared.syncDailyReminderPrefsToBackend()
             isRequesting = false
-            appStateManager.completeNotifications()
+            await finish("I've got you!")
         }
+    }
+
+    /// Flamey answers, then the screen moves on.
+    @MainActor
+    private func finish(_ line: String) async {
+        flameyLine = line
+        reaction += 1
+        try? await Task.sleep(for: .milliseconds(800))
+        appStateManager.completeNotifications()
     }
 }
 
 /// Flamey with the kind of notification he sends.
 private struct NotificationHeroArt: View {
     let height: CGFloat
+    let line: String?
+    let reaction: Int
 
     var body: some View {
         // Banners are ~58pt. A short hero (SE) shows one banner; Flamey
@@ -61,7 +74,7 @@ private struct NotificationHeroArt: View {
                     .scaleEffect(0.94)
                     .opacity(0.9)
             }
-            FlameBuddyView(health: .healthy, size: flame, showsMoodBubble: false)
+            OnboardingFlamey(items: ["violet", "megaphone"], size: flame, line: line, reaction: reaction)
                 .frame(width: flame, height: flame)
                 .introPop(0)
         }

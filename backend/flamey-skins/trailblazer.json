@@ -1,0 +1,49 @@
+{
+  "format": 1,
+  "id": "trailblazer",
+  "order": 134,
+  "slot": "color",
+  "name": "Trailblazer",
+  "family": "firsts",
+  "unlock": {
+    "badge": "community_coast_to_coast_trailblazer"
+  },
+  "unlock_copy": "Walk 25 days of Coast to Coast, December 2026",
+  "holidays": [],
+  "mood_prop": false,
+  "compact": true,
+  "tier": 400,
+  "auto_eligible": false,
+  "rules": {
+    "hides": [],
+    "clashes": []
+  },
+  "palette": {
+    "angular": false,
+    "bodyOpacity": 1,
+    "core": "#FFF3C4FF",
+    "effects": [],
+    "end": [
+      0.5,
+      1
+    ],
+    "eye": "#1A1020FF",
+    "glow": "#FF8A1FFF",
+    "inner": [
+      "#FFFBE6FF",
+      "#FFC93CFF"
+    ],
+    "innerOpacity": 1,
+    "outer": [
+      "#FF7A1AFF",
+      "#D9271AFF",
+      "#6E0F4FFF"
+    ],
+    "rim": "#FFD98C8C",
+    "start": [
+      0.5,
+      0
+    ]
+  },
+  "art": {}
+}

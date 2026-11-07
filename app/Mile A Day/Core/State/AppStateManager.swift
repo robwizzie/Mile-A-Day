@@ -36,10 +36,17 @@ class AppStateManager: ObservableObject {
     private let hasCompletedOnboardingKey = "MAD_HasCompletedOnboarding"
     private let isAuthenticatedKey = "MAD_IsAuthenticated"
     private let hasCompletedFullSetupKey = "MAD_HasCompletedFullSetup"
+    private let personalizationPendingKey = "MAD_PersonalizationPending"
     
     // MARK: - Initialization
     init() {
         loadAppState()
+        #if DEBUG
+        if let step = Self.previewStep {
+            currentState = step
+            return
+        }
+        #endif
         if splashLeadsToMain {
             // Returning user: the app builds UNDER the splash (RootView draws
             // `SplashView` over `.main` while `splashOverlay` is set), so the
@@ -56,6 +63,22 @@ class AppStateManager: ObservableObject {
             startSplashTimer()
         }
     }
+
+    #if DEBUG
+    /// `-MADOnboardingStep auth` opens one setup screen, for simulator reviews.
+    private static var previewStep: AppState? {
+        switch UserDefaults.standard.string(forKey: "MADOnboardingStep") {
+        case "intro": return .onboarding
+        case "auth": return .authentication
+        case "username": return .usernameSetup
+        case "about": return .personalization
+        case "health": return .healthAccess
+        case "notifications": return .notifications
+        case "plus": return .plusOffer
+        default: return nil
+        }
+    }
+    #endif
 
     // MARK: - Public Methods
 
@@ -195,6 +218,7 @@ class AppStateManager: ObservableObject {
         // Existing users who update never pass through here, so they still
         // get it.
         WhatsNewManager.markSeen()
+        userDefaults.set(true, forKey: personalizationPendingKey)
         DispatchQueue.main.async {
             withAnimation(MADTheme.Animation.standard) {
                 self.currentState = .personalization
@@ -202,13 +226,13 @@ class AppStateManager: ObservableObject {
         }
     }
 
-    /// Complete the optional personalization step and move straight to health
-    /// access. (A "You're all set" screen sat between them once — it repeated
-    /// the welcome tour the user had just finished.) This step is optional
-    /// (data-collection only) so it is intentionally NOT part of the
-    /// `hasCompletedFullSetup` gate — a user who quits here still resumes
-    /// straight to the main app on next launch.
+    /// Complete the personalization step and move straight to health access.
+    /// (A "You're all set" screen sat between them once — it repeated the
+    /// welcome tour the user had just finished.) Asked of new accounts only:
+    /// `personalizationPendingKey` is what brings someone back here if they
+    /// quit, and existing users never have it set.
     func completePersonalization() {
+        userDefaults.set(false, forKey: personalizationPendingKey)
         DispatchQueue.main.async {
             withAnimation(MADTheme.Animation.standard) {
                 self.currentState = .healthAccess
@@ -327,6 +351,8 @@ class AppStateManager: ObservableObject {
 
         if !user.hasUsername {
             self.currentState = .usernameSetup
+        } else if userDefaults.bool(forKey: personalizationPendingKey) {
+            self.currentState = .personalization
         } else if !isHealthKitAuthorized() {
             self.currentState = .healthAccess
         } else {

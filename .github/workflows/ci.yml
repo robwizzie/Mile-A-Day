@@ -136,6 +136,14 @@ jobs:
       # opt-in, reciprocity, blocks, stealth, maps-off, and deletion on finish.
       - name: Buddy live route privacy check
         run: node scripts/buddy-live-route-check.mjs
+      # Community Goals: what counts, the daily cap, a total that only rises,
+      # and rewards that go out once and stay.
+      - name: Community goal check
+        run: node scripts/community-goal-check.mjs
+      # Referrals: real accounts only, a verified walker before anything counts,
+      # rewards once each, and offer codes that only ever reach one person.
+      - name: Referral check
+        run: node scripts/referral-check.mjs
       # Lobby readiness. A guest is ready only once they've said walk/run and
       # indoor/outdoor; the host is told exactly once on that transition, and
       # a running walk's 'active' row is never rewritten by a late answer.
