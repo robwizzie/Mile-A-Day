@@ -63,9 +63,9 @@ struct TotalMilesDetailView: View {
         VStack(spacing: MADTheme.Spacing.md) {
             HStack(spacing: MADTheme.Spacing.sm) {
                 Image(systemName: "map.fill")
-                    .font(.system(size: 14, weight: .semibold))
+                    .madFont(size: 14, weight: .semibold, maxScale: 1.5)
                 Text("Lifetime")
-                    .font(MADTheme.Typography.smallBold)
+                    .madFont(size: 14, weight: .semibold, design: .rounded)
             }
             .foregroundColor(MADTheme.Colors.madRed)
             .padding(.horizontal, MADTheme.Spacing.md)
@@ -76,11 +76,11 @@ struct TotalMilesDetailView: View {
             )
 
             Text(totalMiles.milesFormatted)
-                .font(.system(size: 52, weight: .bold, design: .rounded))
+                .madFont(size: 52, weight: .bold, design: .rounded)
                 .foregroundColor(.primary)
 
             Text("Total Miles Covered")
-                .font(MADTheme.Typography.body)
+                .madFont(size: 17, design: .rounded)
                 .foregroundColor(.secondary)
         }
         .padding(MADTheme.Spacing.lg)
@@ -125,10 +125,10 @@ struct TotalMilesDetailView: View {
             VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
                 HStack(spacing: MADTheme.Spacing.sm) {
                     Image(systemName: "flag.fill")
-                        .font(.system(size: 14, weight: .semibold))
+                        .madFont(size: 14, weight: .semibold, maxScale: 1.5)
                         .foregroundStyle(MADTheme.Colors.redGradient)
                     Text("Next Medal")
-                        .font(MADTheme.Typography.headline)
+                        .madFont(size: 17, weight: .semibold, design: .rounded)
                         .foregroundColor(.primary)
                 }
 
@@ -155,7 +155,7 @@ struct TotalMilesDetailView: View {
 
                     VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
                         Text(badge.name)
-                            .font(MADTheme.Typography.body)
+                            .madFont(size: 17, design: .rounded)
                             .fontWeight(.medium)
                             .foregroundColor(.primary)
 
@@ -173,7 +173,7 @@ struct TotalMilesDetailView: View {
                         .frame(height: 6)
 
                         Text(String(format: "%.1f mi to go", remaining))
-                            .font(MADTheme.Typography.caption)
+                            .madFont(size: 12, design: .rounded)
                             .foregroundColor(.secondary)
                     }
                 }
@@ -189,17 +189,17 @@ struct TotalMilesDetailView: View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
             HStack(spacing: MADTheme.Spacing.sm) {
                 Image(systemName: "medal.fill")
-                    .font(.system(size: 14, weight: .semibold))
+                    .madFont(size: 14, weight: .semibold, maxScale: 1.5)
                     .foregroundStyle(MADTheme.Colors.redGradient)
                 Text("Mile Medals")
-                    .font(MADTheme.Typography.headline)
+                    .madFont(size: 17, weight: .semibold, design: .rounded)
                     .foregroundColor(.primary)
 
                 Spacer()
 
                 let earned = milesBadges.filter { !$0.isLocked }.count
                 Text("\(earned)/\(milesBadges.count)")
-                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .madFont(size: 13, weight: .semibold, design: .rounded)
                     .foregroundColor(.secondary)
             }
 
@@ -221,10 +221,10 @@ struct TotalMilesDetailView: View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
             HStack(spacing: MADTheme.Spacing.sm) {
                 Image(systemName: "sparkles")
-                    .font(.system(size: 14, weight: .semibold))
+                    .madFont(size: 14, weight: .semibold, maxScale: 1.5)
                     .foregroundStyle(MADTheme.Colors.redGradient)
                 Text("Your Journey")
-                    .font(MADTheme.Typography.headline)
+                    .madFont(size: 17, weight: .semibold, design: .rounded)
                     .foregroundColor(.primary)
             }
 
@@ -265,12 +265,12 @@ struct TotalMilesDetailView: View {
     private func funFactRow(icon: String, text: String) -> some View {
         HStack(spacing: MADTheme.Spacing.md) {
             Image(systemName: icon)
-                .font(.system(size: 15, weight: .medium))
+                .madFont(size: 15, weight: .medium, maxScale: 1.5)
                 .foregroundColor(MADTheme.Colors.madRed)
                 .frame(width: 24)
 
             Text(text)
-                .font(MADTheme.Typography.body)
+                .madFont(size: 17, design: .rounded)
                 .foregroundColor(.primary)
                 .fixedSize(horizontal: false, vertical: true)
         }

@@ -41,11 +41,11 @@ struct DailyChallengeSettingsView: View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
             HStack(spacing: MADTheme.Spacing.sm) {
                 Image(systemName: "flag.2.crossed.fill")
-                    .font(.system(size: 11, weight: .semibold))
+                    .madFont(size: 11, weight: .semibold, maxScale: 1.5)
                     .foregroundColor(MADTheme.Colors.madRed)
 
                 Text("HEAD-TO-HEAD")
-                    .font(MADTheme.Typography.caption)
+                    .madFont(size: 12, design: .rounded)
                     .fontWeight(.semibold)
                     .foregroundColor(.secondary)
                     .tracking(0.5)
@@ -53,7 +53,7 @@ struct DailyChallengeSettingsView: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Toggle("Rivals from close friends only", isOn: $closeFriendsOnly)
-                    .font(MADTheme.Typography.body)
+                    .madFont(size: 17, design: .rounded)
                     .tint(MADTheme.Colors.madRed)
                     .disabled(!hasLoaded || (!hasCloseFriends && !closeFriendsOnly))
                     .onChange(of: closeFriendsOnly) { oldValue, newValue in
@@ -66,13 +66,13 @@ struct DailyChallengeSettingsView: View {
                         ? "Head-to-Head matchups will only pull rivals from your close friends. Applies starting with your next matchup."
                         : "Add at least one close friend to unlock this."
                 )
-                .font(.system(size: 11, design: .rounded))
-                .foregroundColor(.white.opacity(0.35))
+                .madFont(size: 11, design: .rounded)
+                .foregroundColor(.white.opacity(0.6))
                 .padding(.leading, 2)
 
                 if let saveError {
                     Text(saveError)
-                        .font(.system(size: 11, design: .rounded))
+                        .madFont(size: 11, design: .rounded)
                         .foregroundColor(.orange)
                         .padding(.leading, 2)
                         .padding(.top, 2)
@@ -84,19 +84,19 @@ struct DailyChallengeSettingsView: View {
             NavigationLink(destination: CloseFriendsListView(friendService: friendService)) {
                 HStack {
                     Image(systemName: "star.fill")
-                        .font(.system(size: 13, weight: .semibold))
+                        .madFont(size: 13, weight: .semibold, maxScale: 1.5)
                         .foregroundColor(.yellow)
                     Text("Manage Close Friends")
-                        .font(MADTheme.Typography.body)
+                        .madFont(size: 17, design: .rounded)
                         .foregroundColor(.primary)
                     Spacer()
                     if closeFriendsService.hasLoadedOnce {
                         Text("\(closeFriendsService.closeFriendIds.count)")
-                            .font(.system(size: 13, weight: .semibold, design: .rounded))
+                            .madFont(size: 13, weight: .semibold, design: .rounded)
                             .foregroundColor(.secondary)
                     }
                     Image(systemName: "chevron.right")
-                        .font(.system(size: 12, weight: .semibold))
+                        .madFont(size: 12, weight: .semibold, maxScale: 1.5)
                         .foregroundColor(.white.opacity(0.3))
                 }
             }
