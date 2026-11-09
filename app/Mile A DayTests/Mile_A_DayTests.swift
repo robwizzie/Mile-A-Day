@@ -124,4 +124,83 @@ struct TreadmillDataTests {
         let after = odometer.ingest(totalMeters: 101, speedKmh: nil, at: t0.addingTimeInterval(1))
         #expect(after == 1)
     }
+
+    // MARK: Console seed (start where the treadmill is)
+
+    static let machine = UUID()
+    /// Noon, so a few minutes back never crosses midnight.
+    static var noon: Date {
+        Calendar.current.date(bySettingHour: 12, minute: 0, second: 0, of: Date())!
+    }
+
+    @Test func seedStartsAtTheConsolesTimeAndDistance() throws {
+        let now = Self.noon
+        let seed = try #require(TreadmillConsoleSeed.resolve(
+            totalMeters: 1609, elapsedSeconds: 900, elapsedReadAt: now.addingTimeInterval(-1),
+            machine: Self.machine, mark: nil, now: now))
+        #expect(seed.elapsedSeconds == 901)                     // the clock ran on since the read
+        #expect(abs(seed.miles - 1609 / 1609.344) < 0.0001)
+        #expect(seed.startDate == now.addingTimeInterval(-901))
+    }
+
+    @Test func seedNeedsBothNumbersAndAFreshReading() {
+        let now = Self.noon
+        #expect(TreadmillConsoleSeed.resolve(totalMeters: nil, elapsedSeconds: 900, elapsedReadAt: now,
+                                             machine: Self.machine, mark: nil, now: now) == nil)
+        #expect(TreadmillConsoleSeed.resolve(totalMeters: 500, elapsedSeconds: nil, elapsedReadAt: now,
+                                             machine: Self.machine, mark: nil, now: now) == nil)
+        #expect(TreadmillConsoleSeed.resolve(totalMeters: 500, elapsedSeconds: 900,
+                                             elapsedReadAt: now.addingTimeInterval(-60),
+                                             machine: Self.machine, mark: nil, now: now) == nil)
+    }
+
+    @Test func seedRejectsNumbersNoBeltMakes() {
+        let now = Self.noon
+        // 5 km in 60 s.
+        #expect(TreadmillConsoleSeed.resolve(totalMeters: 5000, elapsedSeconds: 60, elapsedReadAt: now,
+                                             machine: Self.machine, mark: nil, now: now) == nil)
+        // Longer than any session we'd trust.
+        #expect(TreadmillConsoleSeed.resolve(totalMeters: 5000, elapsedSeconds: 5 * 3600, elapsedReadAt: now,
+                                             machine: Self.machine, mark: nil, now: now) == nil)
+    }
+
+    @Test func seedNeverReachesBackPastMidnight() {
+        let midnight = Calendar.current.startOfDay(for: Date())
+        let now = midnight.addingTimeInterval(120)
+        #expect(TreadmillConsoleSeed.resolve(totalMeters: 300, elapsedSeconds: 600, elapsedReadAt: now,
+                                             machine: Self.machine, mark: nil, now: now) == nil)
+    }
+
+    /// Finish a workout, start another on the same machine without the
+    /// console starting over: only what came after the first one counts.
+    @Test func seedSubtractsWhereTheLastWorkoutEnded() throws {
+        let now = Self.noon
+        let mark = TreadmillConsoleMark(machine: Self.machine, totalMeters: 1700, elapsedSeconds: 1200,
+                                        at: now.addingTimeInterval(-300))
+        let seed = try #require(TreadmillConsoleSeed.resolve(
+            totalMeters: 2100, elapsedSeconds: 1500, elapsedReadAt: now,
+            machine: Self.machine, mark: mark, now: now))
+        #expect(seed.elapsedSeconds == 300)
+        #expect(abs(seed.miles - 400 / 1609.344) < 0.0001)
+        // Ended exactly there: nothing new to start from.
+        #expect(TreadmillConsoleSeed.resolve(totalMeters: 1700, elapsedSeconds: 1200, elapsedReadAt: now,
+                                             machine: Self.machine, mark: mark, now: now) == nil)
+    }
+
+    @Test func seedIgnoresAMarkFromAnotherMachineOrAReset() throws {
+        let now = Self.noon
+        let mark = TreadmillConsoleMark(machine: Self.machine, totalMeters: 1700, elapsedSeconds: 1200,
+                                        at: now.addingTimeInterval(-300))
+        // Another machine.
+        let other = try #require(TreadmillConsoleSeed.resolve(
+            totalMeters: 2100, elapsedSeconds: 1500, elapsedReadAt: now,
+            machine: UUID(), mark: mark, now: now))
+        #expect(other.elapsedSeconds == 1500)
+        // Same machine, console started a new workout since.
+        let reset = try #require(TreadmillConsoleSeed.resolve(
+            totalMeters: 200, elapsedSeconds: 150, elapsedReadAt: now,
+            machine: Self.machine, mark: mark, now: now))
+        #expect(reset.elapsedSeconds == 150)
+        #expect(abs(reset.miles - 200 / 1609.344) < 0.0001)
+    }
 }
