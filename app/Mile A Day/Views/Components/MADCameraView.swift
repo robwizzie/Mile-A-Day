@@ -30,6 +30,16 @@ struct MADCameraView: View {
     /// Delivered instead of `image` when a FRONT & BACK capture completes.
     /// Required for `allowsDual` to do anything.
     var onDualCapture: ((DualCapture) -> Void)? = nil
+    /// The post prompt's camera: today's photo prompt, tucked into a small
+    /// "Today's prompt" button that opens a card (never on the picture), and
+    /// the walk's route thumbnail top-right with a caption for that card.
+    /// All nil everywhere else.
+    var themeLabel: String? = nil
+    var companion: AnyView? = nil
+    var companionCaption: String? = nil
+    /// Bottom-left: the walk's own photos (latest snap as the thumbnail,
+    /// how many there are). The camera closes and the caller opens them.
+    var walkPhotos: CameraWalkPhotos? = nil
     @Environment(\.dismiss) private var dismiss
     @State private var camera = MADCameraController()
     /// Seconds left on a running self-timer; nil when idle.
@@ -50,6 +60,8 @@ struct MADCameraView: View {
     /// Display zoom captured at the start of a pinch, so the gesture scales from
     /// where the user was (not always from 1×). nil when no pinch is active.
     @State private var pinchBaseline: CGFloat?
+    /// The tucked-away prompt card is open.
+    @State private var showPromptCard = false
 
     // MARK: FRONT & BACK
 
@@ -144,25 +156,51 @@ struct MADCameraView: View {
                 topBar
                     .opacity(controlsAppeared ? 1 : 0)
                     .offset(y: controlsAppeared ? 0 : -14)
+                // Flash, timer and FRONT & BACK: one labelled rail down the
+                // right edge, so every setting says what it is and what it's
+                // set to. Gone while a second frame is pending.
+                if firstFrame == nil {
+                    HStack {
+                        Spacer(minLength: 0)
+                        sideRail
+                    }
+                    .padding(.trailing, 10)
+                    .padding(.top, 10)
+                    .opacity(controlsAppeared ? 1 : 0)
+                }
                 Spacer()
                 // While the second frame is pending, every control except
                 // cancel goes away: there is exactly one thing to do, and each
                 // of the others is a way to lose the shot already taken.
                 if firstFrame == nil {
+                    if isDualActive, dualMode {
+                        // FRONT & BACK changes what the shutter DOES, so the
+                        // mode says so right above it.
+                        Text("Front & back: one tap shoots both ways")
+                            .madFont(size: 12, weight: .bold, design: .rounded, maxScale: 1.15)
+                            .foregroundColor(.white)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(Capsule().fill(Color.black.opacity(0.5)))
+                            .padding(.bottom, 10)
+                            .transition(.opacity)
+                    }
                     if camera.zoomOptions.count > 1 {
                         zoomSelector
                             .padding(.bottom, 14)
-                            .opacity(controlsAppeared ? 1 : 0)
-                    }
-                    if isDualActive {
-                        captureModeRail
-                            .padding(.bottom, 16)
                             .opacity(controlsAppeared ? 1 : 0)
                     }
                     bottomBar
                         .opacity(controlsAppeared ? 1 : 0)
                         .offset(y: controlsAppeared ? 0 : 16)
                 }
+            }
+            .animation(.easeInOut(duration: 0.2), value: dualMode)
+
+            if showPromptCard, let themeLabel {
+                promptCard(themeLabel)
             }
 
             // Shutter acknowledgment blink.
@@ -194,32 +232,195 @@ struct MADCameraView: View {
     // MARK: - Controls
 
     private var topBar: some View {
-        HStack {
+        HStack(spacing: 8) {
             glassCircleButton(icon: "xmark", size: 40, iconSize: 16) {
                 countdownTask?.cancel()
                 secondShotTask?.cancel()
                 dismiss()
             }
+            .accessibilityLabel("Close camera")
 
-            Spacer()
+            Spacer(minLength: 0)
 
-            HStack(spacing: 10) {
-                if camera.isFlashAvailable {
-                    controlPill(
-                        icon: camera.flash.icon,
-                        label: camera.flash.label,
-                        active: camera.flash != .off
-                    ) { camera.cycleFlash() }
+            // Found, not shouted: one small button; the prompt itself is on
+            // the card it opens.
+            if themeLabel != nil, firstFrame == nil {
+                Button {
+                    MADHaptics.tap()
+                    withAnimation(.easeOut(duration: 0.2)) { showPromptCard = true }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "lightbulb.fill")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundColor(Color(red: 1, green: 0.7, blue: 0.3))
+                            .accessibilityHidden(true)
+                        Text("Today's prompt")
+                            .madFont(size: 13, weight: .heavy, design: .rounded, maxScale: 1.15)
+                            .foregroundColor(.white)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                    }
+                    .padding(.horizontal, 12)
+                    .frame(minHeight: 34)
+                    .background(.ultraThinMaterial, in: Capsule())
+                    .overlay(Capsule().strokeBorder(Color.white.opacity(0.18), lineWidth: 1))
                 }
-                controlPill(
-                    icon: "timer",
-                    label: camera.timerSeconds == 0 ? "Off" : "\(camera.timerSeconds)s",
-                    active: camera.timerSeconds > 0
-                ) { camera.cycleTimer() }
+                .buttonStyle(CameraControlButtonStyle())
+            }
+
+            Spacer(minLength: 0)
+
+            if let companion, firstFrame == nil {
+                Button {
+                    MADHaptics.tap()
+                    withAnimation(.easeOut(duration: 0.2)) { showPromptCard = true }
+                } label: {
+                    companion
+                        .frame(width: 40, height: 40)
+                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .strokeBorder(Color.white.opacity(0.85), lineWidth: 1.5)
+                        )
+                }
+                .buttonStyle(CameraControlButtonStyle())
+                .accessibilityLabel("Your route goes on the post")
+                .disabled(themeLabel == nil)
+            } else {
+                // Keeps the prompt button centred.
+                Color.clear.frame(width: 40, height: 40)
             }
         }
         .padding(.horizontal, MADTheme.Spacing.md)
         .padding(.top, MADTheme.Spacing.sm)
+    }
+
+    /// Flash, timer and FRONT & BACK, each a round button with what it is
+    /// and how it's set written under it ("Flash auto", "Timer off").
+    private var sideRail: some View {
+        VStack(spacing: 12) {
+            if camera.isFlashAvailable {
+                railButton(
+                    icon: camera.flash.icon,
+                    label: "Flash \(camera.flash.label.lowercased())",
+                    active: camera.flash != .off
+                ) { camera.cycleFlash() }
+            }
+            railButton(
+                icon: "timer",
+                label: camera.timerSeconds == 0 ? "Timer off" : "Timer \(camera.timerSeconds)s",
+                active: camera.timerSeconds > 0
+            ) { camera.cycleTimer() }
+            if isDualActive {
+                railButton(
+                    icon: "person.2.fill",
+                    label: "Front & back",
+                    active: dualMode
+                ) { dualMode.toggle() }
+                .accessibilityValue(dualMode ? "On" : "Off")
+            }
+        }
+    }
+
+    private func railButton(
+        icon: String, label: String, active: Bool, action: @escaping () -> Void
+    ) -> some View {
+        Button {
+            MADHaptics.tap()
+            action()
+        } label: {
+            VStack(spacing: 3) {
+                Image(systemName: icon)
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundColor(active ? .yellow : .white)
+                    .frame(width: 44, height: 44)
+                    .background(.ultraThinMaterial, in: Circle())
+                    .overlay(Circle().strokeBorder(
+                        active ? Color.yellow.opacity(0.7) : Color.white.opacity(0.18), lineWidth: 1))
+                    .contentTransition(.symbolEffect(.replace))
+                Text(label)
+                    .madFont(size: 11, weight: .heavy, design: .rounded, maxScale: 1.15)
+                    .foregroundColor(active ? .yellow : .white)
+                    .shadow(color: .black.opacity(0.6), radius: 3)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.8)
+                    .frame(width: 62)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(CameraControlButtonStyle())
+        .accessibilityLabel(label)
+        .animation(.easeInOut(duration: 0.15), value: active)
+    }
+
+    /// The prompt, opened: an idea (never a rule) and what rides along on
+    /// the post. Dims the preview; any tap outside, or "Got it", closes it.
+    private func promptCard(_ theme: String) -> some View {
+        ZStack(alignment: .top) {
+            Color.black.opacity(0.4)
+                .ignoresSafeArea()
+                .onTapGesture { withAnimation(.easeOut(duration: 0.2)) { showPromptCard = false } }
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Today's prompt")
+                        .madFont(size: 12, weight: .heavy, design: .rounded, maxScale: 1.3)
+                        .foregroundColor(.white.opacity(0.6))
+                    Text(theme)
+                        .madFont(size: 22, weight: .black, design: .rounded, maxScale: 1.3)
+                        .foregroundColor(.white)
+                        .madBodyLines(2)
+                    Text("Just an idea. Post anything you like.")
+                        .madFont(size: 14, weight: .semibold, design: .rounded, maxScale: 1.3)
+                        .foregroundColor(.white.opacity(0.7))
+                        .madBodyLines(2)
+                }
+                if let companion {
+                    Rectangle().fill(Color.white.opacity(0.1)).frame(height: 1)
+                    HStack(spacing: 12) {
+                        companion
+                            .frame(width: 52, height: 52)
+                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            .accessibilityHidden(true)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Your route goes on the post")
+                                .madFont(size: 15, weight: .heavy, design: .rounded, maxScale: 1.3)
+                                .foregroundColor(.white)
+                                .madBodyLines(2)
+                            if let companionCaption {
+                                Text(companionCaption)
+                                    .madFont(size: 13, weight: .semibold, design: .rounded, maxScale: 1.3)
+                                    .foregroundColor(.white.opacity(0.65))
+                                    .madBodyLines(2)
+                            }
+                        }
+                    }
+                }
+                Button {
+                    MADHaptics.tap()
+                    withAnimation(.easeOut(duration: 0.2)) { showPromptCard = false }
+                } label: {
+                    Text("Got it")
+                        .madFont(size: 15, weight: .heavy, design: .rounded, maxScale: 1.3)
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .background(Capsule().fill(Color.white.opacity(0.14)))
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(16)
+            .background(
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .fill(Color(red: 0.07, green: 0.055, blue: 0.065).opacity(0.94))
+            )
+            .padding(.horizontal, 16)
+            .padding(.top, 64)
+            .accessibilityElement(children: .contain)
+            .accessibilityAddTraits(.isModal)
+        }
+        .transition(.opacity)
     }
 
     private func glassCircleButton(
@@ -241,119 +442,112 @@ struct MADCameraView: View {
         .buttonStyle(CameraControlButtonStyle())
     }
 
-    private func controlPill(
-        icon: String, label: String, active: Bool, action: @escaping () -> Void
-    ) -> some View {
-        Button {
-            MADHaptics.tap()
-            action()
-        } label: {
-            HStack(spacing: 5) {
-                Image(systemName: icon)
-                    .font(.system(size: 13, weight: .bold))
-                Text(label)
-                    .font(.system(size: 13, weight: .bold, design: .rounded))
-            }
-            .foregroundColor(active ? .yellow : .white)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(.ultraThinMaterial, in: Capsule())
-            .overlay(Capsule().strokeBorder(Color.white.opacity(0.18), lineWidth: 1))
-            .contentTransition(.symbolEffect(.replace))
-        }
-        .buttonStyle(CameraControlButtonStyle())
-        .animation(.easeInOut(duration: 0.15), value: active)
-    }
-
+    /// Walk photos bottom-left, the shutter, a labelled Flip bottom-right.
     private var bottomBar: some View {
-        ZStack {
-            shutterButton
-            HStack {
-                Spacer()
-                glassCircleButton(
-                    icon: "arrow.triangle.2.circlepath.camera.fill",
-                    size: 48, iconSize: 18, rotation: flipRotation
-                ) {
-                    withAnimation(.spring(response: 0.45, dampingFraction: 0.75)) {
-                        flipRotation += 180
-                    }
-                    camera.flip()
+        HStack(alignment: .center) {
+            Group {
+                if let walkPhotos {
+                    walkPhotosButton(walkPhotos)
+                } else {
+                    Color.clear
                 }
             }
-            .padding(.trailing, MADTheme.Spacing.lg)
+            .frame(width: 70)
+
+            Spacer(minLength: 0)
+            shutterButton
+            Spacer(minLength: 0)
+
+            Button {
+                MADHaptics.tap()
+                withAnimation(.spring(response: 0.45, dampingFraction: 0.75)) {
+                    flipRotation += 180
+                }
+                camera.flip()
+            } label: {
+                VStack(spacing: 4) {
+                    Image(systemName: "arrow.triangle.2.circlepath.camera.fill")
+                        .font(.system(size: 18, weight: .bold))
+                        .foregroundColor(.white)
+                        .rotationEffect(.degrees(flipRotation))
+                        .frame(width: 48, height: 48)
+                        .background(.ultraThinMaterial, in: Circle())
+                        .overlay(Circle().strokeBorder(Color.white.opacity(0.18), lineWidth: 1))
+                    bottomLabel("Flip")
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(CameraControlButtonStyle())
+            .accessibilityLabel("Flip camera")
+            .frame(width: 70)
         }
-        .padding(.bottom, 36)
+        .padding(.horizontal, MADTheme.Spacing.md)
+        .padding(.bottom, 30)
     }
 
-    // MARK: - FRONT & BACK
-
-    /// PHOTO | FRONT & BACK, directly above the shutter.
-    ///
-    /// A rail rather than a toggle or a menu item, for the reason every camera
-    /// app uses one: the mode changes what the shutter DOES, so it has to be
-    /// readable without being opened, and the unselected option has to be
-    /// visible enough to be discovered by someone who was not looking for it.
-    /// Sits above the shutter (not in the top bar with flash and timer) for
-    /// the same reason — those change how a shot is taken, this changes how
-    /// many.
-    private var captureModeRail: some View {
-        HStack(spacing: 4) {
-            modeChip(title: "PHOTO", icon: "camera.fill", selected: !dualMode) {
-                dualMode = false
-            }
-            modeChip(title: "FRONT & BACK", icon: "person.2.fill", selected: dualMode) {
-                dualMode = true
-            }
-        }
-        .padding(4)
-        .background(.ultraThinMaterial, in: Capsule())
-        .overlay(Capsule().strokeBorder(Color.white.opacity(0.18), lineWidth: 1))
-        .overlay(alignment: .top) {
-            // One line of explanation, shown only in the mode that needs it.
-            // "Front and back" names the cameras, not what happens, and the
-            // whole gamble of this feature is that the second shot is not a
-            // surprise.
-            if dualMode {
-                Text("One tap shoots both ways")
-                    .font(.system(size: 11, weight: .bold, design: .rounded))
-                    .foregroundColor(.white.opacity(0.85))
-                    .shadow(color: .black.opacity(0.6), radius: 4)
-                    .fixedSize()
-                    .offset(y: -20)
-                    .transition(.opacity.combined(with: .move(edge: .bottom)))
-            }
-        }
-        .animation(.spring(response: 0.34, dampingFraction: 0.82), value: dualMode)
+    private func bottomLabel(_ text: String) -> some View {
+        Text(text)
+            .madFont(size: 11, weight: .heavy, design: .rounded, maxScale: 1.15)
+            .foregroundColor(.white)
+            .shadow(color: .black.opacity(0.6), radius: 3)
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
     }
 
-    private func modeChip(
-        title: String, icon: String, selected: Bool, action: @escaping () -> Void
-    ) -> some View {
+    /// The walk's own photos, one tap away: the latest snap stacked on a
+    /// second card with a count, or a plain photos glyph when there are none
+    /// yet (the window-filtered library still has the walk's photos).
+    private func walkPhotosButton(_ photos: CameraWalkPhotos) -> some View {
         Button {
             MADHaptics.tap()
-            action()
+            photos.open()
         } label: {
-            HStack(spacing: 5) {
-                Image(systemName: icon)
-                    .font(.system(size: 10, weight: .black))
-                    .accessibilityHidden(true)
-                Text(title)
-                    .font(.system(size: 11, weight: .black, design: .rounded))
-                    .tracking(0.5)
+            VStack(spacing: 4) {
+                ZStack(alignment: .topTrailing) {
+                    ZStack {
+                        if photos.thumbnail != nil {
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .fill(Color.white.opacity(0.35))
+                                .frame(width: 42, height: 42)
+                                .offset(x: 5, y: -5)
+                        }
+                        Group {
+                            if let thumb = photos.thumbnail {
+                                Image(uiImage: thumb).resizable().scaledToFill()
+                            } else {
+                                Image(systemName: "photo.on.rectangle.angled")
+                                    .font(.system(size: 18, weight: .bold))
+                                    .foregroundColor(.white)
+                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                    .background(.ultraThinMaterial)
+                            }
+                        }
+                        .frame(width: 46, height: 46)
+                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .strokeBorder(Color.white, lineWidth: 2)
+                        )
+                    }
+                    .frame(width: 52, height: 52)
+                    if photos.count > 0 {
+                        Text("\(photos.count)")
+                            .font(.system(size: 11, weight: .black, design: .rounded))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 6)
+                            .frame(minWidth: 20, minHeight: 20)
+                            .background(Capsule().fill(MADTheme.Colors.madRed))
+                            .offset(x: 6, y: -6)
+                    }
+                }
+                bottomLabel("Walk photos")
             }
-            .lineLimit(1)
-            .fixedSize()
-            .foregroundColor(selected ? .black : .white.opacity(0.85))
-            .padding(.horizontal, 12)
-            .padding(.vertical, 7)
-            .background(
-                Capsule().fill(selected ? Color.white : Color.clear)
-            )
-            .contentShape(Capsule())
+            .contentShape(Rectangle())
         }
         .buttonStyle(CameraControlButtonStyle())
-        .accessibilityLabel(title.lowercased())
-        .accessibilityAddTraits(selected ? [.isSelected] : [])
+        .accessibilityLabel(photos.count > 0
+            ? "Photos from this walk, \(photos.count)"
+            : "Photos from this walk")
     }
 
     /// Between the two frames: the shot already in hand, parked in the corner
@@ -1200,4 +1394,12 @@ private struct MADCameraPreview: UIViewRepresentable {
             }
         }
     }
+}
+
+
+/// What the camera's bottom-left "Walk photos" button shows and does.
+struct CameraWalkPhotos {
+    var thumbnail: UIImage?
+    var count: Int
+    var open: () -> Void
 }

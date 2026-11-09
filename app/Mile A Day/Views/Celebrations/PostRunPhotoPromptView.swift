@@ -22,10 +22,12 @@ struct PostRunPhotoPromptView: View {
             workoutId: workoutId,
             workoutType: workoutType,
             stats: stats ?? RunPostService.todayStats(workoutId: workoutId),
-            skipTitle: "Skip",
-            // Read so the note can't promise something the setting turned off.
+            // Saying no is always one plain tap. What it still does is said
+            // quietly under it, read from the setting so it can't promise a
+            // route card the user turned off.
+            skipTitle: "No thanks",
             skipNote: NotificationPreferences.load().autoPostWithoutPhoto
-                ? "Your route and stats will still post" : nil,
+                ? "Your route and stats still post" : nil,
             onEngage: { manager.photoPromptEngaged = true },
             onFinish: { outcome in
                 switch outcome {
