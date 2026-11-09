@@ -31667,6 +31667,17 @@
         }
       }
     },
+    "more" : {
+      "comment" : "Expands a long post caption at the top of the comments sheet.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "mehr"
+          }
+        }
+      }
+    },
     "Miss %lld days and you're out" : {
       "localizations" : {
         "de" : {

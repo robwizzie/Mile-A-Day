@@ -5,7 +5,35 @@ import SwiftUI
 /// input bar with a "Replying to" state, and @friend autocomplete. Long-press
 /// a comment to delete (yours, or any on your own/co-authored post) or report.
 struct CommentsSheet: View {
+    /// The post's caption, shown at the top of the thread the way Instagram
+    /// does: the author's words first, then the conversation about them.
+    struct CaptionHeader {
+        let userId: String
+        let username: String?
+        let firstName: String?
+        let lastName: String?
+        let profileImageURL: String?
+        let displayName: String
+        let text: String
+        let relativeTime: String
+
+        /// Nil when the post has no caption worth showing.
+        init?(post: PostItem) {
+            guard let caption = post.caption?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !caption.isEmpty else { return nil }
+            userId = post.user_id
+            username = post.username
+            firstName = post.first_name
+            lastName = post.last_name
+            profileImageURL = post.profile_image_url
+            displayName = post.displayName
+            text = caption
+            relativeTime = post.relativeTime
+        }
+    }
+
     let target: CommentTarget
+    let captionHeader: CaptionHeader?
     /// True when the current user authors/co-authors this feed item (may
     /// delete any comment on it).
     let canModerate: Bool
@@ -26,6 +54,8 @@ struct CommentsSheet: View {
     @State private var errorMessage: String?
     /// Profile opened from a tapped @mention inside a comment.
     @State private var profileUser: BackendUser?
+    /// A long caption starts folded, like Instagram's "… more".
+    @State private var captionExpanded = false
     @StateObject private var friendService = FriendService()
     @FocusState private var inputFocused: Bool
 
@@ -35,6 +65,7 @@ struct CommentsSheet: View {
         onCountChange: ((Int) -> Void)? = nil
     ) {
         self.target = .post(post.post_id)
+        self.captionHeader = CaptionHeader(post: post)
         self.canModerate = canModerate
         self.onCountChange = onCountChange
     }
@@ -45,6 +76,7 @@ struct CommentsSheet: View {
         onCountChange: ((Int) -> Void)? = nil
     ) {
         self.target = target
+        self.captionHeader = nil
         self.canModerate = canModerate
         self.onCountChange = onCountChange
     }
@@ -153,7 +185,44 @@ struct CommentsSheet: View {
 
     @ViewBuilder
     private var content: some View {
-        if isLoading {
+        if let captionHeader {
+            // With a caption, it leads and scrolls with the thread; the
+            // loading / empty states sit under it instead of centring.
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    captionRow(captionHeader)
+                    Divider()
+                        .overlay(Color.white.opacity(0.08))
+                        .padding(.horizontal, MADTheme.Spacing.md)
+                        .padding(.bottom, 4)
+                    if isLoading {
+                        ProgressView()
+                            .progressViewStyle(CircularProgressViewStyle(tint: MADTheme.Colors.madRed))
+                            .frame(maxWidth: .infinity)
+                            .padding(.top, 40)
+                    } else if failed {
+                        stateMessage(icon: "wifi.slash", text: "Couldn't load comments")
+                            .frame(maxWidth: .infinity)
+                            .padding(.top, 40)
+                    } else if comments.isEmpty {
+                        stateMessage(icon: "bubble.left.and.bubble.right", text: "No comments yet",
+                                     detail: "Be the first to cheer them on")
+                            .frame(maxWidth: .infinity)
+                            .padding(.top, 40)
+                    } else {
+                        LazyVStack(alignment: .leading, spacing: 0) {
+                            ForEach(topLevel) { comment in
+                                thread(comment)
+                            }
+                        }
+                        .padding(.bottom, 12)
+                    }
+                }
+                .padding(.top, 12)
+            }
+            .scrollIndicators(.hidden)
+            .scrollDismissesKeyboard(.interactively)
+        } else if isLoading {
             Spacer()
             ProgressView()
                 .progressViewStyle(CircularProgressViewStyle(tint: MADTheme.Colors.madRed))
@@ -254,6 +323,84 @@ struct CommentsSheet: View {
                 profileUser = match
             }
         }
+    }
+
+    /// The caption, laid out like a comment (avatar, name, time, text) so it
+    /// reads as the first word in the thread, without Reply or a menu.
+    private func captionRow(_ caption: CaptionHeader) -> some View {
+        HStack(alignment: .top, spacing: 11) {
+            Button { openAuthor(caption) } label: {
+                AvatarView(name: caption.displayName, imageURL: caption.profileImageURL, size: 34)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("\(caption.displayName)'s profile")
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Button { openAuthor(caption) } label: {
+                        Text(caption.displayName)
+                            .font(.system(size: 13, weight: .bold, design: .rounded))
+                            .foregroundColor(.white)
+                            .lineLimit(1)
+                    }
+                    .buttonStyle(.plain)
+                    Text(caption.relativeTime)
+                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .foregroundColor(.white.opacity(0.4))
+                        .lineLimit(1)
+                }
+                Text(MentionText.attributed(caption.text))
+                    .font(.system(size: 14, weight: .medium, design: .rounded))
+                    .foregroundColor(.white.opacity(0.9))
+                    .lineLimit(captionExpanded ? nil : Self.captionFoldLines)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .environment(\.openURL, OpenURLAction { url in
+                        if let username = MentionText.username(from: url) {
+                            openMentionProfile(username)
+                            return .handled
+                        }
+                        return .systemAction
+                    })
+                if !captionExpanded, Self.captionMightFold(caption.text) {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) { captionExpanded = true }
+                    } label: {
+                        Text("more")
+                            .font(.system(size: 12, weight: .bold, design: .rounded))
+                            .foregroundColor(.white.opacity(0.45))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, MADTheme.Spacing.md)
+        .padding(.bottom, 12)
+        .accessibilityElement(children: .contain)
+    }
+
+    private static let captionFoldLines = 6
+
+    /// Cheap stand-in for "is it taller than the fold": many line breaks or
+    /// enough characters to wrap past it on a phone.
+    private static func captionMightFold(_ text: String) -> Bool {
+        text.count > 240 || text.filter { $0 == "\n" }.count >= captionFoldLines
+    }
+
+    /// The post's author, built from the post itself (no lookup needed).
+    private func openAuthor(_ caption: CaptionHeader) {
+        guard caption.userId != UserDefaults.standard.string(forKey: "backendUserId") else { return }
+        profileUser = BackendUser(
+            user_id: caption.userId,
+            username: caption.username,
+            email: nil,
+            first_name: caption.firstName,
+            last_name: caption.lastName,
+            bio: nil,
+            profile_image_url: caption.profileImageURL,
+            apple_id: nil,
+            auth_provider: nil,
+            role: nil
+        )
     }
 
     private func row(_ comment: PostComment, isReply: Bool) -> some View {
