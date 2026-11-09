@@ -462,7 +462,9 @@ private struct Starfield: View {
 struct AddFinishStorySheet: View {
     let stats: RunStatsInput
     let onAdded: () -> Void
-    let onPostPhoto: () -> Void
+    /// Nil hides "Post a photo instead" (the home card passes nil once the
+    /// walk's photo window has closed).
+    let onPostPhoto: (() -> Void)?
 
     @Environment(\.dismiss) private var dismiss
     @State private var isPosting = false
@@ -565,18 +567,20 @@ struct AddFinishStorySheet: View {
                 .buttonStyle(.plain)
                 .disabled(isPosting)
 
-                Button {
-                    dismiss()
-                    onPostPhoto()
-                } label: {
-                    Text("Post a photo instead")
-                        .madFont(size: 15, weight: .bold, design: .rounded, maxScale: 1.3)
-                        .foregroundColor(.white.opacity(0.85))
-                        .frame(maxWidth: .infinity, minHeight: 46)
-                        .background(Capsule().fill(Color.white.opacity(0.08)))
+                if let onPostPhoto {
+                    Button {
+                        dismiss()
+                        onPostPhoto()
+                    } label: {
+                        Text("Post a photo instead")
+                            .madFont(size: 15, weight: .bold, design: .rounded, maxScale: 1.3)
+                            .foregroundColor(.white.opacity(0.85))
+                            .frame(maxWidth: .infinity, minHeight: 46)
+                            .background(Capsule().fill(Color.white.opacity(0.08)))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isPosting)
                 }
-                .buttonStyle(.plain)
-                .disabled(isPosting)
             }
             .padding(.horizontal, 20)
             .padding(.bottom, 12)

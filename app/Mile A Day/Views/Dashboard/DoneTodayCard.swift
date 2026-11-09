@@ -13,11 +13,17 @@ import HealthKit
 ///   photo prompt every door uses, `PhotoPromptView` via the celebration
 ///   queue), **Add to story** (the opt-in finish frame) and the **Flamey
 ///   card** (the share studio). "Not today" folds it away until tomorrow.
+///   The theme and **Post a photo** show only while the walk's ten-minute
+///   photo window is open (`FreshPostWindowManager.isCameraOpen`); once it
+///   closes, the card keeps just Add to story and the Flamey card.
 /// - **Posted, folded, or nothing to share** (a steps-only day): nothing.
 ///   It used to stay as a whole card saying "Shared. Nice one."
 struct DoneTodayCard: View {
     @ObservedObject var healthManager: HealthKitManager
     @ObservedObject var userManager: UserManager
+    /// Observed so the photo button leaves the moment the window closes (the
+    /// manager publishes at expiry), not on the next unrelated redraw.
+    @ObservedObject private var postWindow = FreshPostWindowManager.shared
 
     @AppStorage("doneCardFoldedDayV1") private var foldedDay = ""
     @State private var showStorySheet = false
@@ -45,7 +51,10 @@ struct DoneTodayCard: View {
     private var folded: Bool { foldedDay == Self.todayStamp() }
 
     /// A photo needs a walk or run to belong to; a steps-only day has none.
-    private var canShare: Bool { workoutId != nil && FreshPostWindowManager.shared.canPostToday }
+    private var canShare: Bool { workoutId != nil && postWindow.canPostToday }
+
+    /// The walk's photo window: the photo prompt is offered only while it's open.
+    private var photoWindowOpen: Bool { postWindow.isCameraOpen }
 
     private var workoutType: String {
         guard let id = workoutId,
@@ -93,9 +102,9 @@ struct DoneTodayCard: View {
                 AddFinishStorySheet(
                     stats: RunPostService.todayStats(workoutId: id),
                     onAdded: {},
-                    onPostPhoto: {
+                    onPostPhoto: photoWindowOpen ? {
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { postPhoto() }
-                    }
+                    } : nil
                 )
                 .presentationDragIndicator(.visible)
             }
@@ -118,41 +127,9 @@ struct DoneTodayCard: View {
     private var shareSection: some View {
         let theme = DailyPhotoTheme.today
         return VStack(alignment: .leading, spacing: 12) {
-            // The reason to take the photo: one light prompt a day.
-            HStack(spacing: 8) {
-                Text(theme.emoji)
-                    .madFont(size: 20)
-                    .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("Today's photo prompt")
-                        .madFont(size: 11, weight: .semibold, design: .rounded)
-                        .foregroundColor(.white.opacity(0.5))
-                    Text(theme.title)
-                        .madFont(size: 15, weight: .bold, design: .rounded)
-                        .foregroundColor(.white)
-                        .lineLimit(2)
-                }
+            if photoWindowOpen {
+                photoPrompt(theme)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color.white.opacity(0.05)))
-            .accessibilityElement(children: .combine)
-
-            Button {
-                postPhoto()
-            } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: "camera.fill")
-                        .accessibilityHidden(true)
-                    Text("Post a photo")
-                }
-                .madFont(size: 16, weight: .heavy, design: .rounded, maxScale: 1.3)
-                .foregroundColor(.white)
-                .frame(maxWidth: .infinity, minHeight: 50)
-                .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(MADTheme.Colors.madRed))
-            }
-            .buttonStyle(.plain)
 
             HStack(spacing: 10) {
                 secondaryButton("Add to story", icon: "plus.circle") {
@@ -163,6 +140,45 @@ struct DoneTodayCard: View {
                 }
             }
         }
+    }
+
+    @ViewBuilder
+    private func photoPrompt(_ theme: DailyPhotoTheme) -> some View {
+        // The reason to take the photo: one light prompt a day.
+        HStack(spacing: 8) {
+            Text(theme.emoji)
+                .madFont(size: 20)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Today's photo prompt")
+                    .madFont(size: 11, weight: .semibold, design: .rounded)
+                    .foregroundColor(.white.opacity(0.5))
+                Text(theme.title)
+                    .madFont(size: 15, weight: .bold, design: .rounded)
+                    .foregroundColor(.white)
+                    .lineLimit(2)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color.white.opacity(0.05)))
+        .accessibilityElement(children: .combine)
+
+        Button {
+            postPhoto()
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "camera.fill")
+                    .accessibilityHidden(true)
+                Text("Post a photo")
+            }
+            .madFont(size: 16, weight: .heavy, design: .rounded, maxScale: 1.3)
+            .foregroundColor(.white)
+            .frame(maxWidth: .infinity, minHeight: 50)
+            .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(MADTheme.Colors.madRed))
+        }
+        .buttonStyle(.plain)
     }
 
     private func secondaryButton(_ title: String, icon: String, action: @escaping () -> Void) -> some View {
