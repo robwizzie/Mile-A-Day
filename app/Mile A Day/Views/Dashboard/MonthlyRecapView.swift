@@ -23,6 +23,9 @@ struct MonthlyRecapStats {
     var dayMiles: [Double]? = nil
     /// The goal those days were judged against (`activeDays`' threshold).
     var goalMiles: Double? = nil
+    /// Days (index 0 = the 1st) done by 10,000 steps. A day counts by a mile
+    /// OR steps, so these are in `activeDays` too.
+    var stepDays: Set<Int>? = nil
 
     var isPerfect: Bool { activeDays >= daysInMonth }
 
@@ -46,10 +49,18 @@ struct MonthlyRecapStats {
             byDay[cal.startOfDay(for: entry.localDate), default: 0] += entry.distance
             workoutCount += 1
         }
-        guard !byDay.isEmpty else { return nil }
-
         let effectiveGoal = goal > 0 ? goal : 1.0
         let daysInMonth = cal.range(of: .day, in: .month, for: startOfPrev)?.count ?? 30
+        let stepKeys = StepGoalDayStore.goalDayKeys
+        let stepDays = Set((0..<daysInMonth).filter { offset in
+            guard let day = cal.date(byAdding: .day, value: offset, to: startOfPrev) else { return false }
+            return stepKeys.contains(StepGoalDayStore.dayKey(for: day))
+        })
+        guard !byDay.isEmpty || !stepDays.isEmpty else { return nil }
+        let mileDays = Set((0..<daysInMonth).filter { offset in
+            guard let day = cal.date(byAdding: .day, value: offset, to: startOfPrev) else { return false }
+            return ProgressCalculator.isGoalCompleted(current: byDay[cal.startOfDay(for: day)] ?? 0, goal: effectiveGoal)
+        })
         let monthFormatter = DateFormatter()
         monthFormatter.dateFormat = "MMMM"
         let keyFormatter = DateFormatter()
@@ -59,9 +70,7 @@ struct MonthlyRecapStats {
             monthName: monthFormatter.string(from: startOfPrev),
             monthKey: keyFormatter.string(from: startOfPrev),
             totalMiles: byDay.values.reduce(0, +),
-            activeDays: byDay.values.filter {
-                ProgressCalculator.isGoalCompleted(current: $0, goal: effectiveGoal)
-            }.count,
+            activeDays: mileDays.union(stepDays).count,
             daysInMonth: daysInMonth,
             bestDayMiles: byDay.values.max() ?? 0,
             workoutCount: workoutCount,
@@ -71,7 +80,8 @@ struct MonthlyRecapStats {
                 guard let day = cal.date(byAdding: .day, value: offset, to: startOfPrev) else { return 0 }
                 return byDay[cal.startOfDay(for: day)] ?? 0
             },
-            goalMiles: effectiveGoal
+            goalMiles: effectiveGoal,
+            stepDays: stepDays
         )
     }
 }

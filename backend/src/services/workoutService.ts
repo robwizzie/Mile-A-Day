@@ -16,6 +16,7 @@ import {
   type StreakEra,
   readStoredStreak,
   STREAK_QUALIFYING_STEPS,
+  stepGoalMetSql,
 } from "./streakFeatureCore.js";
 import { USER_OFFSET_MINUTES_P1_SQL } from "./dailyResetTime.js";
 
@@ -1560,7 +1561,7 @@ export async function getTodayMiles(userId: string) {
  */
 export async function getLast7DayMiles(
   userId: string,
-): Promise<{ date: string; miles: number }[]> {
+): Promise<{ date: string; miles: number; step_goal_met: boolean }[]> {
   const query = `
 	WITH user_tz AS (
 		SELECT ${USER_OFFSET_MINUTES_P1_SQL} AS tz_offset
@@ -1570,7 +1571,10 @@ export async function getLast7DayMiles(
 		FROM user_tz, generate_series(0, 6) AS offs(n)
 	)
 	SELECT to_char(d.day, 'YYYY-MM-DD') AS date,
-		COALESCE(SUM(w.distance), 0) AS miles
+		COALESCE(SUM(w.distance), 0) AS miles,
+		-- Additive: the day was done by 10k steps (a boolean only, never the
+		-- count, so a friend's profile learns no more than "done").
+		${stepGoalMetSql("$1", "d.day")} AS step_goal_met
 	FROM days d
 	LEFT JOIN workouts w
 		ON w.user_id = $1
@@ -1581,13 +1585,14 @@ export async function getLast7DayMiles(
 	ORDER BY d.day
 	`;
 
-  const rows = await db.query<{ date: string; miles: string | number | null }>(
+  const rows = await db.query<{ date: string; miles: string | number | null; step_goal_met: boolean }>(
     query,
     [userId],
   );
   return rows.map((r) => ({
     date: r.date,
     miles: r.miles == null ? 0 : Number(r.miles),
+    step_goal_met: r.step_goal_met === true,
   }));
 }
 

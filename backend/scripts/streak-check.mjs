@@ -13,7 +13,7 @@ import assert from "node:assert/strict";
 
 const { PostgresService } = await import("../dist/services/DbService.js");
 const core = await import("../dist/services/streakFeatureCore.js");
-const { getActiveStreak, getStreakErasForUser } =
+const { getActiveStreak, getStreakErasForUser, getLast7DayMiles } =
   await import("../dist/services/workoutService.js");
 const { refreshCurrentStreak, reconcileStaleStreaks } =
   await import("../dist/services/leaderboardService.js");
@@ -824,6 +824,16 @@ async function seedSteps(userId, date, steps) {
     await refreshCurrentStreak("sc-steps-both"),
     5,
   );
+
+  // (3b) The profile week series says which days steps carried, as a flag
+  // only (never the count), so the chart can show a steps day as done.
+  {
+    const week = await getLast7DayMiles("sc-steps-only");
+    ok("the week series flags step days", week.every((d) => d.step_goal_met === true), true);
+    const edge = await getLast7DayMiles("sc-steps-both");
+    ok("…and mile days with steps too", edge[6]?.step_goal_met, true);
+    ok("…without leaking the step count", Object.keys(edge[0]).sort(), ["date", "miles", "step_goal_met"]);
+  }
 
   // (4) The upsert refreshes the stored streak the moment 10k is crossed —
   // no workout, no explicit refresh call.

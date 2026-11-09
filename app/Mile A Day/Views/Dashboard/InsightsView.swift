@@ -249,13 +249,16 @@ private struct RoadToMilestoneCard: View {
         let records = healthManager.workoutIndex?.workouts(for: date) ?? []
         let workouts = localDays.workouts(on: date)
         let measuredDistance = localDays.countedMiles(on: date, healthManager: healthManager)
-        let distance = measuredDistance > 0 ? measuredDistance : (dayNumber < streak ? goalMiles : 0)
-        let activity = activityType(for: dayNumber, records: records, workouts: workouts, distance: distance)
+        // A day done by 10k steps keeps its real (often zero) miles instead of
+        // being drawn as a goal-length walk it never was.
+        let stepDay = StepGoalDayStore.goalDayKeys.contains(StepGoalDayStore.dayKey(for: date))
+        let distance = measuredDistance > 0 ? measuredDistance : (dayNumber < streak && !stepDay ? goalMiles : 0)
+        let activity = activityType(for: dayNumber, records: records, workouts: workouts, distance: distance, stepDay: stepDay)
 
         return RoadDayData(distance: distance, activity: activity, workouts: workouts)
     }
 
-    private func activityType(for day: Int, records: [WorkoutRecord], workouts: [HKWorkout], distance: Double) -> RoadActivity {
+    private func activityType(for day: Int, records: [WorkoutRecord], workouts: [HKWorkout], distance: Double, stepDay: Bool = false) -> RoadActivity {
         var hasRun = records.contains { $0.workoutType.lowercased() == "running" }
         var hasWalk = records.contains { $0.workoutType.lowercased() == "walking" }
 
@@ -270,6 +273,7 @@ private struct RoadToMilestoneCard: View {
         if hasRun && hasWalk { return .both }
         if hasRun { return .run }
         if hasWalk { return .walk }
+        if stepDay { return .steps }
         if day == streak { return distance >= max(goalMiles * 0.95, 0.95) ? .walk : .today }
         return day <= streak ? .walk : .future
     }
@@ -342,7 +346,7 @@ private struct RoadMilestoneGoal {
 }
 
 private enum RoadActivity {
-    case run, walk, both, today, future
+    case run, walk, both, steps, today, future
 }
 
 private struct RoadDayNode: Identifiable {
@@ -364,6 +368,7 @@ private struct RoadDayNode: Identifiable {
         case .run: return "Run"
         case .walk: return "Walk"
         case .both: return "Run + walk"
+        case .steps: return "10k steps"
         case .today: return "In progress"
         case .future: return "Locked"
         }
@@ -629,6 +634,7 @@ private struct CompactRoadDot: View {
         case .run: return MADTheme.Colors.madRed
         case .walk: return MADTheme.Colors.walkBlue
         case .both: return .orange
+        case .steps: return MADTheme.Colors.success
         case .today: return .orange
         case .future: return .white.opacity(0.16)
         }
@@ -639,6 +645,7 @@ private struct CompactRoadDot: View {
         case .run: return MADTheme.Colors.madRed.opacity(0.32)
         case .walk: return MADTheme.Colors.walkBlue.opacity(0.32)
         case .both: return Color.orange.opacity(0.32)
+        case .steps: return MADTheme.Colors.success.opacity(0.32)
         case .today: return MADTheme.Colors.madRed.opacity(0.26)
         case .future: return .clear
         }
@@ -1112,6 +1119,8 @@ private struct RoadDayDot: View {
             return AnyShapeStyle(LinearGradient(colors: [Color.orange, MADTheme.Colors.madRed], startPoint: .topLeading, endPoint: .bottomTrailing))
         case .both:
             return AnyShapeStyle(Color.orange)
+        case .steps:
+            return AnyShapeStyle(LinearGradient(colors: [Color(red: 0.55, green: 0.95, blue: 0.6), MADTheme.Colors.success], startPoint: .topLeading, endPoint: .bottomTrailing))
         case .future:
             return AnyShapeStyle(Color.white.opacity(0.08))
         }
@@ -1160,6 +1169,7 @@ private struct RoadDayDot: View {
         case .run: return MADTheme.Colors.madRed.opacity(0.45)
         case .walk: return MADTheme.Colors.walkBlue.opacity(0.45)
         case .both: return Color.orange.opacity(0.48)
+        case .steps: return MADTheme.Colors.success.opacity(0.45)
         case .today: return MADTheme.Colors.madRed.opacity(0.45)
         case .future: return .clear
         }

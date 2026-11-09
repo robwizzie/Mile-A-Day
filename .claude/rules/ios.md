@@ -77,6 +77,7 @@ Details: docs/conventions/ios.md § Key Patterns
 - Never print an implausible pace or time: `PostStats` DECODES through `DisplayPace` bounds (pace outside 2:00–60:00 /mi → nil; duration ÷ distance past 60:00 /mi → nil); raw cards use `ActivityCardView.shownDuration`.
 - Goal scoring uses `isGoalCompleted(current:goal:)` (clamp goal > 0), never `>= goal` (in-workout alert and competitions excepted); day miles via `countedMiles(onLocalDay:)`.
 - The DAY is done at a mile OR 10k steps (`isDayComplete`, `dailyStepGoal`); steps-done reads `StepGoalDayStore.isTodayMet()`, never `todaysSteps`; walks union `StepGoalDayStore`, behind `#if !os(watchOS)` in Watch-member files; celebration/posting stay miles.
+- Any per-day "done" display (week charts, Insights road, monthly recap) shows HOW via `DayDoneKind` + `DayDoneMark` (runner = mile, footprints = 10k steps, both); a friend's step days come only as `FriendDayMiles.stepGoalMet` (server `step_goal_met`, a flag, never a count).
 - Never use `HKWorkout.totalDistance` for display/sums: use `madDistanceMiles` (tracked floor, `userOverride` wins); sync uploads it too.
 - Never read `HKWorkout.duration` for display/pace/sums: use `madDuration` (`userOverrideDuration` wins; raw only for dedup) and `madMovingSeconds`; sync uploads it too.
 - Edit flags come only from `WorkoutEditPolicy` (lenient, judged vs RECORDED figures): plausible ⇒ `.healthkit`, totally off ⇒ `.manual`; edit screens never emit `.edited`.
