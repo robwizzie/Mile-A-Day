@@ -1033,7 +1033,8 @@ struct DashboardView: View {
                     .transition(.opacity)
                     .zIndex(52)
                 } else if let story = tokensState.storyEvent,
-                          !celebrationManager.isShowingCelebration {
+                          !celebrationManager.isShowingCelebration,
+                          !celebrationManager.isScreenCovered {
                     TokenStoryOverlay(
                         event: story,
                         streak: userManager.currentUser.streak,
@@ -1042,7 +1043,8 @@ struct DashboardView: View {
                     .transition(.opacity)
                     .zIndex(51)
                 } else if !tokensState.newlyEarned.isEmpty,
-                          !celebrationManager.isShowingCelebration {
+                          !celebrationManager.isShowingCelebration,
+                          !celebrationManager.isScreenCovered {
                     TokenUnlockOverlay(
                         kinds: tokensState.newlyEarned.compactMap { StreakTokenKind.from(raw: $0) },
                         onDismiss: { tokensState.newlyEarned = [] }
@@ -1166,7 +1168,8 @@ struct DashboardView: View {
             }
             .onChange(of: currentState.isCompleted) { oldValue, newValue in
                 if newValue && !oldValue {
-                    triggerConfetti()
+                    // Confetti under the tracker's cover plays to nobody.
+                    if !celebrationManager.isScreenCovered { triggerConfetti() }
                     // Also check for goal celebration when completion status changes
                     checkAndShowGoalCelebration()
                 }
