@@ -207,16 +207,44 @@ struct TreadmillDataTests {
     // MARK: Machine status (ended on the console)
 
     @Test func statusStopResetAndSafetyKeyEndTheWorkout() {
-        #expect(FTMSMachineStatus.endsWorkout(Self.bytes("0201")))  // stopped by the user
-        #expect(FTMSMachineStatus.endsWorkout(Self.bytes("01")))    // reset
-        #expect(FTMSMachineStatus.endsWorkout(Self.bytes("03")))    // safety key
+        #expect(FTMSMachineStatus.parse(Self.bytes("0201")) == .ended)  // stopped by the user
+        #expect(FTMSMachineStatus.parse(Self.bytes("01")) == .ended)    // reset
+        #expect(FTMSMachineStatus.parse(Self.bytes("03")) == .ended)    // safety key
     }
 
-    @Test func statusPauseAndOthersDoNot() {
-        #expect(!FTMSMachineStatus.endsWorkout(Self.bytes("0202"))) // paused, not stopped
-        #expect(!FTMSMachineStatus.endsWorkout(Self.bytes("02")))   // no parameter
-        #expect(!FTMSMachineStatus.endsWorkout(Self.bytes("04")))   // started / resumed
-        #expect(!FTMSMachineStatus.endsWorkout(Self.bytes("05E803"))) // target speed changed
-        #expect(!FTMSMachineStatus.endsWorkout(Data()))
+    @Test func statusPauseAndResume() {
+        #expect(FTMSMachineStatus.parse(Self.bytes("0202")) == .paused)
+        #expect(FTMSMachineStatus.parse(Self.bytes("04")) == .resumed)
+    }
+
+    @Test func statusOthersSayNothing() {
+        #expect(FTMSMachineStatus.parse(Self.bytes("02")) == nil)       // no parameter
+        #expect(FTMSMachineStatus.parse(Self.bytes("05E803")) == nil)   // target speed changed
+        #expect(FTMSMachineStatus.parse(Data()) == nil)
+    }
+
+    // MARK: Belt watch (pause with the belt)
+
+    @Test func beltStandingStillPausesAndMovingResumes() {
+        let t0 = Date()
+        var watch = TreadmillBeltWatch()
+        #expect(watch.observe(speedKmh: 4.8, at: t0) == nil)
+        #expect(watch.observe(speedKmh: 0, at: t0.addingTimeInterval(1)) == nil)
+        #expect(watch.observe(speedKmh: 0, at: t0.addingTimeInterval(3)) == nil)      // 2 s still
+        #expect(watch.observe(speedKmh: 0, at: t0.addingTimeInterval(4)) == .stopped) // 3 s still
+        #expect(watch.observe(speedKmh: 0, at: t0.addingTimeInterval(10)) == nil)     // once
+        #expect(watch.observe(speedKmh: nil, at: t0.addingTimeInterval(11)) == nil)   // no speed
+        #expect(watch.observe(speedKmh: 1.2, at: t0.addingTimeInterval(12)) == .moving)
+        #expect(watch.observe(speedKmh: 4.8, at: t0.addingTimeInterval(13)) == nil)
+    }
+
+    /// Slowing through zero for a moment is not a pause.
+    @Test func aBriefZeroIsNotAPause() {
+        let t0 = Date()
+        var watch = TreadmillBeltWatch()
+        #expect(watch.observe(speedKmh: 0, at: t0) == nil)
+        #expect(watch.observe(speedKmh: 0, at: t0.addingTimeInterval(2)) == nil)
+        #expect(watch.observe(speedKmh: 3, at: t0.addingTimeInterval(3)) == nil)
+        #expect(watch.observe(speedKmh: 0, at: t0.addingTimeInterval(4)) == nil)
     }
 }

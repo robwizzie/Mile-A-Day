@@ -524,6 +524,7 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
         trackingStartedAt = Date()
         clockStartedAt = treadmillSeed?.startDate
         treadmillEndedWorkout = false
+        pausedByTreadmill = false
         movingSeconds = 0
         movingCreditedThrough = nil
         effortCurve = [(0, initialDistance)]
@@ -655,6 +656,7 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
     func resume() {
         guard isTracking, isPaused else { return }
         isPaused = false
+        pausedByTreadmill = false
         if !pauseIntervals.isEmpty, pauseIntervals[pauseIntervals.count - 1].end == nil {
             pauseIntervals[pauseIntervals.count - 1].end = Date()
         }
@@ -916,6 +918,23 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
         if UIApplication.shared.applicationState == .active {
             Task { @MainActor in DeepLinkRouter.shared.requestOpenTracker() }
         }
+    }
+
+    /// True while the current pause is one the treadmill made, so only that
+    /// pause is lifted when the belt moves again — never one the user made.
+    private var pausedByTreadmill = false
+
+    /// The console paused, or the belt stood still (`TreadmillBeltWatch`).
+    func treadmillDidPause() {
+        guard acceptsTreadmill, !treadmillEndedWorkout, !isPaused else { return }
+        pause()
+        pausedByTreadmill = true
+    }
+
+    /// The console resumed, or the belt moved again after a treadmill pause.
+    func treadmillDidResume() {
+        guard acceptsTreadmill, !treadmillEndedWorkout, isPaused, pausedByTreadmill else { return }
+        resume()
     }
 
     /// The treadmill stopped counting mid-workout: hand the distance to the

@@ -130,19 +130,66 @@ struct FTMSTreadmillSample: Equatable {
 /// Fitness Machine Status (0x2ADA) notifications: the machine announcing
 /// what happened to ITS workout. Read-only, like everything here (this is a
 /// notify characteristic, not the Control Point). Pure, so testable.
-enum FTMSMachineStatus {
-    /// Whether this status means the person on the belt ended their workout
-    /// on the console (FTMS v1.0 §4.17): 0x01 Reset, 0x02 Stopped or Paused
-    /// by the User with parameter 0x01 = Stop (0x02 = Pause, which is not an
-    /// end), 0x03 Stopped by Safety Key.
-    static func endsWorkout(_ data: Data) -> Bool {
+enum FTMSMachineStatus: Equatable {
+    case ended
+    case paused
+    case resumed
+
+    /// What a status says about the person's workout on the console (FTMS
+    /// v1.0 §4.17): 0x01 Reset and 0x03 Stopped by Safety Key end it; 0x02
+    /// Stopped or Paused by the User ends it with parameter 0x01 (Stop) and
+    /// pauses it with 0x02 (Pause); 0x04 Started or Resumed by the User.
+    /// Nil for everything else (target changes, etc.).
+    static func parse(_ data: Data) -> FTMSMachineStatus? {
         let bytes = [UInt8](data)
-        guard let op = bytes.first else { return false }
+        guard let op = bytes.first else { return nil }
         switch op {
-        case 0x01, 0x03: return true
-        case 0x02: return bytes.count >= 2 && bytes[1] == 0x01
-        default: return false
+        case 0x01, 0x03: return .ended
+        case 0x02:
+            guard bytes.count >= 2 else { return nil }
+            switch bytes[1] {
+            case 0x01: return .ended
+            case 0x02: return .paused
+            default: return nil
+            }
+        case 0x04: return .resumed
+        default: return nil
         }
+    }
+}
+
+/// Pause/resume from the belt itself, for machines that don't send Status
+/// (or as a second witness): the belt standing still for `stoppedFor` is a
+/// pause, moving again after that is a resume. Edges only, so it never
+/// fights the user: resume the app by hand while the belt is stopped and it
+/// stays resumed until the belt moves and stops again. Pure, so testable.
+struct TreadmillBeltWatch: Equatable {
+    enum Edge: Equatable { case stopped, moving }
+
+    /// Belt speed under this is a stopped belt.
+    static let stoppedKmh = 0.1
+    /// How long the belt must stand still: a speed change through zero, or
+    /// one odd packet, is not a pause.
+    static let stoppedFor: TimeInterval = 3
+
+    private var stoppedSince: Date?
+    private var reportedStopped = false
+
+    /// Feed each reading's speed (nil — a split "More Data" half — says
+    /// nothing); returns an edge when one happens.
+    mutating func observe(speedKmh: Double?, at now: Date) -> Edge? {
+        guard let speed = speedKmh else { return nil }
+        if speed < Self.stoppedKmh {
+            let since = stoppedSince ?? now
+            stoppedSince = since
+            guard !reportedStopped, now.timeIntervalSince(since) >= Self.stoppedFor else { return nil }
+            reportedStopped = true
+            return .stopped
+        }
+        stoppedSince = nil
+        guard reportedStopped else { return nil }
+        reportedStopped = false
+        return .moving
     }
 }
 
@@ -330,8 +377,6 @@ final class TreadmillLink: NSObject {
     static let treadmillDataCharacteristic = CBUUID(string: "2ACD")
     /// Optional in FTMS: machines that have it say when their workout ends.
     static let machineStatusCharacteristic = CBUUID(string: "2ADA")
-    /// Belt speed under this is a stopped belt.
-    static let stoppedBeltKmh = 0.1
 
     enum Phase: Equatable {
         case idle
@@ -430,6 +475,7 @@ final class TreadmillLink: NSObject {
     /// when it arrived: a split "More Data" pair can carry them separately.
     @ObservationIgnored private var consoleTotal: (meters: Int, at: Date)?
     @ObservationIgnored private var consoleElapsed: (seconds: Int, at: Date)?
+    @ObservationIgnored private var beltWatch = TreadmillBeltWatch()
 
     private static let consoleMarkKey = "MAD_TreadmillConsoleMarkV1"
 
@@ -742,6 +788,7 @@ final class TreadmillLink: NSObject {
         lastSampleAt = nil
         consoleTotal = nil
         consoleElapsed = nil
+        beltWatch = TreadmillBeltWatch()
     }
 
     private func noteAdvertisement(_ peripheral: CBPeripheral, advertisement: [String: Any], rssi: Int) {
@@ -796,6 +843,11 @@ final class TreadmillLink: NSObject {
             // Fall through so this reading becomes the odometer's baseline.
         case .connected:
             if isStale { resumeFromStale() }
+            switch beltWatch.observe(speedKmh: sample.speedKmh, at: Date()) {
+            case .stopped: consolePaused()
+            case .moving: consoleResumed()
+            case nil: break
+            }
         default:
             return
         }
@@ -818,6 +870,18 @@ final class TreadmillLink: NSObject {
     private func consoleEndedWorkout() {
         guard isConnected, WorkoutLocationManager.shared.acceptsTreadmill else { return }
         WorkoutLocationManager.shared.treadmillDidEndWorkout()
+    }
+
+    /// The belt stopped / the console paused: pause the app's workout with
+    /// it. Resumes only a pause the treadmill made (`treadmillDidResume`).
+    private func consolePaused() {
+        guard isConnected, WorkoutLocationManager.shared.acceptsTreadmill else { return }
+        WorkoutLocationManager.shared.treadmillDidPause()
+    }
+
+    private func consoleResumed() {
+        guard isConnected, WorkoutLocationManager.shared.acceptsTreadmill else { return }
+        WorkoutLocationManager.shared.treadmillDidResume()
     }
 
     private func connectionLost(_ message: String?) {
@@ -885,7 +949,7 @@ extension TreadmillLink: CBCentralManagerDelegate, CBPeripheralDelegate {
         // One that drops with its belt STOPPED was switched off or ended its
         // session; one that drops mid-stride is a flaky link, and the
         // pedometer carries on.
-        if let speed = speedKmh, speed < Self.stoppedBeltKmh { consoleEndedWorkout() }
+        if let speed = speedKmh, speed < TreadmillBeltWatch.stoppedKmh { consoleEndedWorkout() }
         connectionLost("Lost the treadmill. Your distance so far is kept.")
     }
 
@@ -927,8 +991,12 @@ extension TreadmillLink: CBCentralManagerDelegate, CBPeripheralDelegate {
 
     func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
         if characteristic.uuid == Self.machineStatusCharacteristic {
-            if error == nil, let data = characteristic.value, FTMSMachineStatus.endsWorkout(data) {
-                consoleEndedWorkout()
+            guard error == nil, let data = characteristic.value else { return }
+            switch FTMSMachineStatus.parse(data) {
+            case .ended: consoleEndedWorkout()
+            case .paused: consolePaused()
+            case .resumed: consoleResumed()
+            case nil: break
             }
             return
         }
