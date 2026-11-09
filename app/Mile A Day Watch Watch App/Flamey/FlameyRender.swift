@@ -34,6 +34,10 @@ struct FlameyOutfitLayer: View {
     var reach: CGFloat = 0.9
     /// Flamey's arm pose right now — Flamey Jr. copies it (arms and face).
     var companionPose: FlameArmPose = .rest
+    /// His arms are drawn over this layer, so an item worn ON his hands
+    /// (`FlameyArt.wornOnHands`) rides them instead of being drawn here.
+    /// False where no arms are drawn (the Closet's item tile).
+    var armsCarryMitts: Bool = true
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var phase = false
@@ -315,7 +319,7 @@ struct FlameyOutfitLayer: View {
             }
             .frame(width: size * 3, height: size * 3)
 
-            if let held = look[.held] {
+            if let held = look[.held], !(armsCarryMitts && FlameyArt.wornOnHands(held)) {
                 heldProp(held, a: a)
             }
 

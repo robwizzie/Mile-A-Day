@@ -639,6 +639,12 @@ enum FlameArmPose: Equatable {
     case feed
     /// Both up and waving — being tickled (the flail rides `flail:`).
     case flail
+    /// Both fists thrown high over his head — the champ's salute (a look
+    /// with `rules.raises_when_lit`, done for the day). Long, stretchy arms:
+    /// the reach is the gag.
+    case champ
+    /// The salute's pump: a beat lower and wider, alternated with `.champ`.
+    case champPump
 
     /// (outward angle from straight down in degrees, length scale), for
     /// the viewer-left and viewer-right arm.
@@ -652,6 +658,8 @@ enum FlameArmPose: Equatable {
         case .feedOut: return (.init(26, 1), .init(112, 1.05))
         case .feed: return (.init(26, 1), .init(-64, 0.98))
         case .flail: return (.init(122, 1), .init(122, 1))
+        case .champ: return (.init(166, 2.3), .init(166, 2.3))
+        case .champPump: return (.init(154, 2.0), .init(154, 2.0))
         }
     }
 }
@@ -678,6 +686,9 @@ struct FlameArmHold: Equatable {
     /// false = the hand is inside the prop (the foam finger IS a glove).
     var leftHand: Bool = true
     var rightHand: Bool = true
+    /// A glove-like item worn ON his hands (its skin's `mitt` layer): drawn
+    /// at the end of each arm in the arm's own frame, so it rides every pose.
+    var mitt: FlameyItem? = nil
 }
 
 /// The Fun mascot's arms, drawn as their own layer so a caller can put them
@@ -742,6 +753,8 @@ struct FlameBuddyArms: View {
     }
 
     private func angle(side: CGFloat) -> (FlameArmAngle, Bool) {
+        // Mitts: the arms keep the pose, the mitt covers the hand.
+        if hold?.mitt != nil { return (side < 0 ? pose.arms.left : pose.arms.right, false) }
         if let hold {
             if side < 0, let t = hold.left { return (Self.reaching(t, side: -1), hold.leftHand) }
             // A reaction (high five, feeding) takes the free RIGHT arm even
@@ -759,11 +772,15 @@ struct FlameBuddyArms: View {
         let s = shoulder(side)
         let length = Self.armLength * u * a.length * (compact ? 0.9 : 1)
         let thick = (compact ? 0.11 : 0.098) * u
-        let box = (Self.armLength * 1.7 + 0.1) * u * 2
+        let mitt = hold?.mitt?.skin?.layer("mitt")
+        // Room for the longest arm (the champ's salute) and a mitt past the wrist.
+        let box = max((Self.armLength * 1.7 + 0.1) * u * 2,
+                      (length + (mitt != nil ? 0.3 : 0.08) * u) * 2)
         let swayDeg: Double = compact ? 0 : (sway ? 4 : -2)
         let flailDeg = flail * (side < 0 ? 2.6 : -2.6)
         FlameArmLimb(length: length, thickness: thick, handRadius: showsHand ? (compact ? 0.06 : 0.056) * u : 0,
-                     colors: armColors, handColor: handColor, rim: rim, rimWidth: rimWidth, side: side)
+                     colors: armColors, handColor: handColor, rim: rim, rimWidth: rimWidth, side: side,
+                     mitt: mitt, u: u)
             .frame(width: box, height: box)
             .rotationEffect(.degrees(-Double(side) * a.angle + flailDeg))
             .rotationEffect(.degrees(-Double(side) * swayDeg))
@@ -792,6 +809,11 @@ struct FlameArmLimb: View, Animatable {
     let rim: Color
     let rimWidth: CGFloat
     let side: CGFloat
+    /// A skin layer worn on the hand (boxing gloves), recorded in body units
+    /// with the wrist at the origin and the fist down the arm (+y), thumb on
+    /// -x: toward his body for the viewer-right arm, mirrored for the left.
+    var mitt: FlameySkinLayer? = nil
+    var u: CGFloat = 0
 
     var animatableData: CGFloat {
         get { length }
@@ -820,6 +842,13 @@ struct FlameArmLimb: View, Animatable {
             hl.addQuadCurve(to: CGPoint(x: end.x - thickness * 0.22, y: end.y - thickness * 0.3),
                             control: CGPoint(x: o.x + bend - thickness * 0.22, y: o.y + length * 0.5))
             ctx.stroke(hl, with: .color(.white.opacity(0.26)), style: StrokeStyle(lineWidth: thickness * 0.16, lineCap: .round))
+            if let mitt, u > 0 {
+                var m = ctx
+                m.translateBy(x: end.x, y: end.y)
+                if side < 0 { m.scaleBy(x: -1, y: 1) }
+                FlameySkinArt.draw(mitt, in: &m, u: u, palette: nil)
+                return
+            }
             guard handRadius > 0 else { return }
             // A round mitten with a thumb.
             let r = handRadius

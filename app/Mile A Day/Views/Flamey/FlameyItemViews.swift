@@ -118,13 +118,13 @@ struct FlameyItemArt: View {
             let size = box * k
             let one = look([color, item])
             ZStack {
-                FlameyOutfitLayer(look: one, size: size, side: .behind, still: true)
+                FlameyOutfitLayer(look: one, size: size, side: .behind, still: true, armsCarryMitts: false)
                 if usesMannequin && mannequin {
                     FlameyDressedFigure(look: .plain, health: .healthy, size: size, scale: 1)
                         .saturation(0)
                         .opacity(0.16)
                 }
-                FlameyOutfitLayer(look: one, size: size, side: .front, still: true)
+                FlameyOutfitLayer(look: one, size: size, side: .front, still: true, armsCarryMitts: false)
             }
             .frame(width: size, height: size)
             .offset(x: -cx * size, y: -cy * size)
