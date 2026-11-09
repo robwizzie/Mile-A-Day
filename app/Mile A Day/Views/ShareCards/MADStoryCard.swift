@@ -31,10 +31,9 @@ import CoreLocation
 //   * Distances go through `DistanceUnits`, never a hardcoded "MI". A card is a
 //     surface the user reads, and it was the one place still printing miles at
 //     someone who set the app to kilometres.
-//   * Colours come from `MADTheme` tokens and the flame is the app's OWN — the
-//     Modern dashboard's `ProfessionalFlameView` or Fun's `FlameBuddyView`,
-//     picked by `DashboardStylePreference`, so the card looks like the app the
-//     user actually opens. Hand-mixed near-copies of either drift, and this
+//   * Colours come from `MADTheme` tokens and the flame is the app's OWN
+//     (`FlameBuddyView`), so the card looks like the app the user actually
+//     opens. Hand-mixed near-copies of either drift, and this
 //     file had already drifted: a bespoke orange `flame.fill` belonging to
 //     neither style, over a ground a shade darker than the real token.
 

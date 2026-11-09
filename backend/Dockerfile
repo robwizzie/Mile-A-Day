@@ -57,6 +57,10 @@ COPY --from=builder /app/desk-firmware ./desk-firmware
 # catalog (services/flameySkins.ts reads /app/flamey-skins at boot).
 COPY --from=builder /app/flamey-skins ./flamey-skins
 
+# One-off history repair, run by hand from the container's terminal after a
+# deploy (`node scripts/recompute-exact-copies.mjs`, add --apply to write).
+COPY --from=builder /app/scripts/recompute-exact-copies.mjs ./scripts/recompute-exact-copies.mjs
+
 COPY docker-entrypoint.sh ./docker-entrypoint.sh
 RUN chmod +x docker-entrypoint.sh
 

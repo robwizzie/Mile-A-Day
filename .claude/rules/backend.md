@@ -27,7 +27,7 @@ Details: docs/conventions/backend.md § Backend Conventions
 - Gaps-and-islands: `ORDER BY d DESC` pairs with `d + rn`, ASC with `d - rn`; verify on seeded dates.
 - `streak_events.prior_streak` is write-once; user-facing reads re-derive it (`stampedBreakDetail`).
 - `workouts.feed_role` is FEED display only, never in `SUM(distance)`; written only by `feedRoleStatements` (advisory lock), after every mutation incl. the OLD local_date.
-- Splice `duplicateExclusionStatements` after the upsert, before `feedRoleStatements`; write only NULL `exclusion_reason`; gate on `users.dedupe_since`.
+- Splice `duplicateExclusionStatements` after the upsert, before `feedRoleStatements`; write only NULL `exclusion_reason`; gate on `users.dedupe_since`, except same-app exact copies (`exactCopySql`). Check: `dedupe-containment-check`.
 - Streak Assist = recipient token + donor's extra mile, coverage only on accept; targets via `pickTargetDay`; re-check `stampedBreakDetail().bridged`; show `restored_streak`.
 - Streak Save meter is in RUN-day units: run-alone ≥0.95 = 1, any other mile day = `STREAK_SAVE_WALK_DAY_CREDIT` (½); same rule in `getMeters` and `adminAnalyticsService`. Check: `plus-check`.
 - `refundEarnedCoverage` DELETES a run day's `streak_coverage` row; every spend writes `prior_last_used` + `spent_stamp`. Check: `streak-check` §G2.

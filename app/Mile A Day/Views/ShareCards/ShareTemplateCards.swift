@@ -91,8 +91,7 @@ struct ShareStatRail: View {
     }
 }
 
-/// The flame the user's OWN dashboard draws: Modern ⇒ `ProfessionalFlameView`
-/// (no face, ungrounded), Fun ⇒ `FlameBuddyView` (Flamey). Used by the
+/// The flame the user's OWN dashboard draws, `FlameBuddyView` (Flamey). Used by the
 /// Streak family, which is about the number and so wears the app's own look.
 /// The Flamey family always draws Flamey — he IS that card.
 ///
@@ -125,11 +124,6 @@ struct ShareStyleFlame: View {
                                look: look)
             }
             .accessibilityHidden(true)
-        case .modern:
-            ProfessionalFlameView(phase: .blazing, health: .blazing,
-                                  size: size, coalWarmth: 1, still: true)
-                .frame(width: size, height: size)
-                .accessibilityHidden(true)
         }
     }
 }

@@ -299,6 +299,10 @@ App Store set: `docs/duo-screenshots/app-store/` mirrors the iPhone 01–09 set 
 
 Testing: use the real Duo simulator (`simctl io <udid> screenshot --display=3` for the inner screen; unfolding is only in Device Hub). Debug builds also take `-MADDuoPreview` on a wide simulator, with `TARGETED_DEVICE_FAMILY=1,2` on the xcodebuild command line only, plus `-MADDuoMoment stretch|tuck` and `-MADDuoDemo flyover|share`. `simctl location` drives the buddy route. Screenshots in `docs/duo-screenshots/` came from that iPad stand-in. If a test backend will not bind, check `lsof -iTCP:<port>`: another session's server on that port answers with its own database, which shows up as "No user found" and a 0-day streak.
 
+### Mile, steps or both on every day (`DayDoneKind`, Nov 2026)
+
+A day is done by a mile OR 10,000 steps, but the day-by-day views only knew miles: the profile's Last 7 days chart drew a 10k-step day as an empty bar, so a user on a 2-day streak saw one done day and assumed the app was wrong. Every per-day surface now reads `DayDoneKind` (mile / steps / both) and draws `DayDoneMark` above the day: a runner for the mile, footprints for steps, both side by side. `DayDoneLegend` appears under a chart only when a step day is in view. A steps-only bar gets a third of the height so it reads as done, not empty. Your own days come from `StepGoalDayStore`; a friend's come from the server's `last_7_day_miles[].step_goal_met`, a boolean so a profile visitor learns "done", never the step count. The Insights road has a `.steps` day (green, "10k steps") and no longer draws a step day as a goal-length walk; the monthly recap's `activeDays` and the month share card count step days.
+
 ## Performance
 
 The app felt slow and the console showed "Gesture: System gesture gate timed out" (the main thread was busy when a touch began). An audit found:
