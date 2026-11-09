@@ -1562,6 +1562,12 @@ struct PostComposerView: View {
     /// the sandbox directory, which is not something to do from a `body` —
     /// the dashboard's photo-waiting banner caches it for the same reason.
     @State private var hasWalkSnaps = false
+    /// The camera's bottom-left "Walk photos": latest snap + count, read when
+    /// the camera opens (never from a body).
+    @State private var walkSnapPreview: (thumbnail: UIImage?, count: Int) = (nil, 0)
+    /// "Walk photos" was tapped in the camera: open them once it has gone
+    /// (two covers in one transaction race and drop).
+    @State private var openWalkPhotosAfterCamera = false
     /// Seeded from the local cache so a returning poster never waits on (or
     /// races) the network check in `resolveTermsIfNeeded`.
     @State private var termsState: TermsState =
@@ -1594,6 +1600,9 @@ struct PostComposerView: View {
     /// lost, so the exit reads "‹ Back" instead of "Cancel" (which made
     /// people fear their photos would be discarded).
     let backNavigation: Bool
+    let cameraTheme: String?
+    let cameraCompanion: AnyView?
+    let cameraCompanionCaption: String?
     let onFinished: (PostComposeOutcome) -> Void
     @Environment(\.dismiss) private var dismiss
 
@@ -1613,6 +1622,11 @@ struct PostComposerView: View {
         // Set instead of the three above when the walk is ALREADY posted and
         // this composer is adding your photo to it.
         crewPhotoPostId: String? = nil,
+        /// The photo prompt's camera dressing (`MADCameraView.themeLabel` /
+        /// `.companion`); nil from every other door.
+        cameraTheme: String? = nil,
+        cameraCompanion: AnyView? = nil,
+        cameraCompanionCaption: String? = nil,
         onFinished: @escaping (PostComposeOutcome) -> Void
     ) {
         let model = PostComposerViewModel(
@@ -1664,6 +1678,9 @@ struct PostComposerView: View {
         _crewOffer = State(initialValue: offer)
         self.autoOpenCamera = autoOpenCamera
         self.backNavigation = backNavigation
+        self.cameraTheme = cameraTheme
+        self.cameraCompanion = cameraCompanion
+        self.cameraCompanionCaption = cameraCompanionCaption
         self.onFinished = onFinished
     }
 
@@ -1783,7 +1800,17 @@ struct PostComposerView: View {
             }
             .toolbarBackground(.black, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
-            .fullScreenCover(isPresented: $showCamera) {
+            .fullScreenCover(isPresented: $showCamera, onDismiss: {
+                guard openWalkPhotosAfterCamera else { return }
+                openWalkPhotosAfterCamera = false
+                // The walk's snaps when there are any and the empty state (which
+                // hosts their gallery) is up; else the walk-filtered library.
+                if hasWalkSnaps, vm.pickedImage == nil {
+                    showSnapGallery = true
+                } else {
+                    showLibraryImport = true
+                }
+            }) {
                 // Stamp the source on the SET, not on opening the camera: a
                 // cancelled camera must not relabel a library photo already on
                 // the canvas as a live capture and re-charge it the countdown.
@@ -1810,7 +1837,18 @@ struct PostComposerView: View {
                         vm.dualPrimaryWasFront = capture.primaryWasFront
                         vm.photoSource = .camera
                         vm.errorMessage = nil
-                    }
+                    },
+                    themeLabel: cameraTheme,
+                    companion: cameraCompanion,
+                    companionCaption: cameraCompanionCaption,
+                    walkPhotos: vm.stats.workoutId == nil ? nil : CameraWalkPhotos(
+                        thumbnail: walkSnapPreview.thumbnail,
+                        count: walkSnapPreview.count,
+                        open: {
+                            openWalkPhotosAfterCamera = true
+                            showCamera = false
+                        }
+                    )
                 )
             }
             // A stale composite must never survive a trip back to the editor.
@@ -1849,7 +1887,11 @@ struct PostComposerView: View {
             // A gate held back while the camera cover was up presents as soon
             // as the camera closes.
             .onChange(of: showCamera) { _, isUp in
-                guard !isUp else { return }
+                guard !isUp else {
+                    let snaps = hasWalkSnaps ? MidRunPhotoStash.entries() : []
+                    walkSnapPreview = (snaps.last?.image, snaps.count)
+                    return
+                }
                 presentGateIfNeeded()
             }
             // The server rejected a publish for unaccepted terms (stale local

@@ -573,7 +573,9 @@ struct UserProfileDetailView: View {
                 }
             }
             // The week's shape, then the workouts inside it.
-            if !isCurrentUser(), !friendWorkouts.isEmpty {
+            // A week done on steps alone has no workouts but is still a week.
+            if !isCurrentUser(),
+               !friendWorkouts.isEmpty || (last7DayMiles ?? []).contains(where: { $0.stepGoalMet == true }) {
                 Last7DaysChart(
                     workouts: friendWorkouts,
                     dayTotals: last7DayMiles,
@@ -1782,7 +1784,8 @@ private struct FriendHeadToHeadStrip: View {
 /// workouts a day pushes the week's early days out of the cap, and a
 /// 400-day streak read as an empty Fri-Sun. `workouts` stays as the
 /// per-workout breakdown for the tap-detail panel, and as the totals
-/// fallback until the server ships the field. Goal-hit days are green,
+/// fallback until the server ships the field. Done days (a mile, 10k steps
+/// or both, marked above the bar with `DayDoneMark`) are green,
 /// partial days orange, zeros muted; today is ringed so users orient
 /// themselves at a glance.
 ///
@@ -1859,6 +1862,23 @@ struct Last7DaysChart: View {
         max(milesByDay.values.max() ?? 0, goal)
     }
 
+    /// Days the server (or, on your own profile, this phone) says were done
+    /// by 10,000 steps.
+    private var stepDays: Set<Date> {
+        Set((dayTotals ?? []).compactMap { entry in
+            entry.stepGoalMet == true ? parseDay(entry.date) : nil
+        })
+    }
+
+    /// Mile, steps, both, or neither: either one finishes the day.
+    private func doneKind(for day: Date) -> DayDoneKind {
+        let miles = milesByDay[calendar.startOfDay(for: day)] ?? 0
+        return DayDoneKind(
+            mile: ProgressCalculator.isGoalCompleted(current: miles, goal: goal),
+            steps: stepDays.contains(calendar.startOfDay(for: day))
+        )
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
             HStack {
@@ -1876,6 +1896,11 @@ struct Last7DaysChart: View {
             }
             .frame(height: 108)
 
+            // Only once footprints are on screen, so they explain themselves.
+            if days.contains(where: { doneKind(for: $0).hasSteps }) {
+                DayDoneLegend()
+            }
+
             if let selected = selectedDay {
                 dayDetailPanel(for: selected)
                     .transition(.asymmetric(
@@ -1891,18 +1916,20 @@ struct Last7DaysChart: View {
 
     private func barColumn(for day: Date) -> some View {
         let miles = milesByDay[day] ?? 0
-        let progress = min(miles / maxValue, 1.0)
+        let done = doneKind(for: day)
+        // A steps-only day has few or no miles; give it a third of the height
+        // so it reads as a done day, not an empty one.
+        let progress = max(min(miles / maxValue, 1.0), done == .steps ? 0.34 : 0)
         let isToday = calendar.isDateInToday(day)
-        let didHit = ProgressCalculator.isGoalCompleted(current: miles, goal: goal)
+        let didHit = done.isDone
         let isSelected = selectedDay.map { calendar.isDate($0, inSameDayAs: day) } ?? false
         let savedBy = covered.day(for: day)
         // A saved day is NOT a miss and must never wear the miss colour, no
         // matter how few miles it holds — that equivalence is the whole bug.
         let color: Color = savedBy != nil
             ? SavedDayStyle.tint
-            : (miles == 0
-                ? Color.white.opacity(0.12)
-                : (didHit ? .green : .orange))
+            : (didHit ? .green
+                : (miles == 0 ? Color.white.opacity(0.12) : .orange))
 
         return Button {
             MADHaptics.tap()
@@ -1914,14 +1941,19 @@ struct Last7DaysChart: View {
             }
         } label: {
             VStack(spacing: 6) {
-                // Token marker, so a saved day is legible without tapping it.
-                // Always occupies its slot (hidden when absent) so bars keep a
-                // common baseline.
-                Image(systemName: SavedDayStyle.icon(for: savedBy?.kind ?? "streak_save"))
-                    .madFont(size: 9, weight: .bold, maxScale: 1.5)
-                    .foregroundColor(SavedDayStyle.tint)
-                    .opacity(savedBy != nil ? 1 : 0)
-                    .frame(height: 10)
+                // Marker slot: a token on a saved day, else how the day was
+                // done (runner, footprints, or both). Always occupies its slot
+                // so bars keep a common baseline.
+                ZStack {
+                    if let savedBy, !didHit {
+                        Image(systemName: SavedDayStyle.icon(for: savedBy.kind))
+                            .madFont(size: 9, weight: .bold, maxScale: 1.5)
+                            .foregroundColor(SavedDayStyle.tint)
+                    } else {
+                        DayDoneMark(kind: done)
+                    }
+                }
+                .frame(height: 10)
 
                 // Bar
                 GeometryReader { geo in
@@ -1935,7 +1967,7 @@ struct Last7DaysChart: View {
                                     endPoint: .bottom
                                 )
                             )
-                            .frame(height: max(geo.size.height * progress, miles > 0 ? 4 : 2))
+                            .frame(height: max(geo.size.height * progress, miles > 0 || didHit ? 4 : 2))
                             .overlay(
                                 // Selection ring on the bar — sits inside
                                 // the bar so it doesn't change the layout
@@ -2007,15 +2039,25 @@ struct Last7DaysChart: View {
                 Text(String(format: "%.2f mi", total))
                     .madFont(size: 12, weight: .heavy, design: .rounded)
                     .foregroundColor(
-                        covered.contains(day)
+                        covered.contains(day) && !doneKind(for: day).isDone
                             ? SavedDayStyle.tint
-                            : (ProgressCalculator.isGoalCompleted(current: total, goal: goal)
+                            : (doneKind(for: day).isDone
                                 ? .green
                                 : (total > 0 ? .orange : .white.opacity(0.4)))
                     )
             }
 
-            if let savedBy = covered.day(for: day) {
+            if let line = doneKind(for: day).explanation {
+                HStack(spacing: 6) {
+                    DayDoneMark(kind: doneKind(for: day), size: 10)
+                    Text(line)
+                        .madFont(size: 11, weight: .semibold, design: .rounded)
+                        .foregroundColor(MADTheme.Colors.success)
+                }
+                .padding(.vertical, 2)
+            }
+
+            if let savedBy = covered.day(for: day), !doneKind(for: day).isDone {
                 HStack(alignment: .top, spacing: 6) {
                     Image(systemName: SavedDayStyle.icon(for: savedBy.kind))
                         .madFont(size: 10, weight: .bold, maxScale: 1.5)
@@ -2028,7 +2070,9 @@ struct Last7DaysChart: View {
                 .padding(.vertical, 2)
             }
 
-            if dayWorkouts.isEmpty && total == 0 {
+            if dayWorkouts.isEmpty && total == 0 && doneKind(for: day).hasSteps {
+                EmptyView()
+            } else if dayWorkouts.isEmpty && total == 0 {
                 Text(covered.contains(day) ? "No miles logged — the streak held anyway" : "No miles logged")
                     .madFont(size: 11, weight: .medium, design: .rounded)
                     .foregroundColor(.white.opacity(0.6))

@@ -16,7 +16,10 @@ struct DayData: Identifiable {
     let label: String          // "Sun", "Mon", …
     let shortLabel: String     // "S", "M", …
     let distance: Double       // miles
+    /// Done by a mile OR 10,000 steps (`done`).
     let metGoal: Bool
+    /// Mile, steps, both or neither.
+    var done: DayDoneKind = .none
     let isToday: Bool
     let isFuture: Bool
 }
@@ -54,8 +57,12 @@ enum WeekDataProvider {
             }
             let label = dayFormatter.string(from: date)
             let shortLabel = String(label.prefix(1))
-            let met = !isFuture && miles >= goalDistance * 0.95
-            return DayData(date: date, label: label, shortLabel: shortLabel, distance: miles, metGoal: met, isToday: isToday, isFuture: isFuture)
+            let done = isFuture ? DayDoneKind.none : DayDoneKind(
+                mile: ProgressCalculator.isGoalCompleted(current: miles, goal: goalDistance),
+                steps: StepGoalDayStore.goalDayKeys.contains(StepGoalDayStore.dayKey(for: startOfDay))
+            )
+            return DayData(date: date, label: label, shortLabel: shortLabel, distance: miles,
+                           metGoal: done.isDone, done: done, isToday: isToday, isFuture: isFuture)
         }
     }
 }
@@ -370,6 +377,15 @@ struct WeeklyMileChartView: View {
             Circle()
                 .fill(Color.white)
                 .frame(width: radius * 0.8, height: radius * 0.8)
+            // Footprints over a day done by 10k steps, so a low point that
+            // still finished the day doesn't read as a miss.
+            if data.done.hasSteps {
+                Image(systemName: DayDoneKind.stepsIcon)
+                    .madFont(size: 9, weight: .bold, maxScale: 1.3)
+                    .foregroundColor(MADTheme.Colors.success)
+                    .offset(y: -radius - 9)
+                    .accessibilityHidden(true)
+            }
         }
         .scaleEffect(isSelected ? 1.25 : (visible ? 1.0 : 0.01))
         .opacity(visible ? 1 : 0)
@@ -394,7 +410,7 @@ struct WeeklyMileChartView: View {
         let distText = data.isFuture ? "—" : data.distance.milesFormatted
         let dateText = dateFormatter.string(from: data.date)
 
-        let tooltipWidth: CGFloat = 90
+        let tooltipWidth: CGFloat = 96
         let clampedX = min(max(point.x, tooltipWidth / 2 + 4), chartWidth - tooltipWidth / 2 - 4)
 
         return VStack(spacing: 2) {
@@ -404,6 +420,14 @@ struct WeeklyMileChartView: View {
             Text(dateText)
                 .font(.system(size: 10, weight: .medium, design: .rounded))
                 .foregroundColor(.white.opacity(0.7))
+            if data.done.hasSteps {
+                HStack(spacing: 3) {
+                    Image(systemName: DayDoneKind.stepsIcon)
+                    Text(data.done == .both ? "+ 10k steps" : "10k steps")
+                }
+                .font(.system(size: 10, weight: .bold, design: .rounded))
+                .foregroundColor(MADTheme.Colors.success)
+            }
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)

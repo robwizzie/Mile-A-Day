@@ -109,12 +109,9 @@ struct NotificationSettingsView: View {
 
             ScrollView {
                 VStack(spacing: MADTheme.Spacing.lg) {
-                    SettingsSection("Your activity") {
-                        settingsToggle("When I complete a mile", isOn: $prefs.mileCompletedEnabled)
-                        settingsDivider
-                        settingsToggle("Step goal", isOn: $prefs.stepGoalEnabled,
-                            description: "When you reach 10,000 steps in a day")
-                    }
+                    // The reminders that protect the streak come first: they're
+                    // why most people open this screen.
+                    yourMileSection
 
                     friendsSection
 
@@ -122,8 +119,8 @@ struct NotificationSettingsView: View {
                         settingsToggle("Weekly recap", isOn: $prefs.weeklyRecapEnabled,
                             description: "A Sunday summary of your week, ready to share")
                         settingsDivider
-                        settingsToggle("Weekly challenge", isOn: $prefs.weeklyChallengeEnabled,
-                            description: "The new challenge, a nudge before it ends, and when you finish")
+                        settingsToggle("Challenges & community goals", isOn: $prefs.weeklyChallengeEnabled,
+                            description: "New weekly challenges and community goals, a nudge before they end, and how they finished")
                         settingsDivider
                         // Competition alerts collapse behind a master toggle;
                         // the 8 individual alerts live on a drill-in screen.
@@ -145,7 +142,7 @@ struct NotificationSettingsView: View {
 
                     muteFriendsSection
 
-                    scheduleSection
+                    quietHoursSection
 
                     // Resets the alerts only: the privacy half of the stored
                     // prefs belongs to Privacy and is carried over untouched.
@@ -294,8 +291,8 @@ struct NotificationSettingsView: View {
 
     /// Daily reminder + Do Not Disturb together: both are time-based and the
     /// least often changed.
-    private var scheduleSection: some View {
-        SettingsSection("Schedule") {
+    private var yourMileSection: some View {
+        SettingsSection("Your mile") {
             settingsToggle("Daily reminder", isOn: $prefs.dailyReminderEnabled,
                 description: "A nudge to get your mile in")
 
@@ -314,6 +311,17 @@ struct NotificationSettingsView: View {
 
             settingsDivider
 
+            settingsToggle("When I complete a mile", isOn: $prefs.mileCompletedEnabled)
+
+            settingsDivider
+
+            settingsToggle("Step goal", isOn: $prefs.stepGoalEnabled,
+                description: "When you reach 10,000 steps in a day")
+        }
+    }
+
+    private var quietHoursSection: some View {
+        SettingsSection("Quiet hours") {
             settingsToggle("Do Not Disturb", isOn: $prefs.dndEnabled,
                 description: "Silence alerts during set hours. They wait in your inbox")
 

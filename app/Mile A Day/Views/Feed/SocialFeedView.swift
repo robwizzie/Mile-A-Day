@@ -290,6 +290,15 @@ struct SocialFeedView: View {
         return Calendar.current.isDateInToday(d)
     }
 
+    /// "running" or "walking" for the workout a + would post, so the
+    /// prompt speaks of the right one.
+    private var composeWorkoutType: String {
+        guard let id = statsInput.workoutId,
+              let w = healthManager.cachedWorkouts.first(where: { $0.uuid.uuidString == id })
+        else { return "walking" }
+        return w.workoutActivityType == .running ? "running" : "walking"
+    }
+
     private var statsInput: RunStatsInput {
         if mileDone,
            let workoutId = nextShareableWorkoutId ?? RunPostService.dailyMileWorkoutId() {
@@ -557,7 +566,17 @@ struct SocialFeedView: View {
                 // disappears the moment a workout is shared and would take the
                 // cover down with it mid-dismissal.
                 .fullScreenCover(isPresented: $presentingComposer) {
-                    PostComposerView(stats: statsInput) { outcome in
+                    // The same ask every door uses (`PhotoPromptView`), so the
+                    // feed's + no longer drops straight into a bare composer.
+                    // Here "Not now" only closes it: nothing auto-posts from
+                    // the feed.
+                    PhotoPromptView(
+                        workoutId: statsInput.workoutId,
+                        workoutType: composeWorkoutType,
+                        stats: statsInput,
+                        skipTitle: "Not now",
+                        resolvesWithoutPostingWindow: false
+                    ) { outcome in
                         if case .published = outcome {
                             // Lock this run's share slot immediately — refresh() is async
                             // and its window previously let the composer re-open for the
@@ -567,6 +586,7 @@ struct SocialFeedView: View {
                             }
                             Task { await refresh() }
                         }
+                        presentingComposer = false
                     }
                 }
                 .onReceive(NotificationCenter.default.publisher(for: PostDraftStore.didPublish)) { _ in

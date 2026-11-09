@@ -119,7 +119,6 @@ struct DashboardView: View {
     @State private var trackerDeferredForForeground = false
 
     @AppStorage(DashboardStylePreference.key) private var dashboardStyleRaw = DashboardStylePreference.defaultStyle.rawValue
-    @State private var showDashboardStyleChooser = false
     @State private var showInsights = false
 
 
@@ -984,7 +983,6 @@ struct DashboardView: View {
                 // priority of all auto-surfaces; if anything else claims
                 // this visit, it simply takes the next one.
                 maybePresentMonthlyRecap()
-                maybePresentDashboardStyleChooser()
             }
             // The privacy walkthrough is hosted at MainTabView ROOT and is up
             // on the first launch after an update — the same launch every
@@ -996,7 +994,6 @@ struct DashboardView: View {
             .onReceive(NotificationCenter.default.publisher(for: PrivacyOnboardingView.doneNotification)) { _ in
                 maybePresentWhatsNew()
                 maybePresentMonthlyRecap()
-                maybePresentDashboardStyleChooser()
             }
             // Self-cleaning replacements for the old NotificationCenter.addObserver
             // calls in onAppear — those registered a fresh observer on every
@@ -1024,33 +1021,7 @@ struct DashboardView: View {
             // Each stands down for goal celebrations; all state persists until
             // dismissed, so no moment is ever lost — just queued.
             .overlay {
-                if showDashboardStyleChooser,
-                   !celebrationManager.isShowingCelebration,
-                   !showWelcomeTour,
-                   !showWorkoutView,
-                   !showPendingSheet,
-                   !showMonthlyRecap,
-                   tokensState.storyEvent == nil,
-                   tokensState.newlyEarned.isEmpty {
-                    DashboardStyleChooserView(
-                        onChoose: { style in
-                            DashboardStylePreference.choose(style)
-                            dashboardStyleRaw = style.rawValue
-                            withAnimation(.easeInOut(duration: 0.22)) {
-                                showDashboardStyleChooser = false
-                            }
-                        },
-                        onDismiss: {
-                            DashboardStylePreference.markChosen()
-                            dashboardStyleRaw = DashboardStylePreference.defaultStyle.rawValue
-                            withAnimation(.easeInOut(duration: 0.22)) {
-                                showDashboardStyleChooser = false
-                            }
-                        }
-                    )
-                    .transition(.opacity)
-                    .zIndex(53)
-                } else if showStreakReveal,
+                if showStreakReveal,
                    !celebrationManager.isShowingCelebration,
                    !showWelcomeTour, !showWorkoutView {
                     StreakRevealOverlay(
@@ -1506,30 +1477,6 @@ struct DashboardView: View {
         }
     }
 
-    private func maybePresentDashboardStyleChooser() {
-        guard DashboardStylePreference.offersChoice,
-              !DashboardStylePreference.hasChosen,
-              !showDashboardStyleChooser else { return }
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) {
-            guard !DashboardStylePreference.hasChosen,
-                  PrivacyOnboardingView.hasBeenSeen,
-                  !celebrationManager.isShowingCelebration,
-                  !showWorkoutView,
-                  !showWelcomeTour,
-                  !showWhatsNew,
-                  !showPendingSheet,
-                  !showMonthlyRecap,
-                  !showStreakReveal,
-                  tokensState.storyEvent == nil,
-                  tokensState.newlyEarned.isEmpty
-            else { return }
-            withAnimation(.easeInOut(duration: 0.22)) {
-                showDashboardStyleChooser = true
-            }
-        }
-    }
-
     /// Idempotent — safe to call on every relevant state change.
     private func syncStreakRiskActivity() {
         StreakRiskActivityManager.sync(
@@ -1785,33 +1732,17 @@ struct DashboardView: View {
 
     @ViewBuilder
     private var dashboardExperienceSection: some View {
-        VStack(spacing: dashboardStyle == .fun ? 18 : 14) {
-            switch dashboardStyle {
-            case .fun:
-                FunDashboardBody(
-                    healthManager: healthManager,
-                    userManager: userManager,
-                    friendService: friendService,
-                    hasActiveWorkout: hasActiveWorkout,
-                    showWorkoutView: $showWorkoutView,
-                    onLogPastWorkout: { showManualWorkoutEntry = true },
-                    onReplay: replayAction
-                )
-            case .modern:
-                ModernDashboardBody(
-                    healthManager: healthManager,
-                    userManager: userManager,
-                    friendService: friendService,
-                    hasActiveWorkout: hasActiveWorkout,
-                    showWorkoutView: $showWorkoutView,
-                    onLogPastWorkout: { showManualWorkoutEntry = true },
-                    onReplay: replayAction
-                )
-            }
+        VStack(spacing: 18) {
+            FunDashboardBody(
+                healthManager: healthManager,
+                userManager: userManager,
+                friendService: friendService,
+                hasActiveWorkout: hasActiveWorkout,
+                showWorkoutView: $showWorkoutView,
+                onLogPastWorkout: { showManualWorkoutEntry = true },
+                onReplay: replayAction
+            )
 
-            // AFTER the switch, not inside either body: its identity (and the
-            // Customize sheet it presents) survives a style change, which is
-            // exactly what that sheet does.
             // Two quiet doors, ONE surface with a hairline between (they were
             // two full-width cards for two one-line links).
             VStack(spacing: 0) {
@@ -1831,14 +1762,8 @@ struct DashboardView: View {
 
     @ViewBuilder
     private var dashboardBackground: some View {
-        switch dashboardStyle {
-        case .fun:
-            MADTheme.Colors.appBackgroundGradient
-                .ignoresSafeArea()
-        case .modern:
-            Color(red: 0.05, green: 0.05, blue: 0.06)
-                .ignoresSafeArea()
-        }
+        MADTheme.Colors.appBackgroundGradient
+            .ignoresSafeArea()
     }
 
     // MARK: - Attention slot

@@ -709,7 +709,8 @@ struct ProfileView: View {
 
             return FriendDayMiles(
                 date: Self.localDayFormatter.string(from: day),
-                miles: dayMiles
+                miles: dayMiles,
+                stepGoalMet: StepGoalDayStore.goalDayKeys.contains(StepGoalDayStore.dayKey(for: day))
             )
         }
 

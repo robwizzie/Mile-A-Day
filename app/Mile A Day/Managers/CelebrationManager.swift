@@ -690,8 +690,25 @@ class CelebrationManager: ObservableObject {
         return formatter.string(from: date)
     }
 
+    /// The user ASKED for the photo prompt (the home page's "Post a photo").
+    ///
+    /// `addCelebration` keeps the AUTOMATIC prompt to once per workout, which
+    /// is right for the post-walk finale but made this button a silent no-op
+    /// for everyone who had already skipped that finale: the id was stamped
+    /// "prompted" and the request was dropped before it reached the queue.
+    /// A tap is not a re-offer, so it skips that one-shot (an already-posted
+    /// walk still never prompts; a second skip only re-sends the auto card,
+    /// which the server replaces in place).
+    func requestPhotoPrompt(workoutId: String, workoutType: String) {
+        addCelebration(.postRunPhotoPrompt(workoutId: workoutId, workoutType: workoutType), userRequested: true)
+    }
+
     /// Add a celebration to the queue
     func addCelebration(_ celebration: CelebrationType) {
+        addCelebration(celebration, userRequested: false)
+    }
+
+    private func addCelebration(_ celebration: CelebrationType, userRequested: Bool) {
         // Special handling for goal completion - only allow once per day
         if case .goalCompleted = celebration {
             guard !hasShownGoalCelebrationToday else {
@@ -707,7 +724,7 @@ class CelebrationManager: ObservableObject {
         // re-offer it for a mile already handled (the id is marked as shown in
         // showNextCelebration(), same as the goal celebration).
         if case .postRunPhotoPrompt(let workoutId, _) = celebration {
-            guard !hasPromptedPhoto(for: workoutId) else {
+            guard userRequested || !hasPromptedPhoto(for: workoutId) else {
                 print("[CelebrationManager] ⏭️  Photo prompt already shown for workout \(workoutId), skipping")
                 return
             }

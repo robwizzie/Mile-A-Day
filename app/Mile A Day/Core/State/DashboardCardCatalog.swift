@@ -108,11 +108,10 @@ enum DashboardCard: String, CaseIterable, Identifiable {
 /// dashboard stays empty. Unknown ids — a retired card — drop on read.
 enum DashboardCards {
     static let funKey = "dashboardCardsFunV1"
-    static let modernKey = "dashboardCardsModernV1"
     static let emptyMarker = "-"
 
     static func key(for style: DashboardStyle) -> String {
-        style == .fun ? funKey : modernKey
+        funKey
     }
 
     /// The cards on the dashboard, in the user's order.

@@ -1,24 +1,18 @@
 import SwiftUI
 
 /// ONE card for every surface that hosts Well Earned (the opt-in dashboard
-/// slot, Insights): the Fun face or the Modern face, following the dashboard
-/// style, so Insights matches whichever dashboard the user chose.
+/// slot, Insights): one line on the dashboard, the full scene in Insights.
 struct TreatsCard: View {
     @ObservedObject var healthManager: HealthKitManager
     /// The dashboard's slot: on Fun, one line (Flamey, the count, the
     /// period) instead of the big scene. Insights keeps the scene.
     var compact: Bool = false
-    @AppStorage(DashboardStylePreference.key) private var dashboardStyleRaw = DashboardStylePreference.defaultStyle.rawValue
 
     var body: some View {
-        if DashboardStyle(rawValue: dashboardStyleRaw) == .fun {
-            if compact {
-                TreatLineCard(healthManager: healthManager)
-            } else {
-                TreatSceneCard(healthManager: healthManager)
-            }
+        if compact {
+            TreatLineCard(healthManager: healthManager)
         } else {
-            ModernTreatsCard(healthManager: healthManager)
+            TreatSceneCard(healthManager: healthManager)
         }
     }
 }
@@ -135,69 +129,6 @@ struct TreatLineCard: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(DashboardCardSurface(style: .fun))
             .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .animation(.snappy, value: model.count)
-        .treatRefresh(model: model, healthManager: healthManager)
-        .sheet(isPresented: $showDetail) {
-            CalorieEquivalentsView(healthManager: healthManager, model: model)
-        }
-    }
-}
-
-/// The Modern face: the number, the same caption, and a shelf of glyphs —
-/// one per unit earned, the last one only as full as the fraction.
-struct ModernTreatsCard: View {
-    @ObservedObject var healthManager: HealthKitManager
-    @State private var model = TreatCounterModel()
-    @State private var showDetail = false
-
-    var body: some View {
-        Button {
-            MADHaptics.tap()
-            showDetail = true
-        } label: {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    Image(systemName: "fork.knife")
-                        .font(.system(size: 15, weight: .bold))
-                        .foregroundColor(.pink)
-                        .frame(width: 30, height: 30)
-                        .background(Circle().fill(Color.pink.opacity(0.15)))
-                    Spacer()
-                    Text(model.period.title)
-                        .madFont(size: 11, weight: .bold, design: .rounded, maxScale: 1.3)
-                        .foregroundColor(.white.opacity(0.48))
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundColor(.white.opacity(0.28))
-                }
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(CalorieTreat.featureName)
-                        .madFont(size: 11, weight: .bold, design: .rounded)
-                        .foregroundColor(.white.opacity(0.48))
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Text(TreatFormat.count(model.count))
-                            .madFont(size: 23, weight: .black, design: .rounded)
-                            .monospacedDigit()
-                            .foregroundColor(.white)
-                            .contentTransition(.numericText())
-                        Text(model.treat.unitName(count: model.count))
-                            .madFont(size: 13, weight: .bold, design: .rounded)
-                            .foregroundColor(.white.opacity(0.85))
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.8)
-                    }
-                    Text(TreatCopy.caption(model))
-                        .madFont(size: 11, weight: .semibold, design: .rounded)
-                        .foregroundColor(model.isEmpty ? .white.opacity(0.5) : .pink)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                TreatGlyphShelf(treat: model.treat, count: model.count, size: 22)
-            }
-            .padding(14)
-            .frame(maxWidth: .infinity, alignment: .topLeading)
-            .background(DashboardCardSurface(style: .modern))
         }
         .buttonStyle(.plain)
         .animation(.snappy, value: model.count)

@@ -1062,6 +1062,14 @@ struct BestSplitTime: Codable {
 struct FriendDayMiles: Codable {
     let date: String
     let miles: Double
+    /// The day was done by 10,000 steps. Optional: older servers don't send
+    /// it, and a nil reads as "not by steps".
+    var stepGoalMet: Bool? = nil
+
+    enum CodingKeys: String, CodingKey {
+        case date, miles
+        case stepGoalMet = "step_goal_met"
+    }
 }
 
 /// Stats data for a friend
