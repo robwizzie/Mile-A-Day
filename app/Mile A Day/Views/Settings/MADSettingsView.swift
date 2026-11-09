@@ -32,7 +32,6 @@ struct MADSettingsView: View {
     @Environment(\.appStateManager) var appStateManager
     @Environment(\.dismiss) private var dismiss
 
-    @AppStorage(DashboardStylePreference.key) private var dashboardStyleRaw = DashboardStylePreference.defaultStyle.rawValue
     /// Same key the tracking screen's speaker button and the Ghost Race sheet
     /// write, so all three are one switch.
     @AppStorage(GhostCoach.enabledKey) private var coachEnabled = true
@@ -206,21 +205,18 @@ struct MADSettingsView: View {
             }
             .buttonStyle(.plain)
 
-            // Flamey lives on the Fun dashboard only, so his Closet does too.
-            if selectedStyle == .fun {
-                SettingsDivider()
-                Button {
-                    MADHaptics.tap()
-                    FlameyClosetLink.shared.open()
-                } label: {
-                    SettingsRow(
-                        icon: "hanger",
-                        title: "\(FlameyNameRules.possessive(FlameyFacts.displayName)) Closet",
-                        tint: .orange
-                    )
-                }
-                .buttonStyle(.plain)
+            SettingsDivider()
+            Button {
+                MADHaptics.tap()
+                FlameyClosetLink.shared.open()
+            } label: {
+                SettingsRow(
+                    icon: "hanger",
+                    title: "\(FlameyNameRules.possessive(FlameyFacts.displayName)) Closet",
+                    tint: .orange
+                )
             }
+            .buttonStyle(.plain)
         }
     }
 
@@ -271,32 +267,6 @@ struct MADSettingsView: View {
             }
             .padding(.bottom, MADTheme.Spacing.sm)
 
-            // One style for now, so nothing to pick (`DashboardStylePreference.offered`).
-            if DashboardStylePreference.offersChoice {
-                SettingsDivider()
-
-                VStack(alignment: .leading, spacing: MADTheme.Spacing.xs) {
-                    SettingsRow(
-                        icon: "paintbrush.pointed.fill",
-                        title: "Dashboard style",
-                        subtitle: selectedStyle.subtitle,
-                        tint: .orange,
-                        accessory: .none
-                    )
-                    Picker("Dashboard style", selection: $dashboardStyleRaw) {
-                        ForEach(DashboardStylePreference.offered) { style in
-                            Text(style.title).tag(style.rawValue)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .onChange(of: dashboardStyleRaw) { _, newValue in
-                        DashboardStylePreference.current = DashboardStyle(rawValue: newValue) ?? DashboardStylePreference.defaultStyle
-                        DashboardStylePreference.markChosen()
-                        MADHaptics.tap()
-                    }
-                }
-                .padding(.bottom, MADTheme.Spacing.sm)
-            }
         }
     }
 
@@ -671,10 +641,6 @@ struct MADSettingsView: View {
     }
 
     // MARK: - Chrome
-
-    private var selectedStyle: DashboardStyle {
-        DashboardStyle(rawValue: dashboardStyleRaw) ?? DashboardStylePreference.defaultStyle
-    }
 
     /// The app version's one place in Settings.
     private var versionFooter: some View {
