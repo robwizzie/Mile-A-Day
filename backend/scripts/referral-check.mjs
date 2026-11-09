@@ -22,7 +22,10 @@ import referralRoutes from "../dist/routes/referralRoutes.js";
 import { generateAccessToken } from "../dist/services/tokenService.js";
 import { seedExtraBadges } from "../dist/services/badgeService.js";
 import {
+  adminLinkReferral,
+  adminRejectReferral,
   claimFreeYear,
+  getReferralOverview,
   getReferralStatus,
   linkTypedReferrals,
   setReferrer,
@@ -197,6 +200,28 @@ try {
   const oldFriends = (await getReferralStatus(OLD)).friends;
   check("everyone they referred is listed", oldFriends.map((f) => f.username).sort(), [handle(LATE), handle(TYPED)].sort());
   check("7 days long after signup doesn't count", oldFriends.find((f) => f.username === handle(LATE)).status, "expired");
+
+  // 10. Support tools.
+  await adminLinkReferral(handle(EARLY), handle(REFERRER));
+  check("support can link past the 14 days", (await linkOf(EARLY))?.origin, "admin");
+  check("the link starts at their sign-up", (await db.query(`SELECT r.created_at = u.created_at AS same FROM referrals r JOIN users u ON u.user_id = r.referee_id WHERE r.referee_id = $1`, [EARLY]))[0].same, true);
+  await adminLinkReferral(handle(EARLY), handle(OLD));
+  check("a pending link can be corrected", (await linkOf(EARLY))?.referrer_id, OLD);
+  check("a counted link can't be moved", await errorCode(() => adminLinkReferral(handle(FRIEND), handle(OLD))), "already_counted");
+  check("no loops through support either", await errorCode(() => adminLinkReferral(handle(REFERRER), handle(FRIEND))), "loop");
+  check("a username that doesn't exist", await errorCode(() => adminLinkReferral("nobody_xyz", handle(OLD))), "no_friend");
+  const beforeReject = (await getReferralStatus(REFERRER)).qualified;
+  await adminRejectReferral(handle(FRIENDS[0]));
+  const afterReject = await getReferralStatus(REFERRER);
+  check("rejecting takes it out of the count", afterReject.qualified, beforeReject - 1);
+  check("and off their list", afterReject.friends.some((f) => f.username === handle(FRIENDS[0])), false);
+  check("earned rewards stay", afterReject.rewards.find((r) => r.count === 10).state !== "locked", true);
+  const overview = await getReferralOverview();
+  const top = overview.referrers.find((r) => r.user_id === REFERRER);
+  check("admin sees the referrer", top?.qualified, afterReject.qualified);
+  check("a burst of picks is flagged", top?.flagged, true);
+  check("admin sees codes left", overview.codes.left >= 1, true);
+  check("admin never sees a code", JSON.stringify(overview).includes("CHECKCODE"), false);
 
   // 8. Routes.
   const headers = { authorization: `Bearer ${await generateAccessToken(FRIEND)}` };

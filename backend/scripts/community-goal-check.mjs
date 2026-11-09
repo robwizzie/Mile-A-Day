@@ -21,12 +21,18 @@ import { PostgresService } from "../dist/services/DbService.js";
 import { authenticateToken } from "../dist/middleware/auth.js";
 import communityGoalRoutes from "../dist/routes/communityGoalRoutes.js";
 import { generateAccessToken } from "../dist/services/tokenService.js";
+import { winBackCopy } from "../dist/services/dailyReminderService.js";
 import {
+  activeGoalForDay,
   DAILY_CAP_MILES,
+  getPublicCommunityGoal,
   getCommunityGoalForUser,
   goalPace,
   grantRewards,
   refreshTotals,
+  seedCommunityGoals,
+  walkersToday,
+  clearWalkersTodayCache,
 } from "../dist/services/communityGoalService.js";
 
 const db = PostgresService.getInstance();
@@ -78,6 +84,7 @@ async function cleanup() {
   await db.query(`DELETE FROM badges WHERE badge_id = ANY($1)`, [[BADGE, SMALL_BADGE]]);
   await db.query(`DELETE FROM community_goals WHERE goal_id = $1`, [GOAL]);
   await db.query(`DELETE FROM workouts WHERE user_id = ANY($1)`, [ALL]);
+  await db.query(`DELETE FROM notification_settings WHERE user_id = ANY($1)`, [ALL]);
   await db.query(`DELETE FROM users WHERE user_id = ANY($1)`, [ALL]);
 }
 
@@ -215,6 +222,27 @@ try {
   check("near the end it asks for more walkers", pace.needs_more_walkers, true);
   check("ahead of pace is ahead", goalPace({ target_miles: 3100, starts_on: START, ends_on: END }, 3000, iso(0)).status, "ahead");
   check("miles needed per day", pace.miles_per_day_needed, Math.ceil(3000 / 6));
+  const slow = goalPace({ target_miles: 310, starts_on: "2026-12-01", ends_on: "2026-12-31" }, 50, "2026-12-10", 5);
+  check("the projection follows the rate so far", slow.projected_miles, 155);
+  check("a short projection says who would close it", slow.walkers_needed, 7);
+  check("a short projection has no finish day", slow.projected_finish, null);
+  const fast = goalPace({ target_miles: 310, starts_on: "2026-12-01", ends_on: "2026-12-31" }, 200, "2026-12-10", 5);
+  check("a strong pace names the finish day", fast.projected_finish, "2026-12-16");
+  check("a strong pace needs nobody extra", fast.walkers_needed, null);
+  check("the first days don't project", goalPace({ target_miles: 310, starts_on: "2026-12-01", ends_on: "2026-12-31" }, 9, "2026-12-02", 5).projected_miles, null);
+
+  // The website's view, and the win-back that mentions the goal.
+  const publicGoal = (await getPublicCommunityGoal()).goal;
+  check("the public goal is served", publicGoal?.goal_id, GOAL);
+  check(
+    "it carries no person's data",
+    /cg-|email|my_|user_id|username/.test(JSON.stringify(publicGoal)),
+    false,
+  );
+  check("a running goal is found for reminders", (await activeGoalForDay(iso(0)))?.goal_id, GOAL);
+  const lapse = { user_id: EARNER, days_quiet: 7, has_walked: true, friend_miles_7d: 0, active_friends: 0, top_friend: null };
+  check("win-back invites them to the goal", winBackCopy(lapse, "Check").body.endsWith("Flamey saved you a spot on Check."), true);
+  check("with no goal it reads as before", winBackCopy(lapse).body.includes("Flamey saved"), false);
 
   // Reached: a bonus token, by clearing the anchor.
   await db.query(`UPDATE community_goals SET target_miles = 1, rewards_granted_at = NULL WHERE goal_id = $1`, [GOAL]);
@@ -228,9 +256,52 @@ try {
   await refreshTotals(goal);
   check("the total never falls", await total(), before);
   check("the medal stays after a deletion", await hasBadge(EARNER), true);
+
+  // Walkers today: each person on their own local day, and only real walks.
+  clearWalkersTodayCache();
+  const todayBase = await walkersToday(goal);
+  await walk(EARNER, iso(0), 1);
+  await walk(EARNER, iso(0), 1);
+  await walk(SHORT, iso(0), 3, { source: "manual" });
+  clearWalkersTodayCache();
+  check("walkers today counts each person once", (await walkersToday(goal)) - todayBase, 1);
+  check("a hand-entered walk isn't walking today", (await walkersToday(goal)) - todayBase, 1);
+  await db.query(
+    `INSERT INTO notification_settings (user_id, timezone_offset_minutes) VALUES ($1, 600)
+     ON CONFLICT (user_id) DO UPDATE SET timezone_offset_minutes = 600`,
+    [OTHER],
+  );
+  await walk(OTHER, new Date(Date.now() + 600 * 60_000).toISOString().slice(0, 10), 1);
+  clearWalkersTodayCache();
+  check("a walker ahead of UTC counts on their own today", (await walkersToday(goal)) - todayBase, 2);
+  check("the app is told who walked today", typeof (await getCommunityGoalForUser(EARNER)).goal.walkers_today, "number");
+  check("so is the website", typeof (await getPublicCommunityGoal()).goal.walkers_today, "number");
+
+  // Rewards can still change before a goal starts, and never after.
+  const SEEDED = "coast-to-coast-2026";
+  await seedCommunityGoals();
+  const [{ starts_on: seededStart }] = await db.query(
+    `SELECT starts_on::text FROM community_goals WHERE goal_id = $1`,
+    [SEEDED],
+  );
+  const stale = JSON.stringify([{ days: 1, badge_id: "old", item_id: null, name: "Old" }]);
+  const tiersAfterSeed = async (startSql) => {
+    await db.query(
+      `UPDATE community_goals SET reward_tiers = $2::jsonb, starts_on = ${startSql} WHERE goal_id = $1`,
+      [SEEDED, stale],
+    );
+    await seedCommunityGoals();
+    const [row] = await db.query(`SELECT reward_tiers FROM community_goals WHERE goal_id = $1`, [SEEDED]);
+    return row.reward_tiers;
+  };
+  check("a goal that hasn't started takes the new rewards", (await tiersAfterSeed("CURRENT_DATE + 10")).length, 4);
+  check("a goal that has started keeps its rewards", (await tiersAfterSeed("CURRENT_DATE"))[0].badge_id, "old");
+  await db.query(`UPDATE community_goals SET starts_on = $2::date WHERE goal_id = $1`, [SEEDED, seededStart]);
+  await tiersAfterSeed(`'${seededStart}'::date`);
 } catch (err) {
   failures++;
   console.error("FAIL  threw:", err);
+
 } finally {
   await cleanup().catch(() => {});
   await new Promise((resolve) => server.close(resolve));

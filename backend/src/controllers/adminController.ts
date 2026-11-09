@@ -1,3 +1,9 @@
+import {
+  adminLinkReferral,
+  adminRejectReferral,
+  getReferralOverview,
+  ReferralError,
+} from "../services/referralService.js";
 import { Request, Response } from "express";
 import { createRemoteJWKSet, jwtVerify } from "jose";
 import { generateAccessToken } from "../services/tokenService.js";
@@ -481,4 +487,48 @@ export async function drilldown(req: Request, res: Response) {
   const result = await getDrilldown(kind as DrilldownKind, id);
   if (!result) return res.status(404).json({ error: "Nothing to show" });
   res.json(result);
+}
+
+/** GET /admin/referral-overview */
+export async function referralOverview(_req: Request, res: Response) {
+  try {
+    return res.json(await getReferralOverview());
+  } catch (error: any) {
+    console.error("Error loading referral overview:", error.message);
+    return res.status(500).json({ error: "Failed to load referrals" });
+  }
+}
+
+function referralFailure(res: Response, error: any) {
+  if (error instanceof ReferralError) return res.status(error.status).json({ error: error.message });
+  console.error("Referral admin action failed:", error.message);
+  return res.status(500).json({ error: "That didn't work" });
+}
+
+/** POST /admin/referral-link?friend=&referrer= (the proxy forwards the query). */
+export async function referralLink(req: Request, res: Response) {
+  const { friend, referrer } = req.query;
+  if (typeof friend !== "string" || typeof referrer !== "string" || !friend.trim() || !referrer.trim()) {
+    return res.status(400).json({ error: "Both usernames are required" });
+  }
+  try {
+    await adminLinkReferral(friend, referrer);
+    return res.json({ ok: true });
+  } catch (error: any) {
+    return referralFailure(res, error);
+  }
+}
+
+/** POST /admin/referral-reject?friend= */
+export async function referralReject(req: Request, res: Response) {
+  const { friend } = req.query;
+  if (typeof friend !== "string" || !friend.trim()) {
+    return res.status(400).json({ error: "A username is required" });
+  }
+  try {
+    await adminRejectReferral(friend);
+    return res.json({ ok: true });
+  } catch (error: any) {
+    return referralFailure(res, error);
+  }
 }

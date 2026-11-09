@@ -22,7 +22,11 @@
     "angular": false,
     "bodyOpacity": 1,
     "core": "#E8FFF4FF",
-    "effects": [],
+    "effects": [
+      "embers",
+      "halo",
+      "sheen"
+    ],
     "end": [
       0.5,
       1

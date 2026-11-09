@@ -164,6 +164,27 @@ struct ReferralsView: View {
                 }
             }
             Spacer(minLength: 0)
+            if let id = reward.item_id, let item = FlameyItem(rawValue: id) {
+                FlameyItemArt(item: item)
+                    .frame(width: 56, height: 56)
+                    .clipped()
+                    .accessibilityHidden(true)
+            } else if let icon = rewardIcon(reward) {
+                Image(systemName: icon)
+                    .font(.system(size: 24))
+                    .foregroundColor(.orange)
+                    .frame(width: 56, height: 56)
+                    .accessibilityHidden(true)
+            }
+        }
+    }
+
+    private func rewardIcon(_ reward: ReferralStatus.Reward) -> String? {
+        switch reward.kind {
+        case "medal": return "medal.fill"
+        case "token": return "shield.lefthalf.filled"
+        case "free_year", "lifetime": return "sparkles"
+        default: return nil
         }
     }
 

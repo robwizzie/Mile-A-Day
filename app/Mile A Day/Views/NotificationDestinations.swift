@@ -50,6 +50,7 @@ enum NotificationDestination: Identifiable, Equatable {
         case "daily_reminder":
             // Only the reminder that NAMES today's challenge; a plain, duel or
             // win-back reminder keeps going to the Dashboard.
+            if data["kind"] == "win_back", data["goal_id"] != nil { return .communityGoal }
             return data["kind"] == "challenge" ? .challenges : nil
         case "friend_badge_earned":
             guard let userId = data["sender_id"], !userId.isEmpty,
