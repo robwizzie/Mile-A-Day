@@ -685,10 +685,18 @@ function feedRoleStatements(
  * competition scores.
  *
  * A pair is the same run when all three hold:
- *   - **Different apps.** Two workouts from the SAME bundle id are never
- *     duplicates — that's a user legitimately logging two sessions, and one app
- *     doesn't double-write itself. A null bundle id (pre-feature rows, older
- *     clients) matches nothing; unknown provenance fails open.
+ *   - **Different apps.** Two workouts from the SAME bundle id are normally
+ *     not duplicates — that's a user legitimately logging two sessions. A null
+ *     bundle id (pre-feature rows, older clients) matches nothing; unknown
+ *     provenance fails open.
+ *     The one exception is an EXACT COPY: same app, same end second, same
+ *     duration, same distance. Apps do double-write themselves — Strava,
+ *     Garmin Connect, Fitbit and Oura were all seen writing one activity to
+ *     HealthKit two to four times under fresh UUIDs (Nov 2026: ~350 extra rows
+ *     still counting across ~20 users). Two genuine sessions can't end on the
+ *     same second with the same length and distance, so an exact copy is
+ *     excluded even behind the grandfather line: it never removes a streak
+ *     day (the original stays on that day), only the inflated miles.
  *   - **They genuinely overlap in time**, by at least half of the shorter
  *     workout. Bare interval intersection is too weak: a cooldown walk that
  *     clips the end of a run shares a minute without being the same activity.
@@ -711,6 +719,18 @@ const DUPLICATE_MIN_OVERLAP_RATIO = 0.5;
 const DUPLICATE_DISTANCE_TOLERANCE = 0.2;
 /** Absolute floor for the above, so short walks aren't held to a few feet. */
 const DUPLICATE_DISTANCE_FLOOR = 0.1;
+
+/**
+ * SQL: are workout rows `a` and `b` the same app's exact copy of one activity?
+ * Columns `source_bundle_id`, `total_duration`, `distance` and an end time
+ * (`endsCol`) on both. Tolerances only absorb float/rounding noise.
+ */
+function exactCopySql(a: string, b: string, endsCol: string): string {
+  return `(${a}.source_bundle_id = ${b}.source_bundle_id
+		AND abs(EXTRACT(EPOCH FROM (${a}.${endsCol} - ${b}.${endsCol}))) <= 1
+		AND abs(${a}.total_duration - ${b}.total_duration) <= 1
+		AND abs(${a}.distance - ${b}.distance) <= 0.005)`;
+}
 
 /**
  * How much of the SHORTER workout must sit inside the longer one before it's
@@ -823,7 +843,10 @@ function duplicateExclusionStatements(
 		FROM ranked a
 		JOIN ranked b
 			ON b.pref < a.pref
-			AND a.source_bundle_id <> b.source_bundle_id
+			AND (
+				-- The same app writing one activity twice: always the same run.
+				${exactCopySql("a", "b", "ends_at")}
+				OR (a.source_bundle_id <> b.source_bundle_id
 			AND EXTRACT(EPOCH FROM (
 				LEAST(a.ends_at, b.ends_at) - GREATEST(a.starts_at, b.starts_at)
 			)) >= $3 * LEAST(a.total_duration, b.total_duration)
@@ -851,6 +874,8 @@ function duplicateExclusionStatements(
 					AND a.distance <= b.distance
 				)
 			)
+			)
+		)
 	),
 	-- A row is a duplicate if any better-ranked row is the same run...
 	dups AS (SELECT DISTINCT dup_id FROM same_run),
@@ -926,8 +951,16 @@ function duplicateExclusionStatements(
 				AND w.duplicate_of IS NOT NULL
 				-- ...but never over the top of "count it".
 				AND w.duplicate_decision IS DISTINCT FROM 'count'
-				AND u.dedupe_since IS NOT NULL
-				AND w.created_at >= u.dedupe_since
+				AND (
+					(u.dedupe_since IS NOT NULL AND w.created_at >= u.dedupe_since)
+					-- An exact copy from the same app is never a second
+					-- session, so the grandfather line doesn't protect it.
+					OR EXISTS (
+						SELECT 1 FROM workouts k
+						WHERE k.workout_id = w.duplicate_of
+							AND ${exactCopySql("k", "w", "device_end_date")}
+					)
+				)
 			)
 		)`,
       params: [userId, localDate, enabled],

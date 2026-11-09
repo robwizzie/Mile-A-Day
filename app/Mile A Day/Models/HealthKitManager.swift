@@ -2542,10 +2542,13 @@ enum WorkoutDedup {
 
     /// Two recordings of one real-world activity.
     ///
-    /// Same-source pairs are never matched: one app segmenting its own walk is
-    /// that app's business, and UUID equality already covers true repeats.
+    /// Same-source pairs normally aren't matched: one app segmenting its own
+    /// walk is that app's business. The exception is an exact copy (same end
+    /// second, length and distance): Strava, Garmin Connect, Fitbit and Oura
+    /// write one activity to Health more than once under fresh UUIDs. Mirrors
+    /// `exactCopySql` in the backend.
     private static func isSameActivity(_ a: Candidate, _ b: Candidate) -> Bool {
-        guard a.bundleId != b.bundleId else { return false }
+        guard a.bundleId != b.bundleId else { return isExactCopy(a, b) }
 
         let overlap = min(a.end, b.end).timeIntervalSince(max(a.start, b.start))
         guard overlap >= minOverlapRatio * min(a.duration, b.duration) else {
@@ -2562,6 +2565,12 @@ enum WorkoutDedup {
         // through writes a short workout inside the long one, and 0.36 vs 1.84
         // fails every distance test while being unmistakably the same walk.
         return overlap >= containmentRatio * a.duration && a.miles <= b.miles
+    }
+
+    private static func isExactCopy(_ a: Candidate, _ b: Candidate) -> Bool {
+        abs(a.end.timeIntervalSince(b.end)) <= 1
+            && abs(a.duration - b.duration) <= 1
+            && abs(a.miles - b.miles) <= 0.005
     }
 
     /// Why a workout isn't in the total. Nil means it is.
