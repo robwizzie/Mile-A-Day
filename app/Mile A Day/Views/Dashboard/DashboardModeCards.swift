@@ -39,8 +39,8 @@ struct DashboardStartMileButton: View {
     }
 
     private var buttonTitle: String {
-        if hasActiveWorkout { return "Resume workout" }
-        return goalDone ? "Go another mile" : "Start your mile"
+        if hasActiveWorkout { return String(localized: "Resume workout") }
+        return goalDone ? String(localized: "Go another mile") : String(localized: "Start your mile")
     }
 }
 
@@ -54,7 +54,7 @@ struct DashboardStartMileButton: View {
 /// there is no marker or third label row to collide with what's below.
 struct DashboardMilestoneBar: View {
     let streak: Int
-    var title: String = "Streak milestone"
+    var title: String = String(localized: "Streak milestone")
 
     private static let maxNotches = 12
 
@@ -273,6 +273,10 @@ struct FunDashboardBody: View {
             showWorkoutView: $showWorkoutView,
             onLogPastWorkout: onLogPastWorkout
         )
+        // Friend requests come right after the day's action (they used to
+        // lead the page, which pushed Start under the tab bar on small
+        // phones). Draws nothing when there are none.
+        FriendRequestsHomeRow(friendService: friendService)
         // Mile A Day+ at the moment it would have helped: hides itself
         // unless the streak is at risk or Plus would already hold a Save.
         // Its body is an always-present (empty) stack, so it shares a
@@ -599,7 +603,7 @@ private struct ModernHeroCard: View {
                     Image(systemName: "shield.lefthalf.filled")
                         .madFont(size: 10, weight: .bold)
                         .accessibilityHidden(true)
-                    Text("\(readyTokens) \(readyTokens == 1 ? "saver" : "savers")")
+                    (readyTokens == 1 ? Text("1 saver") : Text("\(readyTokens) savers"))
                         .madFont(size: 12, weight: .semibold, design: .rounded)
                 }
                 // Quiet beside the streak: savers are a footnote to it, and the
@@ -630,12 +634,12 @@ private struct ModernHeroCard: View {
     }
 
     private var statusText: String {
-        if injuryPause.isPaused { return "Paused for injury" }
-        if trustedDone { return "Done today" }
-        if savedToday != nil { return "Covered today" }
-        if !distanceIsFresh { return "Syncing today" }
-        if userManager.currentUser.isStreakAtRisk { return "Streak at risk" }
-        return timeRemainingText.isEmpty ? "Today's mile" : "\(formattedTimeOnly) left"
+        if injuryPause.isPaused { return String(localized: "Paused for injury") }
+        if trustedDone { return String(localized: "Done today") }
+        if savedToday != nil { return String(localized: "Covered today") }
+        if !distanceIsFresh { return String(localized: "Syncing today") }
+        if userManager.currentUser.isStreakAtRisk { return String(localized: "Streak at risk") }
+        return timeRemainingText.isEmpty ? String(localized: "Today's mile") : String(localized: "\(formattedTimeOnly) left")
     }
 
     private var formattedTimeOnly: String {
@@ -643,7 +647,7 @@ private struct ModernHeroCard: View {
         let remaining = secondsUntilLocalMidnight
         let hours = Int(remaining) / 3600
         let minutes = Int(remaining) % 3600 / 60
-        return hours > 0 ? "\(hours)h \(minutes)m" : "\(minutes)m"
+        return hours > 0 ? String(localized: "\(hours)h \(minutes)m") : "\(minutes)m"
     }
 
     private func updateTimeRemaining() {
@@ -652,9 +656,9 @@ private struct ModernHeroCard: View {
 
     private var milestoneCaption: String {
         guard let next = StreakMilestone.next(after: userManager.currentUser.streak) else {
-            return "Legend status"
+            return String(localized: "Legend status")
         }
-        return "\(next.daysToGo) to Day \(next.value)"
+        return String(localized: "\(next.daysToGo) to Day \(next.value)")
     }
 
     private var modernProgressLine: some View {
@@ -771,8 +775,47 @@ private struct ModernHeroStatLine: View {
     let unit: String
     let label: String
     let tint: Color
+    /// Fun hero: "1.00 mi to go" on ONE baseline (the stacked form spent
+    /// two lines per fact). Falls back to stacked when it doesn't fit.
+    var inline: Bool = false
 
     var body: some View {
+        if inline {
+            ViewThatFits(in: .horizontal) {
+                inlineForm
+                stackedForm
+            }
+        } else {
+            stackedForm
+        }
+    }
+
+    private var inlineForm: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Image(systemName: icon)
+                .madFont(size: 11, weight: .bold, maxScale: 1.3)
+                .foregroundColor(tint)
+                .accessibilityHidden(true)
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(value)
+                    .madFont(size: 20, weight: .black, design: .rounded, monospacedDigit: true)
+                    .foregroundColor(.white)
+                if !unit.isEmpty {
+                    Text(unit)
+                        .madFont(size: 12, weight: .bold, design: .rounded)
+                        .foregroundColor(.white.opacity(0.55))
+                }
+            }
+            Text(label)
+                .madFont(size: 12, weight: .semibold, design: .rounded)
+                .foregroundColor(.white.opacity(0.5))
+        }
+        .lineLimit(1)
+        .fixedSize()
+        .frame(maxWidth: .infinity, minHeight: 30, alignment: .leading)
+    }
+
+    private var stackedForm: some View {
         // The number leads; what it means sits under it in plain words, with
         // the state colour on a small glyph rather than a filled icon circle.
         VStack(alignment: .leading, spacing: 2) {
@@ -840,6 +883,9 @@ private struct HeroStatColumn: View {
     /// Opens the Steps screen (the Steps tile that used to be its door is
     /// gone: it repeated the goal bars' step count).
     var onOpenSteps: (() -> Void)? = nil
+    /// Fun hero: one line per fact, no divider, and no "left today" line
+    /// (the time rides in the status pill under the streak).
+    var compact: Bool = false
 
     private var goal: Double { max(goalMiles, 0.01) }
     private var milesDone: Bool { ProgressCalculator.isGoalCompleted(current: currentDistance, goal: goal) }
@@ -854,18 +900,19 @@ private struct HeroStatColumn: View {
         // left stops mattering, so the column takes over the facts the bars
         // no longer show: today's best pace, and the steps (or, on a day the
         // steps finished, the distance).
-        VStack(spacing: 0) {
+        VStack(spacing: compact ? 2 : 0) {
             middleLine
-            ModernHeroDivider()
+            if !compact { ModernHeroDivider() }
             if dayDone {
                 doneSecondLine
-            } else {
+            } else if !compact {
                 ModernHeroStatLine(
                     icon: "clock.fill",
                     value: timeLeftText.isEmpty ? "--" : timeLeftText,
                     unit: "",
-                    label: "left today",
-                    tint: statusColor
+                    label: String(localized: "left today"),
+                    tint: statusColor,
+                    inline: compact
                 )
             }
         }
@@ -883,7 +930,8 @@ private struct HeroStatColumn: View {
                     value: todaySteps.formatted(),
                     unit: "steps",
                     label: "today",
-                    tint: .orange
+                    tint: .orange,
+                    inline: compact
                 )
                 .contentShape(Rectangle())
             }
@@ -896,7 +944,8 @@ private struct HeroStatColumn: View {
                 value: currentDistance.distanceText,
                 unit: DistanceUnits.current.abbreviation,
                 label: "today",
-                tint: MADTheme.Colors.walkBlue
+                tint: MADTheme.Colors.walkBlue,
+                inline: compact
             )
         }
     }
@@ -911,24 +960,27 @@ private struct HeroStatColumn: View {
                 icon: "flag.checkered",
                 value: max(goal - currentDistance, 0).distanceToGoText,
                 unit: DistanceUnits.current.abbreviation,
-                label: "to go",
-                tint: MADTheme.Colors.walkBlue
+                label: String(localized: "to go"),
+                tint: MADTheme.Colors.walkBlue,
+                inline: compact
             )
         } else if let pace = fastestPace {
             ModernHeroStatLine(
                 icon: "timer",
                 value: Self.formatPace(pace),
                 unit: DistanceUnits.current.paceSuffix,
-                label: "today's best pace",
-                tint: MADTheme.Colors.walkBlue
+                label: String(localized: "today's best pace"),
+                tint: MADTheme.Colors.walkBlue,
+                inline: compact
             )
         } else {
             ModernHeroStatLine(
                 icon: "checkmark.circle.fill",
                 value: "Done",
                 unit: "",
-                label: "today's goal",
-                tint: MADTheme.Colors.success
+                label: String(localized: "today's goal"),
+                tint: MADTheme.Colors.success,
+                inline: compact
             )
         }
     }
@@ -1165,10 +1217,10 @@ private struct DailyGoalBars: View {
     }
 
     private var accessibilityText: String {
-        let milesPart = "\(miles.distanceText) of \(goalText) \(DistanceUnits.current.plural)"
-        let stepsPart = "\(steps.formatted()) of 10,000 steps"
-        let status = done ? "Today's goal is done." : "Either one finishes today."
-        return "\(milesPart), or \(stepsPart). \(status)"
+        let milesPart = String(localized: "\(miles.distanceText) of \(goalText) \(DistanceUnits.current.plural)")
+        let stepsPart = String(localized: "\(steps.formatted()) of 10,000 steps")
+        let status = done ? String(localized: "Today's goal is done.") : String(localized: "Either one finishes today.")
+        return String(localized: "\(milesPart), or \(stepsPart). \(status)")
     }
 }
 
@@ -1505,10 +1557,10 @@ struct ModernChallengeRow: View {
     }
 
     private func progressLabel(_ value: Double) -> String {
-        if value <= 0 { return "Start today's effort" }
-        if value < 0.5 { return "Building progress" }
-        if value < 0.85 { return "Closing in" }
-        return "Almost there"
+        if value <= 0 { return String(localized: "Start today's effort") }
+        if value < 0.5 { return String(localized: "Building progress") }
+        if value < 0.85 { return String(localized: "Closing in") }
+        return String(localized: "Almost there")
     }
 
     private func refreshFromService() {
@@ -1551,7 +1603,23 @@ private struct FlameBuddyHeroCard: View {
     /// hero is shorter and the stat column fits its contents. One scale on
     /// the column keeps every internal offset (ground under feet, button
     /// under ground) as it was.
-    private static let flameyScale: CGFloat = 0.9
+    private static let flameyScale: CGFloat = 0.8
+    /// The 0.9 the column was drawn at before the stat column was condensed:
+    /// the Closet button keeps that size (counter-scaled), so its tap target
+    /// doesn't shrink with him.
+    private static let closetButtonScale: CGFloat = 0.9
+    /// His column's unscaled height (frame top to just under the Closet
+    /// button): the 246pt the hero reserved at the old 0.9 scale, unscaled.
+    /// A FIXED design value, never the text-scaled `statFrameHeight`: his
+    /// art doesn't grow with Dynamic Type, the stats do.
+    private static let buddyColumnHeight: CGFloat = 246 / 0.9
+    /// Extra room for the counter-scaled Closet button's lower edge.
+    private static let closetOverhang: CGFloat = 6
+    /// The stat column's measured natural height (`funStatRows`). The hero is
+    /// as tall as the TALLER of his scaled column and the stats, so large
+    /// text grows the card and nothing is ever clipped; never a predicted
+    /// height.
+    @State private var statsHeight: CGFloat = 0
 
     @ObservedObject var healthManager: HealthKitManager
     @ObservedObject var userManager: UserManager
@@ -1802,6 +1870,18 @@ private struct FlameBuddyHeroCard: View {
         return max(0, (extent - (8 + 0.17 * buddySize) + 6).rounded(.up))
     }
 
+    /// The taller of his scaled column (with the outfit's headroom, so rocket
+    /// boots, crowns and his bubble stay inside) and the measured stats.
+    private func heroHeight(top: CGFloat) -> CGFloat {
+        let buddy = (Self.buddyColumnHeight + top) * Self.flameyScale + Self.closetOverhang
+        return max(buddy, statsHeight + Self.saversRoom)
+    }
+
+    /// The strip at the top of the stat column the savers' shield owns, so
+    /// the streak number never runs under it. Fixed: the shield's font caps
+    /// at 1.3× (6pt inset + ~18pt glyph at the cap).
+    private static let saversRoom: CGFloat = 24
+
     /// The stat frame's width, measured (the headroom needs his size BEFORE
     /// the frame's height is set). 0 until the first layout pass.
     @State private var heroFrameWidth: CGFloat = 0
@@ -1884,6 +1964,10 @@ private struct FlameBuddyHeroCard: View {
                         // with the stats.
                         if !injuryPause.isPaused {
                             HeroClosetButton()
+                                // Back to the size it had at the old 0.9
+                                // column scale: the art shrank, its tap
+                                // target must not.
+                                .scaleEffect(Self.closetButtonScale / Self.flameyScale)
                                 .offset(y: Self.groundBaseline + top + 32)
                         }
                     }
@@ -1891,16 +1975,28 @@ private struct FlameBuddyHeroCard: View {
                     .frame(width: leftWidth, height: geo.size.height, alignment: .top)
 
                     funStatRows
-                        // Spread over his whole frame (see `funStatRows`): the
-                        // streak at the top, the day's lines down by his feet.
                         .padding(.top, 2)
                         .padding(.bottom, 4)
-                        .frame(width: rightWidth, height: geo.size.height, alignment: .top)
+                        // NATURAL height (fixedSize): measured inside a
+                        // shorter frame, the stats compressed (the milestone
+                        // line shrank) and the card never grew to fit them.
+                        // `heroHeight` then takes the taller side.
+                        .fixedSize(horizontal: false, vertical: true)
+                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { statsHeight = $0 }
+                        // Centred in what's left under the savers' row: a
+                        // tall hat (his headroom) makes his side taller than
+                        // the stats, and top-aligned that left one big band
+                        // under them. The shield is pinned separately.
+                        .frame(width: rightWidth, height: max(0, geo.size.height - Self.saversRoom), alignment: .center)
+                        .padding(.top, Self.saversRoom)
+                        // The savers stay in the hero's top-right corner,
+                        // whatever he wears or however tall the card grows.
+                        .overlay(alignment: .topTrailing) { saversChip }
                 }
                 .onAppear { heroFrameWidth = geo.size.width }
                 .onChange(of: geo.size.width) { _, width in heroFrameWidth = width }
             }
-            .frame(height: statFrameHeight + top * Self.flameyScale)
+            .frame(height: heroHeight(top: top))
 
             if !injuryPause.isPaused {
                 DailyGoalBars(
@@ -1987,39 +2083,44 @@ private struct FlameBuddyHeroCard: View {
         // own line under the number "day streak" read as a separate fact.
         // Narrower columns (or a 4-digit streak) fall back to "days", then
         // to the stacked form.
-        return VStack(alignment: .leading, spacing: 1) {
-            ViewThatFits(in: .horizontal) {
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    streakNumber
-                    streakUnit("day streak")
+        // Option 3: the streak and a shield count for the savers on ONE row,
+        // then one status pill that also carries the time left ("Streak at
+        // risk · 3h 23m left"). It was five lines: number, status, savers,
+        // and the time left as its own two-line stat further down.
+        return VStack(alignment: .leading, spacing: 6) {
+            // Tight spacing: at 375pt the column is ~148pt, and "87 days"
+            // plus the shield only just fit on one line.
+            // `.top`: the savers sit in the column's top-right corner, level
+            // with the top of the number, never centred beside it.
+            HStack(alignment: .top, spacing: 2) {
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        streakNumber
+                        streakUnit("day streak")
+                    }
+                    HStack(alignment: .firstTextBaseline, spacing: 5) {
+                        streakNumber
+                        streakUnit("days")
+                    }
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("\(heroStreakValue)")
+                            .madFont(size: 46, weight: .black, design: .rounded, monospacedDigit: true)
+                            .foregroundColor(.white)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.55)
+                        streakUnit("day streak")
+                    }
                 }
-                HStack(alignment: .firstTextBaseline, spacing: 5) {
-                    streakNumber
-                    streakUnit("days")
-                }
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("\(heroStreakValue)")
-                        .madFont(size: 46, weight: .black, design: .rounded, monospacedDigit: true)
-                        .foregroundColor(.white)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.55)
-                    streakUnit("day streak")
-                }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("\(heroStreakValue) day streak")
+                Spacer(minLength: 0)
             }
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel("\(heroStreakValue) day streak")
 
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 8) {
-                    streakStatus(gold: gold)
-                    saversLine
-                }
-                VStack(alignment: .leading, spacing: 2) {
-                    streakStatus(gold: gold)
-                    saversLine
-                }
-            }
-            .padding(.top, 5)
+            statusPill(gold: gold)
+
+            // A Save already committed to a missed day says so in words: the
+            // streak beside it reads reset until the morning sweep.
+            pendingSaveLine
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -2032,7 +2133,7 @@ private struct FlameBuddyHeroCard: View {
             .fixedSize()
     }
 
-    private func streakUnit(_ text: String) -> some View {
+    private func streakUnit(_ text: LocalizedStringKey) -> some View {
         Text(text)
             .madFont(size: 15, weight: .heavy, design: .rounded)
             .foregroundColor(.orange)
@@ -2040,38 +2141,114 @@ private struct FlameBuddyHeroCard: View {
             .fixedSize()
     }
 
-    /// The crown on a record run, unless the day is urgent ("Syncing",
-    /// "Streak at risk"), which always wins the line.
-    @ViewBuilder
-    private func streakStatus(gold: Color) -> some View {
-        if atAllTimeBest && !statusIsUrgent {
-            HStack(spacing: 3) {
-                Image(systemName: "crown.fill")
-                    .madFont(size: 10, weight: .bold)
-                    .accessibilityHidden(true)
-                Text("Best ever")
-                    .madFont(size: 12, weight: .bold, design: .rounded)
+    /// The day's state in one pill, with the time left riding along while
+    /// the mile is still owed. The crown ("Best ever") takes the pill on a
+    /// record run unless the day is urgent ("Syncing", "Streak at risk").
+    /// Never truncated: the full line, then "At risk" (it sits right under
+    /// the streak), then the same pill on two lines.
+    private func statusPill(gold: Color) -> some View {
+        let crowned = atAllTimeBest && !statusIsUrgent
+        let tint = crowned ? gold : statusColor
+        let showsTime = !trustedDone && !injuryPause.isPaused && savedToday == nil && !formattedTimeOnly.isEmpty
+        let atRisk = !crowned && statusText == String(localized: "Streak at risk")
+        return ViewThatFits(in: .horizontal) {
+            pillBody(tint: tint) {
+                HStack(spacing: 4) {
+                    pillStatus(crowned: crowned, short: false)
+                    if showsTime { pillTime }
+                }
             }
-            .foregroundColor(gold)
-            .lineLimit(1)
-            .fixedSize()
-        } else {
-            Text(statusText)
-                .madFont(size: 12, weight: .bold, design: .rounded)
-                .foregroundColor(statusColor)
-                .lineLimit(1)
-                .minimumScaleFactor(0.75)
+            if atRisk && showsTime {
+                pillBody(tint: tint) {
+                    HStack(spacing: 4) {
+                        pillStatus(crowned: crowned, short: true)
+                        pillTime
+                    }
+                }
+            }
+            pillBody(tint: tint, radius: 10) {
+                VStack(alignment: .leading, spacing: 1) {
+                    pillStatus(crowned: crowned, short: false)
+                    if showsTime { Text("\(formattedTimeOnly) left").monospacedDigit() }
+                }
+            }
         }
     }
 
-    /// "🛡 3 savers" — one tappable line under the streak, opening the
-    /// tokens screen. Hidden until the token status has loaded.
     @ViewBuilder
-    private var saversLine: some View {
+    private func pillStatus(crowned: Bool, short: Bool) -> some View {
+        if crowned {
+            HStack(spacing: 3) {
+                Image(systemName: "crown.fill")
+                    .madFont(size: 10, weight: .bold, maxScale: 1.3)
+                    .accessibilityHidden(true)
+                Text("Best ever")
+            }
+        } else if short {
+            Text("At risk")
+        } else {
+            Text(statusText)
+        }
+    }
+
+    private var pillTime: some View {
+        HStack(spacing: 4) {
+            Text(verbatim: "·").opacity(0.6)
+            Text("\(formattedTimeOnly) left").monospacedDigit()
+        }
+    }
+
+    private func pillBody<Content: View>(tint: Color, radius: CGFloat? = nil,
+                                         @ViewBuilder _ content: () -> Content) -> some View {
+        content()
+            .madFont(size: 12, weight: .bold, design: .rounded)
+            .foregroundColor(tint)
+            .lineLimit(1)
+            .fixedSize()
+            .padding(.horizontal, 9)
+            .padding(.vertical, 4)
+            .background(
+                RoundedRectangle(cornerRadius: radius ?? 100, style: .continuous).fill(tint.opacity(0.16))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: radius ?? 100, style: .continuous).strokeBorder(tint.opacity(0.24), lineWidth: 1)
+            )
+    }
+
+    /// The savers as a shield and a count beside the streak, opening the
+    /// tokens screen. Hidden until the token status has loaded, and while a
+    /// committed Save is pending (`pendingSaveLine` says that in words).
+    @ViewBuilder
+    private var saversChip: some View {
+        if let payload = tokensState.payload, payload.pending_save == nil {
+            Button {
+                showTokens = true
+            } label: {
+                HStack(spacing: 2) {
+                    Image(systemName: "shield.lefthalf.filled")
+                        .madFont(size: 11, weight: .bold, maxScale: 1.3)
+                        .accessibilityHidden(true)
+                    Text("\(readyTokens)")
+                        .madFont(size: 13, weight: .heavy, design: .rounded, maxScale: 1.3)
+                }
+                .foregroundColor(.white.opacity(readyTokens > 0 ? 0.7 : 0.4))
+                // Bare glyph + number: a capsule here cost the width that
+                // keeps "87 days" on one line beside it. The hit area stays
+                // 44pt tall.
+                .padding(.top, 6)
+                .frame(minWidth: 24, minHeight: 44, alignment: .top)
+                .contentShape(Rectangle())
+                .fixedSize()
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(readyTokens == 1 ? "1 streak saver ready" : "\(readyTokens) streak savers ready")
+            .accessibilityHint("Opens your streak tokens")
+        }
+    }
+
+    @ViewBuilder
+    private var pendingSaveLine: some View {
         if let pending = tokensState.payload?.pending_save {
-            // A Save already committed to a missed day: the number beside
-            // this reads reset until the morning sweep spends it, so say so
-            // here instead of "N savers" next to an apparently broken streak.
             Button {
                 showTokens = true
             } label: {
@@ -2089,27 +2266,6 @@ private struct FlameBuddyHeroCard: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel(pending.accessibilitySummary)
-            .accessibilityHint("Opens your streak tokens")
-        } else if tokensState.payload != nil {
-            Button {
-                showTokens = true
-            } label: {
-                HStack(spacing: 3) {
-                    Image(systemName: "shield.lefthalf.filled")
-                        .madFont(size: 10, weight: .bold)
-                        .accessibilityHidden(true)
-                    Text("\(readyTokens) \(readyTokens == 1 ? "saver" : "savers")")
-                        .madFont(size: 12, weight: .semibold, design: .rounded)
-                }
-                // Quiet beside the streak: savers are a footnote to it, and the
-                // crown/status beside them already carries the colour.
-                .foregroundColor(.white.opacity(0.55))
-                .lineLimit(1)
-                .minimumScaleFactor(0.6)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("\(readyTokens) streak savers ready")
             .accessibilityHint("Opens your streak tokens")
         }
     }
@@ -2175,9 +2331,12 @@ private struct FlameBuddyHeroCard: View {
             // With only the streak and the day's lines, either the top or
             // the middle was an empty band; the milestone belongs with the
             // streak anyway, and moving it here takes a row off the card.
-            Spacer(minLength: 4)
+            // Fixed gaps, not spacers: with the column down to four facts the
+            // spacers spread them over Flamey's whole frame and it read as
+            // loose. Top-aligned with him; any spare height falls below.
             DashboardMilestoneBar(streak: userManager.currentUser.streak)
-            Spacer(minLength: 4)
+                .padding(.top, 6)
+                .padding(.bottom, 12)
 
             HeroStatColumn(
                 currentDistance: currentDistance,
@@ -2187,7 +2346,8 @@ private struct FlameBuddyHeroCard: View {
                 statusColor: statusColor,
                 todaySteps: todaySteps,
                 stepGoalMet: stepGoalMet,
-                onOpenSteps: { showSteps = true }
+                onOpenSteps: { showSteps = true },
+                compact: true
             )
 
             RecordGhostRow(
@@ -2202,7 +2362,7 @@ private struct FlameBuddyHeroCard: View {
     private var heroChips: some View {
         ModernMetricPill(
             icon: trustedDone ? "checkmark.circle.fill" : "figure.run",
-            title: trustedDone ? "Logged" : "To go",
+            title: trustedDone ? String(localized: "Logged") : String(localized: "To go"),
             // Logged floors, "To go" ceils — mirrored so neither side can
             // claim the goal is closer than it is (0.995 logged used to
             // round up to "1.00 mi" on an incomplete day).
@@ -2213,7 +2373,7 @@ private struct FlameBuddyHeroCard: View {
         )
         ModernMetricPill(
             icon: "clock.fill",
-            title: trustedDone ? "Safe" : "Left today",
+            title: trustedDone ? String(localized: "Safe") : String(localized: "Left today"),
             value: trustedDone ? "Done" : (formattedTimeOnly.isEmpty ? "--" : formattedTimeOnly),
             tint: trustedDone ? .green : statusColor
         )
@@ -2243,12 +2403,12 @@ private struct FlameBuddyHeroCard: View {
     }
 
     private var statusText: String {
-        if injuryPause.isPaused { return "Paused for injury" }
-        if trustedDone { return "Streak safe" }
-        if savedToday != nil { return "Covered today" }
-        if !distanceIsFresh { return "Syncing" }
-        if userManager.currentUser.isStreakAtRisk { return "Streak at risk" }
-        return "Keep it alive"
+        if injuryPause.isPaused { return String(localized: "Paused for injury") }
+        if trustedDone { return String(localized: "Streak safe") }
+        if savedToday != nil { return String(localized: "Covered today") }
+        if !distanceIsFresh { return String(localized: "Syncing") }
+        if userManager.currentUser.isStreakAtRisk { return String(localized: "Streak at risk") }
+        return String(localized: "Keep it alive")
     }
 
     /// Same clock as the Modern hero — `timeUntilStreakReset` goes nil once the
@@ -2260,7 +2420,7 @@ private struct FlameBuddyHeroCard: View {
         let remaining = secondsUntilLocalMidnight
         let hours = Int(remaining) / 3600
         let minutes = Int(remaining) % 3600 / 60
-        return hours > 0 ? "\(hours)h \(minutes)m" : "\(minutes)m"
+        return hours > 0 ? String(localized: "\(hours)h \(minutes)m") : "\(minutes)m"
     }
 
     private var secondsUntilLocalMidnight: TimeInterval {

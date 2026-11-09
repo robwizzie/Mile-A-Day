@@ -53,7 +53,7 @@ struct CompetitionsListView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            MADTabHeader(title: "Compete", actions: headerActions)
+            MADTabHeader(title: String(localized: "Compete"), actions: headerActions)
                 .tourAnchor("compete.header")
 
             if !duoSpread {
@@ -62,13 +62,13 @@ struct CompetitionsListView: View {
                     options: [
                         .init(
                             id: .compete,
-                            title: "Compete",
+                            title: String(localized: "Compete"),
                             systemImage: "bolt.fill",
                             badgeCount: competitionService.invites.count
                         ),
                         .init(
                             id: .record,
-                            title: "History",
+                            title: String(localized: "History"),
                             systemImage: "trophy.fill",
                             badgeCount: 0
                         )

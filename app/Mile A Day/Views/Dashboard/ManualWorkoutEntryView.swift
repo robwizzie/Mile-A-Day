@@ -18,8 +18,38 @@ struct ManualWorkoutEntryView: View {
     @State private var showDiscardConfirmation = false
     @FocusState private var distanceFieldFocused: Bool
 
+    /// What was typed, in the DISPLAY unit. A comma is a decimal separator
+    /// too: a German keyboard's decimal pad types "1,2", which `Double`
+    /// rejected, so the form could never be saved there.
+    private var enteredDistance: Double? {
+        Double(distanceString.replacingOccurrences(of: ",", with: "."))
+    }
+
+    /// Miles, the unit everything is stored and synced in: km users type
+    /// kilometres (the field shows their unit) and it converts here.
     private var distance: Double? {
-        Double(distanceString)
+        enteredDistance.map { $0 / DistanceUnits.current.perMile }
+    }
+
+    /// One decimal separator, at most two decimals: the field used to take
+    /// "1.21.2", which showed as typed and silently disabled Save.
+    private static func sanitized(_ raw: String) -> String {
+        var out = ""
+        var seenSeparator = false
+        var decimals = 0
+        for ch in raw {
+            if ch.isNumber {
+                if seenSeparator {
+                    guard decimals < 2 else { continue }
+                    decimals += 1
+                }
+                out.append(ch)
+            } else if (ch == "." || ch == ","), !seenSeparator {
+                seenSeparator = true
+                out.append(ch)
+            }
+        }
+        return out
     }
 
     /// Anything the user would lose if the sheet closed right now. Drives both
@@ -43,13 +73,13 @@ struct ManualWorkoutEntryView: View {
         Calendar.current.date(byAdding: .day, value: -30, to: Date()) ?? Date()
     }
 
-    /// Computed pace in min/mi
+    /// Pace per DISPLAY unit ("/mi" or "/km").
     private var paceString: String? {
-        guard let d = distance, d > 0, totalDuration > 0 else { return nil }
+        guard let d = enteredDistance, d > 0, totalDuration > 0 else { return nil }
         let paceSeconds = totalDuration / d
         let mins = Int(paceSeconds) / 60
         let secs = Int(paceSeconds) % 60
-        return String(format: "%d:%02d /mi", mins, secs)
+        return String(format: "%d:%02d ", mins, secs) + DistanceUnits.current.paceSuffix
     }
 
     var body: some View {
@@ -251,12 +281,16 @@ struct ManualWorkoutEntryView: View {
             HStack(alignment: .firstTextBaseline, spacing: 4) {
                 TextField("0.00", text: $distanceString)
                     .keyboardType(.decimalPad)
+                    .onChange(of: distanceString) { _, raw in
+                        let clean = Self.sanitized(raw)
+                        if clean != raw { distanceString = clean }
+                    }
                     .font(.system(size: 44, weight: .bold, design: .rounded))
                     .foregroundColor(.white)
                     .multilineTextAlignment(.center)
                     .focused($distanceFieldFocused)
 
-                Text("mi")
+                Text(DistanceUnits.current.abbreviation)
                     .font(.system(size: 20, weight: .medium, design: .rounded))
                     .foregroundColor(.white.opacity(0.4))
             }
@@ -427,7 +461,7 @@ struct ManualWorkoutEntryView: View {
                 .foregroundColor(.white)
 
             if let d = distance {
-                Text(String(format: "%.2f mi", d))
+                Text(d.distanceFormatted)
                     .font(.system(size: 17, weight: .medium, design: .rounded))
                     .foregroundColor(.white.opacity(0.6))
             }

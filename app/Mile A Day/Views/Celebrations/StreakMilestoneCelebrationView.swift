@@ -119,7 +119,7 @@ struct StreakMilestoneCelebrationView: View {
 
     private static func dateText(_ date: Date) -> String {
         let f = DateFormatter()
-        f.dateFormat = "MMM d, yyyy"
+        f.setLocalizedDateFormatFromTemplate("MMMdyyyy")
         return f.string(from: date)
     }
 
@@ -339,7 +339,7 @@ struct StreakMilestoneCelebrationView: View {
 
     private static func shortDate(_ date: Date) -> String {
         let f = DateFormatter()
-        f.dateFormat = "M/d/yy"
+        f.setLocalizedDateFormatFromTemplate("Mdyy")
         return f.string(from: date)
     }
 

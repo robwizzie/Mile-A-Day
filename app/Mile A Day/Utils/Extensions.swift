@@ -146,7 +146,7 @@ extension Date {
     
     var formattedShortDate: String {
         let formatter = DateFormatter()
-        formatter.dateFormat = "MMM d, yyyy"
+        formatter.setLocalizedDateFormatFromTemplate("MMMdyyyy")
         return formatter.string(from: self)
     }
 }

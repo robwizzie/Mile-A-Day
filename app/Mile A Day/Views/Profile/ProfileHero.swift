@@ -30,12 +30,12 @@ enum ProfileBannerStyle: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .ember: return "Ember"
-        case .sunrise: return "Sunrise"
-        case .sky: return "Sky"
-        case .trail: return "Trail"
-        case .ghost: return "Ghost"
-        case .night: return "Night"
+        case .ember: return String(localized: "Ember")
+        case .sunrise: return String(localized: "Sunrise")
+        case .sky: return String(localized: "Sky")
+        case .trail: return String(localized: "Trail")
+        case .ghost: return String(localized: "Ghost")
+        case .night: return String(localized: "Night")
         }
     }
 
@@ -321,11 +321,11 @@ struct ProfileHero<Avatar: View, TopBar: View>: View {
 
     /// What the ring shows, for VoiceOver (the ring has no text of its own).
     private var goalAccessibilityValue: String {
-        if goalComplete { return "Today's goal done" }
-        if goalSavedToday != nil { return "Today is saved by a streak token" }
+        if goalComplete { return String(localized: "Today's goal done") }
+        if goalSavedToday != nil { return String(localized: "Today is saved by a streak token") }
         if let goalProgress {
             let percent = Int((max(0, min(1, goalProgress)) * 100).rounded(.down))
-            return "\(percent) percent of today's goal"
+            return String(localized: "\(percent) percent of today's goal")
         }
         return ""
     }
@@ -437,21 +437,21 @@ struct ProfileStatTiles<FriendsDestination: View>: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            tile(label: "Streak", value: "\(streak)", labelColor: MADTheme.Colors.madRed)
+            tile(label: String(localized: "Streak"), value: "\(streak)", labelColor: MADTheme.Colors.madRed)
             if let onTapMiles {
                 Button {
                     MADHaptics.tap()
                     onTapMiles()
                 } label: {
-                    tile(label: DistanceUnits.current.plural.capitalized, value: milesText, chevron: true)
+                    tile(label: DistanceUnits.current.pluralTitle, value: milesText, chevron: true)
                 }
                 .buttonStyle(.plain)
             } else {
-                tile(label: DistanceUnits.current.plural.capitalized, value: milesText)
+                tile(label: DistanceUnits.current.pluralTitle, value: milesText)
             }
             NavigationLink(destination: friendsDestination()) {
                 tile(
-                    label: friendCount == 1 ? "Friend" : "Friends",
+                    label: friendCount == 1 ? String(localized: "Friend") : String(localized: "Friends"),
                     value: friendCount.map { $0.formatted(.number.grouping(.automatic)) } ?? "—",
                     chevron: true
                 )
@@ -591,7 +591,7 @@ extension View {
 /// "Hall of Streaks", "Recent workouts"…). Callers pass sentence case; no
 /// tracked capitals.
 struct ProfileCardLabel: View {
-    let text: String
+    let text: LocalizedStringKey
 
     var body: some View {
         Text(text)
@@ -617,12 +617,12 @@ struct ProfileStat: Identifiable {
 
     /// Fastest mile, `pace` in minutes per mile (0 = none yet).
     static func bestPace(_ pace: TimeInterval, action: (() -> Void)? = nil) -> ProfileStat {
-        guard pace > 0 else { return ProfileStat(label: "Best pace", value: "—", action: action) }
+        guard pace > 0 else { return ProfileStat(label: String(localized: "Best pace"), value: "—", action: action) }
         let shown = pace / DistanceUnits.current.perMile
         let minutes = Int(shown)
         let seconds = min(59, Int(((shown - Double(minutes)) * 60).rounded()))
         return ProfileStat(
-            label: "Best pace",
+            label: String(localized: "Best pace"),
             value: String(format: "%d:%02d", minutes, seconds),
             unit: DistanceUnits.current.paceSuffix,
             action: action
@@ -632,7 +632,7 @@ struct ProfileStat: Identifiable {
     /// Most miles in one day.
     static func bestDay(_ miles: Double, action: (() -> Void)? = nil) -> ProfileStat {
         ProfileStat(
-            label: "Best day",
+            label: String(localized: "Best day"),
             value: String(format: "%.1f", miles.inDisplayUnit),
             unit: DistanceUnits.current.abbreviation,
             action: action
@@ -641,10 +641,10 @@ struct ProfileStat: Identifiable {
 
     /// Mean over the last seven days, zero days included (`nil` = not known).
     static func sevenDayAverage(_ days: [FriendDayMiles]?) -> ProfileStat {
-        guard let days, !days.isEmpty else { return ProfileStat(label: "7-day avg", value: "—") }
+        guard let days, !days.isEmpty else { return ProfileStat(label: String(localized: "7-day avg"), value: "—") }
         let average = days.reduce(0) { $0 + $1.miles } / Double(days.count)
         return ProfileStat(
-            label: "7-day avg",
+            label: String(localized: "7-day avg"),
             value: String(format: "%.1f", average.inDisplayUnit),
             unit: DistanceUnits.current.abbreviation
         )

@@ -48,10 +48,10 @@ struct CompetitionDayDetailSheet: View {
         case .day:
             if Calendar.current.isDateInToday(date) { return "Today" }
             if Calendar.current.isDateInYesterday(date) { return "Yesterday" }
-            f.dateFormat = "EEEE, MMM d"
+            f.setLocalizedDateFormatFromTemplate("EEEEMMMd")
             return f.string(from: date)
         case .week:
-            f.dateFormat = "MMM d"
+            f.setLocalizedDateFormatFromTemplate("MMMd")
             let end = Calendar.current.date(byAdding: .day, value: 6, to: date) ?? date
             return "Week of \(f.string(from: date)) – \(f.string(from: end))"
         case .month:

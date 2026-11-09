@@ -187,7 +187,7 @@ struct MemoriesDetailView: View {
 
     private static let dateFormatter: DateFormatter = {
         let f = DateFormatter()
-        f.dateFormat = "MMMM d, yyyy"
+        f.setLocalizedDateFormatFromTemplate("MMMMdyyyy")
         return f
     }()
 

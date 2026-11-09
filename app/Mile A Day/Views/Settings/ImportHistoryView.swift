@@ -324,7 +324,7 @@ struct ImportHistoryView: View {
             let last = pendingWorkouts.map({ $0.start }).max()
         else { return nil }
         let f = DateFormatter()
-        f.dateFormat = "MMM yyyy"
+        f.setLocalizedDateFormatFromTemplate("MMMyyyy")
         let a = f.string(from: first)
         let b = f.string(from: last)
         return a == b ? a : "\(a) – \(b)"

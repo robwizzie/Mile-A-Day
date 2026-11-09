@@ -105,10 +105,10 @@ final class LeaderboardViewModel {
     private func friendlyMessage(for error: Error) -> String {
         let ns = error as NSError
         if ns.domain == NSURLErrorDomain {
-            return "Couldn't reach the server. Check your connection."
+            return String(localized: "Couldn't reach the server. Check your connection.")
         }
         if error is DecodingError {
-            return "Decode error — backend response doesn't match. Update the app or backend."
+            return String(localized: "Decode error — backend response doesn't match. Update the app or backend.")
         }
         // APIError (and most other errors) conform to LocalizedError —
         // expose the real message so 500s, 404s, auth issues etc. are visible.
@@ -441,19 +441,25 @@ struct LeaderboardSection: View {
 
     private var emptyStateMessage: String {
         switch vm.metric {
-        case .streak: return "None of your friends have an active streak yet."
-        case .milesRan: return "None of your friends have logged runs for this period."
-        case .milesTotal: return "None of your friends have logged runs or walks for this period."
-        case .pace: return "No qualifying mile splits in this period yet."
+        case .streak: return String(localized: "None of your friends have an active streak yet.")
+        case .milesRan: return String(localized: "None of your friends have logged runs for this period.")
+        case .milesTotal: return String(localized: "None of your friends have logged runs or walks for this period.")
+        case .pace: return String(localized: "No qualifying mile splits in this period yet.")
         }
     }
 
     private var notRankedMessage: String {
         switch vm.metric {
-        case .streak: return "Start a streak to appear on the board."
-        case .milesRan: return "Log a run for \(vm.period.displayName.lowercased()) to climb the board."
-        case .milesTotal: return "Log a run or walk for \(vm.period.displayName.lowercased()) to climb the board."
-        case .pace: return "Run a mile in \(vm.period.displayName.lowercased()) to set a pace."
+        case .streak: return String(localized: "Start a streak to appear on the board.")
+        case .milesRan:
+            guard let when = vm.period.phrase else { return String(localized: "Log a run to climb the board.") }
+            return String(localized: "Log a run \(when) to climb the board.")
+        case .milesTotal:
+            guard let when = vm.period.phrase else { return String(localized: "Log a run or walk to climb the board.") }
+            return String(localized: "Log a run or walk \(when) to climb the board.")
+        case .pace:
+            guard let when = vm.period.phrase else { return String(localized: "Run a mile to set a pace.") }
+            return String(localized: "Run a mile \(when) to set a pace.")
         }
     }
 
@@ -655,9 +661,9 @@ struct LeaderboardSection: View {
     private var filterSubtitle: String {
         switch vm.metric {
         case .milesRan, .milesTotal, .pace:
-            return "\(vm.period.displayName) · Friends"
+            return String(localized: "\(vm.period.displayName) · Friends")
         case .streak:
-            return "Current streak · Friends"
+            return String(localized: "Current streak · Friends")
         }
     }
 

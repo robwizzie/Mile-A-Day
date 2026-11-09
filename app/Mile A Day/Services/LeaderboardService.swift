@@ -57,11 +57,25 @@ enum LeaderboardPeriod: String, CaseIterable, Identifiable {
 
     var displayName: String {
         switch self {
-        case .today: return "Today"
-        case .week: return "Week"
-        case .month: return "Month"
-        case .year: return "Year"
-        case .all: return "All-Time"
+        case .today: return String(localized: "Today")
+        case .week: return String(localized: "Week")
+        case .month: return String(localized: "Month")
+        case .year: return String(localized: "Year")
+        case .all: return String(localized: "All-Time")
+        }
+    }
+
+    /// Mid-sentence time frame ("this week"), for copy like "Log a run this
+    /// week…". nil for all-time, where the sentence needs no time frame.
+    /// (The empty states used to splice in `displayName.lowercased()`, which
+    /// read "for week".)
+    var phrase: String? {
+        switch self {
+        case .today: return String(localized: "today")
+        case .week: return String(localized: "this week")
+        case .month: return String(localized: "this month")
+        case .year: return String(localized: "this year")
+        case .all: return nil
         }
     }
 }

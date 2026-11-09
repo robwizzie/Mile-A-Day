@@ -378,7 +378,7 @@ struct ChallengeCompletionDetailSheet: View {
 
     private static let timeOfDayFormatter: DateFormatter = {
         let f = DateFormatter()
-        f.dateFormat = "h:mm a"
+        f.setLocalizedDateFormatFromTemplate("jmm")
         return f
     }()
 }
@@ -583,7 +583,7 @@ private struct SharedPhotoCard: View {
 
     private static let timeFormatter: DateFormatter = {
         let f = DateFormatter()
-        f.dateFormat = "h:mm a"
+        f.setLocalizedDateFormatFromTemplate("jmm")
         return f
     }()
 }

@@ -1864,7 +1864,7 @@ struct Last7DaysChart: View {
             HStack {
                 ProfileCardLabel(text: "Last 7 days")
                 Spacer()
-                Text(String(format: "%.1f mi total", weekTotal))
+                Text("\(weekTotal.distanceFormatted1) total")
                     .madFont(size: 12, weight: .semibold, design: .rounded)
                     .foregroundColor(.white.opacity(0.55))
             }
@@ -1994,7 +1994,7 @@ struct Last7DaysChart: View {
             if calendar.isDateInToday(day) { return "Today" }
             if calendar.isDateInYesterday(day) { return "Yesterday" }
             let formatter = DateFormatter()
-            formatter.dateFormat = "EEEE, MMM d"
+            formatter.setLocalizedDateFormatFromTemplate("EEEEMMMd")
             return formatter.string(from: day)
         }()
 

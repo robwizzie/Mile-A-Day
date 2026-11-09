@@ -365,14 +365,14 @@ struct HallOfStreaksSection: View {
 
     private static let dayFormat: DateFormatter = {
         let fmt = DateFormatter()
-        fmt.dateFormat = "MMM d"
+        fmt.setLocalizedDateFormatFromTemplate("MMMd")
         fmt.timeZone = TimeZone(identifier: "UTC")
         return fmt
     }()
 
     private static let dayYearFormat: DateFormatter = {
         let fmt = DateFormatter()
-        fmt.dateFormat = "MMM d, yyyy"
+        fmt.setLocalizedDateFormatFromTemplate("MMMdyyyy")
         fmt.timeZone = TimeZone(identifier: "UTC")
         return fmt
     }()

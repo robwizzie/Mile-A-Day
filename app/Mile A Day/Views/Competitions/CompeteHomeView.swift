@@ -244,7 +244,7 @@ struct CompeteHomeView: View {
     private var invitesSection: some View {
         Group {
             header(
-                title: competitionService.invites.count == 1 ? "1 invite" : "\(competitionService.invites.count) invites",
+                title: competitionService.invites.count == 1 ? String(localized: "1 invite") : String(localized: "\(competitionService.invites.count) invites"),
                 icon: "envelope.fill",
                 accent: MADTheme.Colors.madRed
             )
@@ -344,7 +344,7 @@ struct CompeteHomeView: View {
     private var fullStartSection: some View {
         Group {
             header(
-                title: "Start competing",
+                title: String(localized: "Start competing"),
                 icon: "plus.circle.fill",
                 accent: MADTheme.Colors.madRed
             )
@@ -408,8 +408,8 @@ struct CompeteHomeView: View {
         Group {
             if pendingDeleteId == competition.competition_id {
                 InlineConfirmBanner(
-                    title: "Delete \"\(competition.competition_name)\"?",
-                    subtitle: "Removes for everyone. Can't be undone.",
+                    title: String(localized: "Delete \"\(competition.competition_name)\"?"),
+                    subtitle: String(localized: "Removes for everyone. Can't be undone."),
                     icon: "trash.fill",
                     confirmLabel: "Delete",
                     accent: .red,
@@ -420,8 +420,8 @@ struct CompeteHomeView: View {
                 )
             } else if pendingLeaveId == competition.competition_id {
                 InlineConfirmBanner(
-                    title: "Leave \"\(competition.competition_name)\"?",
-                    subtitle: "You'll be removed from the standings.",
+                    title: String(localized: "Leave \"\(competition.competition_name)\"?"),
+                    subtitle: String(localized: "You'll be removed from the standings."),
                     icon: "rectangle.portrait.and.arrow.right",
                     confirmLabel: "Leave",
                     accent: .orange,

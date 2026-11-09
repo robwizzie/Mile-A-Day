@@ -1,4 +1,5 @@
 import SwiftUI
+import StoreKit
 import Combine
 import HealthKit
 import UserNotifications
@@ -55,6 +56,7 @@ struct MainTabView: View {
 
     // "Leave us a review" moment — gated to streak milestones by ReviewPromptManager.
     @StateObject private var reviewManager = ReviewPromptManager.shared
+    @Environment(\.requestReview) private var requestReview
 
     // Celebrations (flame, leaderboard climb, photo prompt…) host HERE, above
     // the whole TabView — not inside DashboardView. The manager marks a
@@ -82,10 +84,16 @@ struct MainTabView: View {
 
     /// How far a floating banner sits above the bottom edge. A Duo's tabs live
     /// in the side rail, so its bottom edge is free and 52pt only lifted the
-    /// banner onto Start.
+    /// banner onto Start. The floating tab bar's top is ~86pt above the
+    /// SCREEN bottom either way, and padding counts from the safe area, so a
+    /// home-button phone (no bottom inset: SE) needs all 86 or banners sat
+    /// inside the bar.
     private var bottomBarClearance: CGFloat {
-        DuoDevice.isDuo ? 12 : 52
+        DuoDevice.isDuo ? 12 : max(52, 86 - bottomSafeInset)
     }
+
+    /// The root's bottom safe-area inset (0 on home-button phones).
+    @State private var bottomSafeInset: CGFloat = 34
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -434,6 +442,15 @@ struct MainTabView: View {
                 )
             }
 
+            // Reads the bottom safe-area inset for `bottomBarClearance`.
+            Color.clear
+                .frame(height: 1)
+                .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.bottom } action: {
+                    bottomSafeInset = $0
+                }
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+
             // Sync status floats above the tab bar for the same reason as the
             // workout banner below, and above that banner when both show.
             SyncStatusBanner()
@@ -508,8 +525,9 @@ struct MainTabView: View {
                 showGuidedTour = true
             }
         }
-        .sheet(isPresented: $reviewManager.isPresented, onDismiss: handleReviewSheetDismiss) {
-            ReviewPromptView(manager: reviewManager)
+        // App Review 5.6.1: only the system prompt, never a custom rating sheet.
+        .onChange(of: reviewManager.requestNonce) { _, _ in
+            requestReview()
         }
         // One-time privacy walkthrough: first open after signing in (existing
         // users see it once after updating). Hosted at root like celebrations
@@ -750,24 +768,13 @@ struct MainTabView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
             let celebrations = CelebrationManager.shared
             guard !celebrations.isShowingCelebration, celebrations.celebrationQueue.isEmpty else { return }
+            // Never over the system Health sheet (it's up whenever access
+            // hasn't been granted yet).
+            guard healthManager.isAuthorized else { return }
+            // The token reveal / story overlays are not celebrations: wait them out too.
+            let tokens = StreakTokensState.shared
+            guard tokens.newlyEarned.isEmpty, tokens.storyEvent == nil else { return }
             reviewManager.evaluate(streak: userManager.currentUser.streak, allowPresent: true)
-        }
-    }
-
-    /// After the review sheet dismisses, if the user tapped the positive CTA,
-    /// open the App Store review page. We deliberately do NOT use StoreKit's
-    /// `requestReview` here: it's for unprompted moments, and Apple silently
-    /// no-ops it once the user is over the ~3/year quota or has already rated —
-    /// which made the button look broken. Our sheet IS the ask, so the tap is
-    /// explicit intent and the deep link always lands. A short delay lets the
-    /// sheet finish dismissing before we hand off to the App Store.
-    private func handleReviewSheetDismiss() {
-        guard reviewManager.pendingRateRequest else { return }
-        reviewManager.pendingRateRequest = false
-        Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 400_000_000)
-            guard let url = ReviewPromptManager.writeReviewURL else { return }
-            _ = await UIApplication.shared.open(url)
         }
     }
 

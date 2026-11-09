@@ -108,7 +108,7 @@ struct CompetitionMyDailyRings: View {
             return cal.isDateInToday(date) ? "Today" : String(s.prefix(3))
         case .week:
             let f = DateFormatter()
-            f.dateFormat = "M/d"
+            f.setLocalizedDateFormatFromTemplate("Md")
             return f.string(from: date)
         case .month:
             let f = DateFormatter()

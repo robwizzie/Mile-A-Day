@@ -29,47 +29,47 @@ enum DashboardCard: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .dailyChallenge: return "Daily challenge"
-        case .streakTokens: return "Streak Tokens"
-        case .friendActivity: return "Friends' activity"
+        case .dailyChallenge: return String(localized: "Daily challenge")
+        case .streakTokens: return String(localized: "Streak Tokens")
+        case .friendActivity: return String(localized: "Friends' activity")
         case .treats: return CalorieTreat.featureName
-        case .weekChart: return "This week's miles"
-        case .recentWorkouts: return "Recent workouts"
-        case .competitions: return "Your competitions"
-        case .weeklyChallenge: return "Weekly challenge"
-        case .streakHistory: return "Hall of Streaks"
-        case .routeMap: return "Your routes"
-        case .monthlyFlame: return "This month's flame"
-        case .communityGoal: return "Community goal"
+        case .weekChart: return String(localized: "This week's miles")
+        case .recentWorkouts: return String(localized: "Recent workouts")
+        case .competitions: return String(localized: "Your competitions")
+        case .weeklyChallenge: return String(localized: "Weekly challenge")
+        case .streakHistory: return String(localized: "Hall of Streaks")
+        case .routeMap: return String(localized: "Your routes")
+        case .monthlyFlame: return String(localized: "This month's flame")
+        case .communityGoal: return String(localized: "Community goal")
         }
     }
 
     var subtitle: String {
         switch self {
         case .dailyChallenge:
-            return "Today's challenge and how you're doing on it."
+            return String(localized: "Today's challenge and how you're doing on it.")
         case .streakTokens:
-            return "Double Down, Streak Save and Assist, while one is earning or can help. With all three ready, tap the savers under your streak."
+            return String(localized: "Double Down, Streak Save and Assist, while one is earning or can help. With all three ready, tap the savers under your streak.")
         case .friendActivity:
-            return "Who's been out today, and a hype button for each."
+            return String(localized: "Who's been out today, and a hype button for each.")
         case .treats:
-            return "What your miles' calories are worth in wine, burgers or lattes — and Flamey enjoying them for you. Always in Insights too."
+            return String(localized: "What your miles' calories are worth in wine, burgers or lattes — and Flamey enjoying them for you. Always in Insights too.")
         case .weekChart:
-            return "The week's miles as bars, straight from Insights."
+            return String(localized: "The week's miles as bars, straight from Insights.")
         case .recentWorkouts:
-            return "Your latest walk or run, one tap from the full list."
+            return String(localized: "Your latest walk or run, one tap from the full list.")
         case .competitions:
-            return "Every competition you're in, with what it needs from you today."
+            return String(localized: "Every competition you're in, with what it needs from you today.")
         case .weeklyChallenge:
-            return "This week's challenge and how far along you are."
+            return String(localized: "This week's challenge and how far along you are.")
         case .streakHistory:
-            return "Your best streaks ever, from the profile's Hall of Streaks."
+            return String(localized: "Your best streaks ever, from the profile's Hall of Streaks.")
         case .routeMap:
-            return "Every walk and run you've mapped, on one map."
+            return String(localized: "Every walk and run you've mapped, on one map.")
         case .monthlyFlame:
-            return "Your days so far this month — every one of them unlocks Flamey's Monthly Flame."
+            return String(localized: "Your days so far this month — every one of them unlocks Flamey's Monthly Flame.")
         case .communityGoal:
-            return "The miles everyone is walking together, and your part."
+            return String(localized: "The miles everyone is walking together, and your part.")
         }
     }
 

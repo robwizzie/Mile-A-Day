@@ -17,9 +17,9 @@ enum StreakTokenKind {
 
     var title: String {
         switch self {
-        case .doubleDown: return "Double Down"
-        case .save: return "Streak Save"
-        case .assist: return "Streak Assist"
+        case .doubleDown: return String(localized: "Double Down")
+        case .save: return String(localized: "Streak Save")
+        case .assist: return String(localized: "Streak Assist")
         }
     }
 
@@ -58,11 +58,11 @@ enum StreakTokenKind {
     var what: String {
         switch self {
         case .doubleDown:
-            return "Miss a day? Run 2× your goal the next day and yesterday still counts."
+            return String(localized: "Miss a day? Run 2× your goal the next day and yesterday still counts.")
         case .save:
-            return "Life happens — if you miss a day and can't Double Down, this covers it automatically."
+            return String(localized: "Life happens — if you miss a day and can't Double Down, this covers it automatically.")
         case .assist:
-            return "Covers a day you missed — but only when a friend donates a mile they ran past their own goal. Ask, and it's theirs to give."
+            return String(localized: "Covers a day you missed — but only when a friend donates a mile they ran past their own goal. Ask, and it's theirs to give.")
         }
     }
 
@@ -71,12 +71,12 @@ enum StreakTokenKind {
     func howToEarn(target: Int, walkCredit: Double = 0.5) -> String {
         switch self {
         case .doubleDown:
-            return "Complete your mile on \(target) days — runs or walks both count."
+            return String(localized: "Complete your mile on \(target) days — runs or walks both count.")
         case .save:
             let walkDays = Int((Double(target) / max(walkCredit, 0.1)).rounded(.up))
-            return "Run your full mile on \(target) days — or walk it on \(walkDays). A walk day counts as half a run, so mixing works and running gets you there fastest."
+            return String(localized: "Run your full mile on \(target) days — or walk it on \(walkDays). A walk day counts as half a run, so mixing works and running gets you there fastest.")
         case .assist:
-            return "One every \(target) days — the countdown starts the day you spend one, so a brand-new account is already holding its first. Holding one is half of a save; a friend's spare mile is the other half."
+            return String(localized: "One every \(target) days — the countdown starts the day you spend one, so a brand-new account is already holding its first. Holding one is half of a save; a friend's spare mile is the other half.")
         }
     }
 
@@ -100,20 +100,20 @@ enum StreakTokenKind {
     var howToUse: String {
         switch self {
         case .doubleDown:
-            return "Nothing to tap. Miss a day, then run double your goal before the next midnight — we back-fill the missed day as soon as the miles sync."
+            return String(localized: "Nothing to tap. Miss a day, then run double your goal before the next midnight — we back-fill the missed day as soon as the miles sync.")
         case .save:
-            return "Nothing to tap and nothing to decide. Miss a day and this covers it the next morning. Holding a Double Down too? The Save waits one more morning so you can run 2× first. Either way, keep doing your daily mile. Your streak may show as reset until the Save is used, and we always tell you when it is."
+            return String(localized: "Nothing to tap and nothing to decide. Miss a day and this covers it the next morning. Holding a Double Down too? The Save waits one more morning so you can run 2× first. Either way, keep doing your daily mile. Your streak may show as reset until the Save is used, and we always tell you when it is.")
         case .assist:
-            return "The only one you choose. Tap “Ask a friend” when your streak is on the line, or hand someone a mile you ran past your own goal. It spends only once you've both said yes."
+            return String(localized: "The only one you choose. Tap “Ask a friend” when your streak is on the line, or hand someone a mile you ran past your own goal. It spends only once you've both said yes.")
         }
     }
 
     /// When, exactly — the question a meter can never answer.
     var whenItFires: String {
         switch self {
-        case .doubleDown: return "The day after a miss, the moment your second mile lands."
-        case .save: return "The morning after a miss, or the morning after that if you hold a Double Down."
-        case .assist: return "The moment the other person accepts."
+        case .doubleDown: return String(localized: "The day after a miss, the moment your second mile lands.")
+        case .save: return String(localized: "The morning after a miss, or the morning after that if you hold a Double Down.")
+        case .assist: return String(localized: "The moment the other person accepts.")
         }
     }
 }
@@ -131,7 +131,7 @@ extension PendingSave {
     /// `fires_on` is the user's local day as the server files it, so a device
     /// a zone away can be a day off; "tomorrow" is the safe reading then.
     var whenText: String {
-        fires_on <= Self.parse.string(from: Date()) ? "this morning" : "tomorrow morning"
+        fires_on <= Self.parse.string(from: Date()) ? String(localized: "this morning") : String(localized: "tomorrow morning")
     }
 
     /// Hero chip: "Save pending · 32 days" (the streak it brings back).
@@ -142,9 +142,9 @@ extension PendingSave {
     /// The full sentence, honest about the one condition that can stop it.
     var detail: String {
         if needs_today {
-            return "Finish today's mile and it's used \(whenText). Your streak goes back to \(protected_streak) days."
+            return String(localized: "Finish today's mile and it's used \(whenText). Your streak goes back to \(protected_streak) days.")
         }
-        return "It's used \(whenText). Your streak goes back to \(protected_streak) days. Until then it may show as reset."
+        return String(localized: "It's used \(whenText). Your streak goes back to \(protected_streak) days. Until then it may show as reset.")
     }
 
     var accessibilitySummary: String {
@@ -179,9 +179,9 @@ enum TokenUsage {
 
     var label: String {
         switch self {
-        case .automatic: return "AUTOMATIC"
-        case .youRunIt: return "YOU RUN IT"
-        case .withAFriend: return "YOU + A FRIEND"
+        case .automatic: return String(localized: "AUTOMATIC")
+        case .youRunIt: return String(localized: "YOU RUN IT")
+        case .withAFriend: return String(localized: "YOU + A FRIEND")
         }
     }
 
@@ -196,9 +196,9 @@ enum TokenUsage {
     /// One line under the badge, for surfaces with room for it.
     var summary: String {
         switch self {
-        case .automatic: return "Spends itself when you need it."
-        case .youRunIt: return "Earn the day back by running."
-        case .withAFriend: return "Ask, or be asked. Both must agree."
+        case .automatic: return String(localized: "Spends itself when you need it.")
+        case .youRunIt: return String(localized: "Earn the day back by running.")
+        case .withAFriend: return String(localized: "Ask, or be asked. Both must agree.")
         }
     }
 }
@@ -314,7 +314,7 @@ struct TokenMedallion: View {
             }
         )
         .shadow(color: held ? kind.tint.opacity(0.55) : .clear, radius: size * 0.18)
-        .accessibilityLabel("\(kind.title)\(held ? ", available" : "")")
+        .accessibilityLabel("\(kind.title)\(held ? String(localized: ", available") : "")")
     }
 
     @ViewBuilder
@@ -831,7 +831,7 @@ struct StreakTokensDetailView: View {
                                 ),
                                 unit: "days"
                             )
-                            tokenCard(kind: .save, meter: payload.streak_save, unit: "run days")
+                            tokenCard(kind: .save, meter: payload.streak_save, unit: String(localized: "run days"))
                             tokenCard(kind: .assist, meter: payload.streak_assist, unit: "days")
                             // The sheet hangs off this always-present
                             // Group: the card itself leaves the tree the
@@ -961,7 +961,7 @@ struct StreakTokensDetailView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityHint(rulesExpanded ? "Hides the details" : "Shows the rules every token follows")
+            .accessibilityHint(rulesExpanded ? String(localized: "Hides the details") : String(localized: "Shows the rules every token follows"))
 
             if rulesExpanded {
                 VStack(alignment: .leading, spacing: 10) {
@@ -973,13 +973,13 @@ struct StreakTokensDetailView: View {
                     rule(
                         icon: "shield.fill",
                         tint: SavedDayStyle.tint,
-                        title: "A saved day shows blue, not green",
+                        title: String(localized: "A saved day shows blue, not green"),
                         detail: "Everywhere a day appears — your week chart, your profile, a friend's — a day a token carried is blue and says which token did it. It is never drawn as a missed day."
                     )
                     rule(
                         icon: "flame.fill",
                         tint: Color(red: 1.0, green: 0.84, blue: 0.35),
-                        title: "One at a time, and only for a real gap",
+                        title: String(localized: "One at a time, and only for a real gap"),
                         detail: "Tokens never bridge two missed days in a row, and a streak that used one rests its Pure Flame until your next untouched run."
                     )
                 }
@@ -1180,7 +1180,7 @@ struct StreakTokensDetailView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityHint(expanded ? "Hides the details" : "Shows how to use and earn this token")
+            .accessibilityHint(expanded ? String(localized: "Hides the details") : String(localized: "Shows how to use and earn this token"))
 
             if expanded {
                 VStack(alignment: .leading, spacing: 8) {
@@ -1387,14 +1387,14 @@ private struct TokenMeterBar: View {
     private var breakdown: String? {
         guard kind == .save, !meter.held, let walks = meter.walk_days, walks > 0 else { return nil }
         let runs = meter.run_days ?? 0
-        let walkPart = walks == 1 ? "1 walk" : "\(walks) walks"
-        let runPart = runs == 1 ? "1 run" : "\(runs) runs"
-        return "\(runPart) + \(walkPart) (walks count ½)"
+        let walkPart = walks == 1 ? String(localized: "1 walk") : String(localized: "\(walks) walks")
+        let runPart = runs == 1 ? String(localized: "1 run") : String(localized: "\(runs) runs")
+        return String(localized: "\(runPart) + \(walkPart) (walks count ½)")
     }
 
     private var statusLine: String {
         if meter.held {
-            return "Earned — you're holding 1 (max 1). Using it restarts the meter."
+            return String(localized: "Earned — you're holding 1 (max 1). Using it restarts the meter.")
         }
         let remaining = max(meter.target - meter.progress, 0)
         let togo = remaining.truncatingRemainder(dividingBy: 1) == 0
@@ -1406,7 +1406,7 @@ private struct TokenMeterBar: View {
         let targetText = meter.target.truncatingRemainder(dividingBy: 1) == 0
             ? String(Int(meter.target))
             : String(format: "%.1f", meter.target)
-        return "\(progressText) / \(targetText) \(unit) · \(togo) to go"
+        return String(localized: "\(progressText) / \(targetText) \(unit) · \(togo) to go")
     }
 }
 

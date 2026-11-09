@@ -680,7 +680,8 @@ struct DashboardView: View {
             MADTabHeader(
                 title: "Mile A Day",
                 subtitle: headerSubtitle,
-                actions: dashboardHeaderActions
+                actions: dashboardHeaderActions,
+                showsLogo: true
             )
             // Tells the launch splash where the real title sits and when the
             // home screen has its data, so it can dissolve into it.
@@ -1843,7 +1844,7 @@ struct DashboardView: View {
     // MARK: - Attention slot
 
     private enum AttentionItem: Hashable {
-        case activeWorkout, invites, friendRequests, photoWaiting
+        case activeWorkout, invites, photoWaiting
     }
 
     /// The two most important things needing the user, in strict priority:
@@ -1856,13 +1857,9 @@ struct DashboardView: View {
         if !competitionService.invites.isEmpty {
             items.append(.invites)
         }
-        // Sits just below invites: both are "a person is waiting on your
-        // answer", but a competition invite has a start date and can expire
-        // while a friend request cannot. Requests used to have no presence on
-        // the Dashboard at all — the tab-bar badge was the only passive signal.
-        if !friendService.friendRequests.isEmpty {
-            items.append(.friendRequests)
-        }
+        // Friend requests are not here: they sit under Start
+        // (`FriendRequestsHomeRow`, in the Fun body), so the day's action is
+        // never pushed below the fold by an inbox item.
         if midRunPhotoWaiting {
             items.append(.photoWaiting)
         }
@@ -1899,65 +1896,8 @@ struct DashboardView: View {
         switch item {
         case .activeWorkout: inProgressBannerSection
         case .invites: invitesAttentionRow
-        case .friendRequests: friendRequestsAttentionRow
         case .photoWaiting: photoWaitingBanner
         }
-    }
-
-    /// Pending friend requests, in the attention slot's shared grammar.
-    private var friendRequestsAttentionRow: some View {
-        let count = friendService.friendRequests.count
-        // Precomputed rather than inlined as ternaries in the ViewBuilder —
-        // this file already carries sections split out to help Swift type-check.
-        let title = count == 1 ? "Friend request" : "\(count) friend requests"
-        let subtitle: String = {
-            guard count == 1, let name = friendService.friendRequests.first?.displayName else {
-                return "Tap to respond"
-            }
-            return "\(name) wants to be friends — tap to respond"
-        }()
-        return Button {
-            // Park the intent BEFORE switching tabs: FriendsListView may not
-            // exist yet, and reads the flag in .task when it first mounts.
-            DeepLinkRouter.shared.requestOpenFriendRequests()
-            NotificationCenter.default.post(
-                name: NSNotification.Name("MAD_SwitchTab"),
-                object: nil,
-                userInfo: ["tab": 3]
-            )
-        } label: {
-            HStack(spacing: MADTheme.Spacing.sm) {
-                // Deliberately an SF Symbols 1 name. The deployment target is
-                // iOS 17, where symbols added after SF Symbols 5 render as a
-                // blank box rather than falling back.
-                Image(systemName: "person.crop.circle.badge.plus")
-                    .madFont(size: 16, weight: .bold)
-                    .foregroundColor(MADTheme.Colors.madRed)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(title)
-                        .madFont(size: 13, weight: .bold, design: .rounded)
-                        .foregroundColor(.white)
-                    Text(subtitle)
-                        .madFont(size: 11, weight: .medium, design: .rounded)
-                        .foregroundColor(.white.opacity(0.55))
-                        .madNameLines()
-                }
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .madFont(size: 11, weight: .bold)
-                    .foregroundColor(.white.opacity(0.4))
-            }
-            .padding(MADTheme.Spacing.md)
-            .background(
-                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                    .fill(Color.white.opacity(0.04))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                            .strokeBorder(MADTheme.Colors.madRed.opacity(0.3), lineWidth: 1)
-                    )
-            )
-        }
-        .buttonStyle(.plain)
     }
 
     /// Competition invites in the attention slot's shared grammar (the old
@@ -2008,7 +1948,7 @@ struct DashboardView: View {
 
     private static let headerDateFormatter: DateFormatter = {
         let f = DateFormatter()
-        f.dateFormat = "EEEE, MMMM d"
+        f.setLocalizedDateFormatFromTemplate("EEEEMMMMd")
         return f
     }()
 

@@ -813,7 +813,7 @@ struct SocialFeedView: View {
         .alert("Finish your mile first", isPresented: $showMileHint) {
             Button("Got it", role: .cancel) {}
         } message: {
-            Text("Each day's stories unlock for the days you complete: finish today's mile to post and to watch today's stories — yesterday's stay open if you completed yesterday. Keep going — you've got this! 🏃")
+            Text("Finish today's mile to post and to watch today's stories. Yesterday's stay open if you finished yesterday.")
         }
         .alert("You've already shared this one", isPresented: $showAlreadySharedHint) {
             Button("Got it", role: .cancel) {}
@@ -1022,18 +1022,18 @@ struct SocialFeedView: View {
         }
     }
 
-    /// The compose FAB. Hidden entirely once the mile is done AND already
-    /// shared — one post per walk/run, so there's nothing to add. Otherwise it
-    /// reads as unlocked only while a post can actually go out: the mile is
-    /// done AND a qualifying walk/run has landed today. It stays visible but
-    /// locked the rest of the time so tapping it can explain itself, which is
-    /// the same thing it already did before the mile was finished.
+    /// The compose FAB. Hidden before the mile (the rail's locked "You" tile
+    /// explains why on tap; a grey lock floating over the feed covered post
+    /// menus and, on small screens, banners' close buttons) and once the
+    /// day's walk is already shared — one post per walk/run. In between it
+    /// reads as unlocked only while a post can actually go out; locked, a tap
+    /// still explains itself.
     ///
     /// The countdown ring is the CAMERA's, and it's the only thing here that
     /// expires: when it runs out the ring simply goes, and the "+" stays a "+".
     @ViewBuilder
     private var composeButton: some View {
-        if !(mileDone && alreadySharedWorkout) {
+        if mileDone && !alreadySharedWorkout {
             Button(action: handleCompose) {
                 Image(systemName: canPostNow ? "plus" : "lock.fill")
                     .accessibilityLabel(canPostNow ? "New post" : "New post, locked until today's mile is done")
@@ -1712,7 +1712,7 @@ struct SocialFeedView: View {
 
     private static func todayText() -> String {
         let f = DateFormatter()
-        f.dateFormat = "MMM d"
+        f.setLocalizedDateFormatFromTemplate("MMMd")
         return f.string(from: Date())
     }
 }

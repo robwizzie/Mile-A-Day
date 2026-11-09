@@ -263,7 +263,7 @@ struct RouteHeatmapView: View {
         formatter.dateFormat = "yyyy-MM-dd"
         formatter.locale = Locale(identifier: "en_US_POSIX")
         let dayFormatter = DateFormatter()
-        dayFormatter.dateFormat = "EEE · MMM d"
+        dayFormatter.setLocalizedDateFormatFromTemplate("EEEMMMd")
         let cutoff = Calendar.current.date(byAdding: .day, value: -7, to: Date()) ?? Date()
         let user = UserManager.shared.currentUser
         return routes

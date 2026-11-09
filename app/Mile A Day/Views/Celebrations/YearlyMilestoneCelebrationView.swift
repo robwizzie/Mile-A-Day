@@ -307,7 +307,7 @@ struct YearlyMilestoneCelebrationView: View {
     private var streakStartLabel: String {
         guard let start = info.streakStartDate else { return "—" }
         let formatter = DateFormatter()
-        formatter.dateFormat = "M/d/yy"
+        formatter.setLocalizedDateFormatFromTemplate("Mdyy")
         return formatter.string(from: start)
     }
 

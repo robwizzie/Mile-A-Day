@@ -556,7 +556,7 @@ struct ProfilePostsGridView: View {
     }()
     private static let storyDateDisplay: DateFormatter = {
         let f = DateFormatter()
-        f.dateFormat = "MMM d"
+        f.setLocalizedDateFormatFromTemplate("MMMd")
         return f
     }()
 

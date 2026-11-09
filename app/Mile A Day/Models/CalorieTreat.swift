@@ -27,12 +27,12 @@ enum CalorieTreat: String, CaseIterable, Identifiable, Codable {
 
     var title: String {
         switch self {
-        case .wine: return "Wine"
-        case .beer: return "Beer"
-        case .cheeseburger: return "Burgers"
-        case .pizza: return "Pizza"
-        case .donut: return "Donuts"
-        case .coffee: return "Lattes"
+        case .wine: return String(localized: "Wine")
+        case .beer: return String(localized: "Beer")
+        case .cheeseburger: return String(localized: "Burgers")
+        case .pizza: return String(localized: "Pizza")
+        case .donut: return String(localized: "Donuts")
+        case .coffee: return String(localized: "Lattes")
         }
     }
 
@@ -71,10 +71,10 @@ enum CalorieTreat: String, CaseIterable, Identifiable, Codable {
     func unitName(count: Double) -> String {
         let singular = TreatFormat.count(count) == "1"
         switch self {
-        case .wine: return singular ? "glass of wine" : "glasses of wine"
+        case .wine: return singular ? String(localized: "glass of wine") : String(localized: "glasses of wine")
         case .beer: return singular ? "beer" : "beers"
         case .cheeseburger: return singular ? "cheeseburger" : "cheeseburgers"
-        case .pizza: return singular ? "slice of pizza" : "slices of pizza"
+        case .pizza: return singular ? String(localized: "slice of pizza") : String(localized: "slices of pizza")
         case .donut: return singular ? "donut" : "donuts"
         case .coffee: return singular ? "latte" : "lattes"
         }
@@ -98,7 +98,7 @@ enum CalorieTreat: String, CaseIterable, Identifiable, Codable {
     /// of walking is a round figure; the sheet says every number is rough.
     var perMileHint: String {
         let units = 100.0 / kcalPerUnit
-        return "A mile earns about \(TreatFormat.count(units)) \(unitName(count: units))."
+        return String(localized: "A mile earns about \(TreatFormat.count(units)) \(unitName(count: units)).")
     }
 
     static let key = "calorieTreatV1"
@@ -121,18 +121,18 @@ enum TreatPeriod: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .today: return "Today"
-        case .week: return "This Week"
-        case .allTime: return "All Time"
+        case .today: return String(localized: "Today")
+        case .week: return String(localized: "This Week")
+        case .allTime: return String(localized: "All Time")
         }
     }
 
     /// Lower-case, mid-sentence form.
     var caption: String {
         switch self {
-        case .today: return "today"
-        case .week: return "this week"
-        case .allTime: return "all time"
+        case .today: return String(localized: "today")
+        case .week: return String(localized: "this week")
+        case .allTime: return String(localized: "all time")
         }
     }
 

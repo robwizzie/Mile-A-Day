@@ -413,7 +413,7 @@ enum RouteFormat {
 
     static func dayText(_ date: Date) -> String {
         let formatter = DateFormatter()
-        formatter.dateFormat = "MMM d, yyyy"
+        formatter.setLocalizedDateFormatFromTemplate("MMMdyyyy")
         return formatter.string(from: date)
     }
 }

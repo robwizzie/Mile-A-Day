@@ -129,11 +129,25 @@ final class SplashDriver: ObservableObject {
             AppStateManager.shared.finishSplashOverlay()
             return
         }
-        // The real title, in this view's coordinates (fallback: where the
-        // header's title sits under the status bar).
+        // Land on the header's real icon when it has reported (the overlay
+        // then lifts with an identical icon underneath); else the old path:
+        // shrink toward the title and fade.
+        if let logo = SplashGate.shared.logoFrame {
+            let frame = view.convert(logo, from: nil)
+            view.reveal(to: CGPoint(x: frame.midX, y: frame.midY), landingSize: frame.width,
+                        flying: !reduceMotion) {
+                AppStateManager.shared.finishSplashOverlay()
+            }
+            // The real icon fades in for the flight's last stretch (the
+            // flying copy fades out over the same window, see `reveal`).
+            after(reduceMotion ? 0 : SplashBeat.revealDuration * SplashLayerView.landingFadeStart) {
+                SplashGate.shared.handOffLogo()
+            }
+            return
+        }
         let target = SplashGate.shared.titleAnchor.map { view.convert($0, from: nil) }
             ?? CGPoint(x: MADTheme.Spacing.md + 14, y: view.safeAreaInsets.top + MADTheme.Spacing.sm + 16)
-        view.reveal(to: target, flying: !reduceMotion) {
+        view.reveal(to: target, landingSize: nil, flying: !reduceMotion) {
             AppStateManager.shared.finishSplashOverlay()
         }
     }
@@ -484,7 +498,16 @@ final class SplashLayerView: UIView {
 
     /// Fly the icon into the real title and fade the splash away, all on the
     /// render server. `completion` runs once it's fully transparent.
-    func reveal(to target: CGPoint, flying: Bool, completion: @escaping () -> Void) {
+    /// `landingSize` set: the icon lands on the header's real icon at that
+    /// size and stays opaque (the header hides its copy until the overlay
+    /// lifts). nil: it shrinks toward the title and fades on the way.
+    /// Fraction of the reveal after which the flying icon hands off to the
+    /// header's real one (both cross-fade over the rest).
+    static let landingFadeStart: Double = 0.7
+    /// …and after which the flying copy fades out over the real one.
+    static let landingFadeOutStart: Double = 0.86
+
+    func reveal(to target: CGPoint, landingSize: CGFloat?, flying: Bool, completion: @escaping () -> Void) {
         let duration = SplashBeat.revealDuration
         CATransaction.begin()
         CATransaction.setCompletionBlock(completion)
@@ -515,9 +538,39 @@ final class SplashLayerView: UIView {
         iconFade.values = [1, 1, 0]
         iconFade.keyTimes = [0, 0.4, 1]
         iconFade.duration = duration
-        icon.opacity = 0
 
-        if flying {
+        if flying, let landingSize {
+            // Onto the header icon: fast out, soft landing, then a short
+            // cross-fade into the real icon (which fades in from
+            // `landingFadeStart`), so a point of difference never pops.
+            let scale = landingSize / iconSize
+            let handOff = CAKeyframeAnimation(keyPath: "opacity")
+            handOff.values = [1, 1, 0]
+            // The real icon is already fully in (it starts at
+            // `landingFadeStart`, under this copy) before this one fades, so
+            // the mark never dips: the two are never both half-transparent.
+            handOff.keyTimes = [0, NSNumber(value: Self.landingFadeOutStart), 1]
+            icon.opacity = 0
+            let move = CABasicAnimation(keyPath: "position")
+            move.fromValue = NSValue(cgPoint: icon.position)
+            move.toValue = NSValue(cgPoint: target)
+            let shrink = CABasicAnimation(keyPath: "transform.scale")
+            shrink.fromValue = 1
+            shrink.toValue = scale
+            let group = CAAnimationGroup()
+            group.animations = [move, shrink]
+            group.duration = duration
+            group.timingFunction = CAMediaTimingFunction(controlPoints: 0.32, 0.72, 0, 1)
+            icon.position = target
+            icon.transform = CATransform3DMakeScale(scale, scale, 1)
+            icon.add(group, forKey: "reveal")
+            // On its own LINEAR clock: inside the eased group its key times
+            // landed far earlier in real time than the header's hand-off.
+            handOff.duration = duration
+            handOff.calculationMode = .linear
+            icon.add(handOff, forKey: "revealHandOff")
+        } else if flying {
+            icon.opacity = 0
             let move = CABasicAnimation(keyPath: "position")
             move.fromValue = NSValue(cgPoint: icon.position)
             move.toValue = NSValue(cgPoint: target)
@@ -532,6 +585,7 @@ final class SplashLayerView: UIView {
             icon.transform = CATransform3DMakeScale(26 / iconSize, 26 / iconSize, 1)
             icon.add(group, forKey: "reveal")
         } else {
+            icon.opacity = 0
             icon.add(iconFade, forKey: "reveal")
         }
         CATransaction.commit()
@@ -621,10 +675,27 @@ final class SplashGate: ObservableObject {
     static let shared = SplashGate()
     @Published private(set) var ready = false
     @Published private(set) var titleAnchor: CGPoint?
+    /// The header's app icon (`MADHeaderLogo`), global coordinates. When
+    /// known, the splash icon lands ON it at its size instead of shrinking
+    /// toward the title and fading.
+    private(set) var logoFrame: CGRect?
+    /// Set as the flying icon reaches the header: the header's real icon
+    /// fades in under it while the flying copy fades out, so the last few
+    /// points of the landing are a cross-fade, never a pop.
+    @Published private(set) var logoHandedOff = false
+
+    func handOffLogo() {
+        if !logoHandedOff { logoHandedOff = true }
+    }
 
     func report(anchor: CGPoint, ready isReady: Bool) {
         if titleAnchor != anchor { titleAnchor = anchor }
         if isReady && !ready { ready = true }
+    }
+
+    func reportLogo(frame: CGRect) {
+        guard frame.width > 0, frame != logoFrame else { return }
+        logoFrame = frame
     }
 }
 

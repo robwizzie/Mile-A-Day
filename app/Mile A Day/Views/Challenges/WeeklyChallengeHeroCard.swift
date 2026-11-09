@@ -6,6 +6,7 @@ import SwiftUI
 /// always something running, it's the same thing your friends got, and the
 /// number is sized to you rather than to an average.
 struct WeeklyChallengeHeroCard: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let response: WeeklyChallengeResponse
     var compact: Bool = false
     /// Inside the dashboard's shared Challenges card (compact only): no
@@ -29,7 +30,7 @@ struct WeeklyChallengeHeroCard: View {
             response.target,
             unit: response.challenge.unit
         )
-        return "\(value) / \(target) \(response.challenge.unit)"
+        return String(localized: "\(value) / \(target) \(response.challenge.unit)")
     }
 
     var body: some View {
@@ -101,7 +102,12 @@ struct WeeklyChallengeHeroCard: View {
     /// The dashboard's header: the glyph in the label line (no icon circle),
     /// sentence case, the days left as plain text.
     private var compactHeader: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
+        // At accessibility sizes the days left go UNDER the title: beside it
+        // they left the title a sliver and it broke mid-word ("No Jun / k…").
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6))
+            : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 8))
+        return layout {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 5) {
                     Image(systemName: response.progress.completed ? "checkmark.circle.fill" : response.challenge.icon)
@@ -166,19 +172,32 @@ struct WeeklyChallengeHeroCard: View {
                     .madFont(size: 17, weight: .heavy, design: .rounded)
                     .foregroundColor(.white)
                     .madNameLines()
+
+                // At accessibility sizes the pill goes under the title:
+                // beside it, with the icon, the title got a sliver and broke
+                // mid-word ("No Jun / k…").
+                if dynamicTypeSize.isAccessibilitySize {
+                    daysLeftPill
+                        .padding(.top, 2)
+                }
             }
 
-            Spacer(minLength: 4)
-
-            Text(WeeklyChallengeFormat.daysLeft(response.days_left))
-                .madFont(size: 11, weight: .bold, design: .rounded)
-                .foregroundColor(.white.opacity(0.6))
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(Capsule().fill(Color.white.opacity(0.08)))
-                // The title truncates before this does.
-                .fixedSize()
+            if !dynamicTypeSize.isAccessibilitySize {
+                Spacer(minLength: 4)
+                daysLeftPill
+            }
         }
+    }
+
+    private var daysLeftPill: some View {
+        Text(WeeklyChallengeFormat.daysLeft(response.days_left))
+            .madFont(size: 11, weight: .bold, design: .rounded)
+            .foregroundColor(.white.opacity(0.6))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(Capsule().fill(Color.white.opacity(0.08)))
+            // The title truncates before this does.
+            .fixedSize()
     }
 
     private var progressBar: some View {
@@ -268,7 +287,7 @@ struct WeeklyChallengeHeroCard: View {
         if last.completed { return "Done" }
         let value = WeeklyChallengeFormat.value(last.value, unit: last.unit)
         let target = WeeklyChallengeFormat.value(last.target, unit: last.unit)
-        return "\(value) / \(target)"
+        return String(localized: "\(value) / \(target)")
     }
 
     /// Where you sit among friends, plus the "why this number" line. Both are

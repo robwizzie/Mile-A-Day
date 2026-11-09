@@ -792,8 +792,8 @@ struct DailyChallengeCard: View {
 
 
     private func progressLabel(_ value: Double) -> String {
-        if value <= 0 { return "Not started" }
-        return "\(ProgressCalculator.formatProgress(min(value, 1.0))) there"
+        if value <= 0 { return String(localized: "Not started") }
+        return String(localized: "\(ProgressCalculator.formatProgress(min(value, 1.0))) there")
     }
 
     /// Read the server-backed state from `ChallengeService.shared` (a `RemoteChallengeService`).
@@ -978,11 +978,11 @@ struct HeadToHeadStrip: View {
     private var leading: Bool { myMiles > opponent.miles && !tied }
 
     private var statusText: String {
-        if tied { return "Dead even" }
+        if tied { return String(localized: "Dead even") }
         if leading {
-            return "You lead by \((myMiles - opponent.miles).milesText) mi"
+            return String(localized: "You lead by \((myMiles - opponent.miles).milesText) mi")
         }
-        return "Behind by \((opponent.miles - myMiles).milesText) mi"
+        return String(localized: "Behind by \((opponent.miles - myMiles).milesText) mi")
     }
 
     private var statusColor: Color { tied ? .yellow : (leading ? .green : .orange) }
@@ -1004,7 +1004,7 @@ struct HeadToHeadStrip: View {
     private var duelStrip: some View {
         VStack(spacing: 6) {
             HStack(spacing: 10) {
-                side(name: "You", image: myImage, miles: myMiles,
+                side(name: String(localized: "You"), image: myImage, miles: myMiles,
                      highlight: leading, color: accent)
 
                 VStack(spacing: 2) {
@@ -1601,7 +1601,7 @@ struct TodayFocus {
             let isUrgent = lives <= 1
             return TodayFocus(
                 level: isUrgent ? .urgent : .behind,
-                pill: isUrgent ? "1 LIFE LEFT" : "\(fmt(remaining)) \(unit.uppercased()) LEFT",
+                pill: isUrgent ? String(localized: "1 LIFE LEFT") : String(localized: "\(fmt(remaining)) \(unit.uppercased()) LEFT"),
                 pillIcon: "flame.fill",
                 detail: isUrgent
                     ? "Miss today's \(competition.options.goalFormatted) \(unit) and you're out."
@@ -1997,7 +1997,7 @@ struct WeeklyTrendCard: View {
             HStack(spacing: 16) {
                 // This week
                 trendColumn(
-                    label: "This Week",
+                    label: String(localized: "This Week"),
                     miles: thisWeek.miles,
                     days: thisWeek.daysCompleted,
                     totalDays: daysElapsed,
@@ -2012,7 +2012,7 @@ struct WeeklyTrendCard: View {
 
                 // Last week (same period)
                 trendColumn(
-                    label: "Last Week",
+                    label: String(localized: "Last Week"),
                     miles: lastWeekSamePeriod.miles,
                     days: lastWeekSamePeriod.daysCompleted,
                     totalDays: daysElapsed,
@@ -2023,14 +2023,14 @@ struct WeeklyTrendCard: View {
             // Change indicators
             HStack(spacing: 20) {
                 changeIndicator(
-                    label: "Miles",
+                    label: String(localized: "Miles"),
                     value: milesChange,
                     isPercentage: true,
                     isPositive: milesChange >= 0
                 )
 
                 changeIndicator(
-                    label: "Days",
+                    label: String(localized: "Days"),
                     value: Double(daysChange),
                     isPercentage: false,
                     isPositive: daysChange >= 0

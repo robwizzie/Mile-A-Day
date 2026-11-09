@@ -26,7 +26,7 @@ struct FunGoalCompletedCelebrationView: View {
 
                 ScrollView(showsIndicators: false) {
                     VStack(spacing: 14) {
-                        Spacer(minLength: geo.safeAreaInsets.top + 34)
+                        Spacer(minLength: geo.safeAreaInsets.top + 34 + hatRoom(stageHeight: min(286, geo.size.height * 0.34)))
 
                         VStack(spacing: 8) {
                             reigniteStage
@@ -77,6 +77,22 @@ struct FunGoalCompletedCelebrationView: View {
                 .scaleEffect(0.76 + ignitionProgress * 0.24)
                 .animation(.easeInOut(duration: 0.9), value: ignitionProgress)
         }
+    }
+
+    /// Room for what he wears above his head. The stage draws him in a 276pt
+    /// frame but is squeezed to 34% of the screen (227pt on an SE), so a
+    /// crown or tall hat rose out of it and was sliced by the status bar.
+    /// Measured from his look like the dashboard hero's headroom; 0 for a
+    /// bare head, so the screen is unchanged without one.
+    private func hatRoom(stageHeight: CGFloat) -> CGFloat {
+        guard let look = FlameyFacts.look() else { return 0 }
+        let size: CGFloat = 210
+        let extent = FlameyArt.extentAboveView(look: look, size: size, scale: FlameHealth.blazing.bodyScale,
+                                               fit: 1 / (1 + look.standLift), bubble: false)
+        // Above the stage's own top: his frame is centred in 276pt, and the
+        // squeeze takes the rest off the top half.
+        let overflow = extent - (276 - size) / 2 + (276 - stageHeight) / 2
+        return max(0, overflow.rounded(.up))
     }
 
     private var reigniteStage: some View {

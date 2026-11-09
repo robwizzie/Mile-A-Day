@@ -7,8 +7,8 @@ private enum FriendsTabMode: String, CaseIterable, Identifiable {
     var id: String { rawValue }
     var displayName: String {
         switch self {
-        case .friends: return "Friends"
-        case .leaderboard: return "Leaderboard"
+        case .friends: return String(localized: "Friends")
+        case .leaderboard: return String(localized: "Leaderboard")
         }
     }
 }
@@ -16,6 +16,7 @@ private enum FriendsTabMode: String, CaseIterable, Identifiable {
 /// Main view for managing friends list
 struct FriendsListView: View {
     @Environment(\.duoSpread) private var duoSpread
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @ObservedObject var friendService: FriendService
     @StateObject private var healthManager = HealthKitManager.shared
     /// Live presence for the "Out right now" section. Shared singleton, so the
@@ -317,10 +318,14 @@ struct FriendsListView: View {
                     Image(systemName: "person.badge.plus")
                         .madFont(size: 13, weight: .bold, maxScale: 1.5)
                         .accessibilityHidden(true)
-                    Text("Add friends")
-                        .madFont(size: 14, weight: .bold, design: .rounded)
-                        .lineLimit(1)
-                        .fixedSize()
+                    // Icon only at accessibility sizes: the labelled pill
+                    // took the row and the tab title shrank to "F…".
+                    if !dynamicTypeSize.isAccessibilitySize {
+                        Text("Add friends")
+                            .madFont(size: 14, weight: .bold, design: .rounded)
+                            .lineLimit(1)
+                            .fixedSize()
+                    }
                 }
                 .foregroundColor(.white)
                 .padding(.horizontal, 14)
@@ -329,6 +334,7 @@ struct FriendsListView: View {
                 .contentShape(Capsule())
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("Add friends")
         }
         .padding(.horizontal, MADTheme.Spacing.md)
         .padding(.top, MADTheme.Spacing.sm)
@@ -351,8 +357,8 @@ struct FriendsListView: View {
             } label: {
                 HStack(spacing: 10) {
                     Text(incoming > 0
-                         ? (incoming == 1 ? "1 friend request" : "\(incoming) friend requests")
-                         : (sent == 1 ? "1 request sent" : "\(sent) requests sent"))
+                         ? (incoming == 1 ? String(localized: "1 friend request") : String(localized: "\(incoming) friend requests"))
+                         : (sent == 1 ? String(localized: "1 request sent") : String(localized: "\(sent) requests sent")))
                         .madFont(size: 15, weight: .bold, design: .rounded)
                         .foregroundColor(.white)
                         .lineLimit(2)
@@ -392,8 +398,8 @@ struct FriendsListView: View {
         MADPillPicker(
             selection: $topMode,
             options: [
-                .init(id: .friends, title: "Friends", systemImage: "person.2.fill"),
-                .init(id: .leaderboard, title: "Leaderboard", systemImage: "trophy.fill")
+                .init(id: .friends, title: String(localized: "Friends"), systemImage: "person.2.fill"),
+                .init(id: .leaderboard, title: String(localized: "Leaderboard"), systemImage: "trophy.fill")
             ]
         )
         .padding(.horizontal, MADTheme.Spacing.md)
@@ -518,7 +524,7 @@ struct FriendsListView: View {
         if !incomplete.isEmpty || !liveIds.isEmpty {
             VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
                 sectionHeader(
-                    title: "Cheer them on",
+                    title: String(localized: "Cheer them on"),
                     trailing: ""
                 )
 
@@ -580,8 +586,8 @@ struct FriendsListView: View {
         if !complete.isEmpty {
             VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
                 sectionHeader(
-                    title: "Done today",
-                    trailing: "\(complete.count) of \(friendService.friends.count)"
+                    title: String(localized: "Done today"),
+                    trailing: String(localized: "\(complete.count) of \(friendService.friends.count)")
                 )
                 VStack(spacing: 6) {
                     ForEach(complete) { friend in
@@ -989,7 +995,7 @@ struct FriendsListView: View {
                     MADHaptics.success()
                     showNudgeFeedback(NudgeFeedback(
                         icon: "bell.badge.fill",
-                        message: "Nudge sent to \(friend.displayName)!",
+                        message: String(localized: "Nudge sent to \(friend.displayName)!"),
                         isError: false
                     ))
                 }
@@ -1031,7 +1037,7 @@ struct FriendsListView: View {
             try await friendService.acceptFriendRequest(from: user)
             return nil
         } catch {
-            return "Couldn't accept \(user.displayName)'s request. Try again."
+            return String(localized: "Couldn't accept \(user.displayName)'s request. Try again.")
         }
     }
 
@@ -1040,7 +1046,7 @@ struct FriendsListView: View {
             try await friendService.declineFriendRequest(from: user)
             return nil
         } catch {
-            return "Couldn't decline that request. Try again."
+            return String(localized: "Couldn't decline that request. Try again.")
         }
     }
 
@@ -1049,7 +1055,7 @@ struct FriendsListView: View {
             try await friendService.cancelFriendRequest(to: user)
             return nil
         } catch {
-            return "Couldn't cancel that request. Try again."
+            return String(localized: "Couldn't cancel that request. Try again.")
         }
     }
 
@@ -1063,7 +1069,7 @@ struct FriendsListView: View {
                 showNudgeFeedback(
                     NudgeFeedback(
                         icon: "xmark.circle",
-                        message: "Couldn't remove \(user.displayName). Try again.",
+                        message: String(localized: "Couldn't remove \(user.displayName). Try again."),
                         isError: true
                     )
                 )

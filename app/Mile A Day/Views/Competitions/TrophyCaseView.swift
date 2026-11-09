@@ -17,7 +17,7 @@ struct TrophyCaseView: View {
 
     private static let displayDateFormatter: DateFormatter = {
         let f = DateFormatter()
-        f.dateFormat = "MMM d, yyyy"
+        f.setLocalizedDateFormatFromTemplate("MMMdyyyy")
         return f
     }()
 

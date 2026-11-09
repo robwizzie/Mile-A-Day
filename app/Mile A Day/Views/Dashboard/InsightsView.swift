@@ -398,13 +398,13 @@ private struct RoadDayNode: Identifiable {
 private enum RoadDateFormatter {
     static let short: DateFormatter = {
         let formatter = DateFormatter()
-        formatter.dateFormat = "EEE, MMM d"
+        formatter.setLocalizedDateFormatFromTemplate("EEEMMMd")
         return formatter
     }()
 
     static let monthDay: DateFormatter = {
         let formatter = DateFormatter()
-        formatter.dateFormat = "MMM d"
+        formatter.setLocalizedDateFormatFromTemplate("MMMd")
         return formatter
     }()
 
@@ -416,7 +416,7 @@ private enum RoadDateFormatter {
 
     static let fullDate: DateFormatter = {
         let formatter = DateFormatter()
-        formatter.dateFormat = "MMM d, yyyy"
+        formatter.setLocalizedDateFormatFromTemplate("MMMdyyyy")
         return formatter
     }()
 
@@ -1321,7 +1321,7 @@ private struct RoadWorkoutSummaryRow: View {
 
     private var timeText: String {
         let formatter = DateFormatter()
-        formatter.dateFormat = "h:mm a"
+        formatter.setLocalizedDateFormatFromTemplate("jmm")
         return formatter.string(from: workout.startDate)
     }
 

@@ -191,13 +191,13 @@ enum FeedTimestamp {
 
     private static let timestampFormatter: DateFormatter = {
         let formatter = DateFormatter()
-        formatter.dateFormat = "MMM d · h:mm a"
+        formatter.setLocalizedDateFormatFromTemplate("MMMdjmm")
         return formatter
     }()
 
     private static let timestampWithYearFormatter: DateFormatter = {
         let formatter = DateFormatter()
-        formatter.dateFormat = "MMM d, yyyy · h:mm a"
+        formatter.setLocalizedDateFormatFromTemplate("MMMdyyyyjmm")
         return formatter
     }()
 }
