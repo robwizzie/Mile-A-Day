@@ -48,11 +48,31 @@ struct CommunityGoalView: View {
                 .foregroundColor(.white.opacity(0.7))
             CommunityGoalJourney(goal: goal, height: 14)
                 .padding(.top, 4)
+            if let today = goal.walkingTodayLine {
+                CommunityGoalWalkingToday(text: today)
+            }
+            if let line = goal.paceLine {
+                Text(line)
+                    .madFont(size: 15, weight: .bold, design: .rounded, maxScale: 1.4)
+                    .foregroundColor(goal.onPace ? .green : .orange)
+            }
             Text(goal.description)
                 .madFont(size: 14, weight: .regular, design: .rounded, maxScale: 1.4)
                 .foregroundColor(.white.opacity(0.7))
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.top, 2)
+            if let url = CommunityGoalCopy.shareURL {
+                ShareLink(
+                    item: url,
+                    message: Text("We're walking \(goal.title) together on Mile A Day. Come help us finish!")
+                ) {
+                    Label("Share this goal", systemImage: "square.and.arrow.up")
+                        .madFont(size: 14, weight: .bold, design: .rounded, maxScale: 1.3)
+                        .foregroundColor(MADTheme.Colors.madRed)
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 2)
+            }
         }
         .communityCard()
     }
@@ -112,45 +132,13 @@ struct CommunityGoalView: View {
     private func rewardsCard(_ goal: CommunityGoal, response: CommunityGoalResponse) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             label(goal.phase == .ended ? "Rewards" : "Limited rewards, this month only")
-            ForEach(goal.rewards) { reward in
-                HStack(spacing: 12) {
-                    Group {
-                        if let id = reward.item_id, let item = FlameyItem(rawValue: id) {
-                            FlameyItemArt(item: item)
-                        } else {
-                            Image(systemName: "medal.fill")
-                                .font(.system(size: 26))
-                                .foregroundColor(.orange)
-                                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        }
-                    }
-                    .frame(width: 56, height: 56)
-                    .clipped()
-                    .accessibilityHidden(true)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(reward.name)
-                            .madFont(size: 16, weight: .heavy, design: .rounded)
-                            .foregroundColor(.white)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.8)
-                        Text(tierLine(reward, days: response.my_days))
-                            .madFont(size: 13, weight: .medium, design: .rounded, maxScale: 1.4)
-                            .foregroundColor(reward.earned ? .green : .white.opacity(0.7))
-                    }
-                    Spacer(minLength: 0)
-                }
-            }
+            CommunityRewardShowcase(goal: goal, days: response.my_days)
             Text("Reach \(CommunityGoalCopy.whole(goal.target_miles)) together and everyone who walked also gets a Streak Assist.")
                 .madFont(size: 13, weight: .medium, design: .rounded, maxScale: 1.4)
                 .foregroundColor(.white.opacity(0.7))
                 .fixedSize(horizontal: false, vertical: true)
         }
         .communityCard()
-    }
-
-    private func tierLine(_ reward: CommunityGoal.Reward, days: Int) -> String {
-        if reward.earned { return "Earned" }
-        return "\(min(days, reward.days)) of \(reward.days) days"
     }
 
     private func checkpointsCard(_ goal: CommunityGoal) -> some View {

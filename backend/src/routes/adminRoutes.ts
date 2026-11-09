@@ -61,6 +61,9 @@ import {
   activation,
   atRisk,
   referralAlias,
+  referralOverview,
+  referralLink,
+  referralReject,
   diagnostics,
 } from "../controllers/adminController.js";
 
@@ -140,6 +143,10 @@ adminRouter.get("/activation", activation);
 adminRouter.get("/at-risk", atRisk);
 // The one write here: resolve a typed referral name to a real account.
 adminRouter.post("/referral-alias", referralAlias);
+// Referral rewards: who's earning, and support's fixes.
+adminRouter.get("/referral-overview", referralOverview);
+adminRouter.post("/referral-link", referralLink);
+adminRouter.post("/referral-reject", referralReject);
 // The rows behind any one number on the dashboard — see DRILLDOWN_KINDS.
 adminRouter.get("/drilldown", drilldown);
 

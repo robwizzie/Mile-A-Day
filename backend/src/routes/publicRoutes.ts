@@ -10,6 +10,7 @@ import {
   getPublicDeskController,
   deskInterestController,
   getShowcaseController,
+  getPublicCommunityGoalController,
 } from "../controllers/publicController.js";
 import { deskInterestLimiter, publicDeskLimiter } from "../middleware/rateLimit.js";
 
@@ -46,6 +47,8 @@ router.post("/android-waitlist", joinAndroidWaitlistController);
 router.get("/desk", publicDeskLimiter, getPublicDeskController);
 // Onboarding's example feed photos (an owner-chosen allowlist of posts).
 router.get("/showcase", publicDeskLimiter, getShowcaseController);
+// The community goal page on the site. Totals and the route only.
+router.get("/community-goal", publicDeskLimiter, getPublicCommunityGoalController);
 router.post("/desk-interest", deskInterestLimiter, deskInterestController);
 
 // Unknown /public/* paths should 404 here, not fall through to the auth

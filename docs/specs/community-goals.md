@@ -36,7 +36,7 @@ The first goal is **Coast to Coast**, a walk across the United States. The route
 | Length | One calendar month |
 | Which days | A workout's `local_date` from `starts_on` through `ends_on` |
 | Daily cap | At most 15 miles per person per local day count toward the goal (open question 3) |
-| Reward tiers | 5 days: Coast Walker medal. 15 days: Trail Cap. 25 days: Trailblazer Flamey. A day counts once its goal miles reach `STREAK_QUALIFYING_MILES` |
+| Reward tiers | The Coast to Coast Collection, which builds one look. 5 days: Compass Pendant. 15 days: Explorer Hat. 25 days: Trailblazer Flamey. 31 days: Horizon Wings. A day counts once its goal miles reach `STREAK_QUALIFYING_MILES` |
 | Community bonus | If the group reaches the target, everyone who walked gets a Streak Assist |
 | Behind pace | Under 90% of a steady pace is behind. With 10 or fewer days left, the card and goal screen ask people to invite friends |
 | Late syncs | Totals keep counting for 48 hours after `ends_on`, then the reward is granted |

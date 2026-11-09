@@ -1,4 +1,5 @@
 import { PostgresService } from "./DbService.js";
+import { activeGoalForDay } from "./communityGoalService.js";
 import { sendPush } from "./pushNotificationService.js";
 import { challengeForNotification } from "./dailyChallengeService.js";
 import { standing } from "./h2hMatchupService.js";
@@ -255,7 +256,14 @@ export async function lapseContextFor(
  * "you've missed 14 days" is a reason to delete the app. Names the most
  * active friend when there is one, because a person beats a statistic.
  */
-export function winBackCopy(lapse: LapseContext): ReminderCopy {
+export function winBackCopy(lapse: LapseContext, goalTitle?: string | null): ReminderCopy {
+  const copy = winBackBaseCopy(lapse);
+  if (!goalTitle) return copy;
+  // A running goal is a reason to come back that isn't about what they missed.
+  return { ...copy, body: `${copy.body} Flamey saved you a spot on ${goalTitle}.` };
+}
+
+function winBackBaseCopy(lapse: LapseContext): ReminderCopy {
   const miles = lapse.friend_miles_7d;
   const milesText =
     miles >= 10 ? Math.round(miles).toString() : miles.toFixed(1);
@@ -403,8 +411,11 @@ export async function sendPendingDailyReminders(): Promise<void> {
         let copy: ReminderCopy;
         let data: Record<string, string> | undefined;
         if (lapse) {
-          copy = winBackCopy(lapse);
+          const goal = await activeGoalForDay(local_date);
+          copy = winBackCopy(lapse, goal?.title);
           data = { kind: "win_back", days_quiet: String(lapse.days_quiet) };
+          // Additive: a current build opens the goal, shipped builds ignore it.
+          if (goal) data.goal_id = goal.goal_id;
         } else if (duel) {
           copy = duelCopy(duel);
           data = { kind: "duel" };

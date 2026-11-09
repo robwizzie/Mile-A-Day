@@ -8,7 +8,7 @@ Long-form reference for `.claude/rules/website.md` — not auto-loaded. Read the
 
 Every page with an `opengraph-image` card also publishes an animated version
 as `og:video`: `/og.mp4` (home, and the root layout's default), and
-`<segment>/og.mp4` for `/updates`, `/desk`, `/privacy`, `/terms`,
+`<segment>/og.mp4` for `/updates`, `/desk`, `/goal`, `/privacy`, `/terms`,
 `/u/<username>` and `/p/<postId>`. Platforms that play `og:video` (iMessage,
 Discord, Telegram…) show the clip; everyone else (X, LinkedIn, WhatsApp, Slack)
 shows the PNG, which also serves as the poster, so the PNG cards stay exactly as

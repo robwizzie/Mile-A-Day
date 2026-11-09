@@ -21,25 +21,32 @@
   "palette": {
     "angular": false,
     "bodyOpacity": 1,
-    "core": "#FFF3C4FF",
-    "effects": [],
+    "core": "#FFF7D6FF",
+    "effects": [
+      "embers",
+      "halo",
+      "sheen",
+      "stars"
+    ],
     "end": [
       0.5,
       1
     ],
-    "eye": "#1A1020FF",
-    "glow": "#FF8A1FFF",
+    "eye": "#140A24FF",
+    "glow": "#FF7A2AFF",
     "inner": [
-      "#FFFBE6FF",
-      "#FFC93CFF"
+      "#FFFFFFFF",
+      "#FFE27AFF"
     ],
     "innerOpacity": 1,
     "outer": [
-      "#FF7A1AFF",
-      "#D9271AFF",
-      "#6E0F4FFF"
+      "#FFD24AFF",
+      "#FF5A2EFF",
+      "#C2187AFF",
+      "#3A1FA8FF",
+      "#0B2E7AFF"
     ],
-    "rim": "#FFD98C8C",
+    "rim": "#FFE9A8E6",
     "start": [
       0.5,
       0
