@@ -124,7 +124,7 @@ struct DoneTodayCard: View {
                     .madFont(size: 20)
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("Today's photo theme")
+                    Text("Today's photo prompt")
                         .madFont(size: 11, weight: .semibold, design: .rounded)
                         .foregroundColor(.white.opacity(0.5))
                     Text(theme.title)
@@ -191,13 +191,14 @@ struct DoneTodayCard: View {
     private func postPhoto() {
         guard let id = workoutId else { return }
         MADHaptics.action()
-        CelebrationManager.shared.addCelebration(.postRunPhotoPrompt(workoutId: id, workoutType: workoutType))
+        CelebrationManager.shared.requestPhotoPrompt(workoutId: id, workoutType: workoutType)
     }
 }
 
 /// One light photo prompt a day, the same for everyone on the same date, so
 /// friends' photos tend to answer the same question. Rotates through the list
-/// by day of the year; no server involved.
+/// by day of the year; no server involved. Never a theme that asks for where
+/// someone lives or finished (routes hide both ends for a reason).
 struct DailyPhotoTheme {
     let emoji: String
     let title: String
@@ -207,7 +208,7 @@ struct DailyPhotoTheme {
         .init(emoji: "👟", title: "Show us your shoes"),
         .init(emoji: "🌳", title: "Best tree you passed"),
         .init(emoji: "🐶", title: "Any dogs out there?"),
-        .init(emoji: "🏠", title: "Your street today"),
+        .init(emoji: "🪑", title: "Best bench you passed"),
         .init(emoji: "🌅", title: "Catch the light"),
         .init(emoji: "🎨", title: "Find something red"),
         .init(emoji: "🛣️", title: "The road ahead"),
@@ -222,7 +223,7 @@ struct DailyPhotoTheme {
         .init(emoji: "🍂", title: "Ground level"),
         .init(emoji: "👯", title: "Who came with you?"),
         .init(emoji: "🌧️", title: "Whatever the weather"),
-        .init(emoji: "🏁", title: "Where you finished"),
+        .init(emoji: "😊", title: "Something that made you smile"),
     ]
 
     static var today: DailyPhotoTheme {

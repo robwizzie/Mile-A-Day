@@ -7,13 +7,13 @@ import CoreLocation
 /// a buddy walk used to get its own crew-and-routes screen that looked
 /// nothing like the solo prompt.
 ///
-/// The hero is a preview of the POST ITSELF, as friends will get it: who
-/// it's from (you, or you and the crew), a camera viewfinder where the photo
-/// goes with the walk's map tucked in its corner, and who sees it — friends,
-/// once they've done their own mile. It replaced two small cards and a "+",
-/// which explained the idea and never showed the thing being made. Mid-run
-/// snaps drop straight into that frame. A sparkle burst marks the moment as
-/// a reward; on the Fun dashboard the user's own Flamey peeks over the card.
+/// It ASKS rather than demands (Nov 2026): the walk as friends will get it
+/// on top (its privacy-trimmed route, or the snap taken out there), Flamey
+/// asking in two chat bubbles whether they'd like to add a photo (with
+/// today's `DailyPhotoTheme`), and the answers as buttons: camera, a photo
+/// from this walk, or just the route. The camera then shows the theme and
+/// the route badge (`MADCameraView.themeLabel`/`.companion`) so the shot is
+/// framed knowing the route rides along.
 ///
 /// This view owns the whole flow up to the composer (mid-run snaps, the snap
 /// gallery, the library import, the composer itself with the buddy credits
@@ -71,20 +71,11 @@ struct PhotoPromptView: View {
     @ObservedObject private var freshWindow = FreshPostWindowManager.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var appeared = false
-    /// Drives the idle float/pulse. Started on the NEXT turn after appear and
-    /// reset without animation on disappear (a `repeatForever` attached to the
-    /// first commit leaks into every later layout change — ios.md).
-    @State private var floating = false
-    /// The one-shot sparkle burst off the card as it lands.
-    @State private var burst = false
     @State private var didAct = false
     /// Photos captured during the run via the tracking screen's camera button.
     @State private var midRunSnaps: [MidRunPhotoStash.Entry] = []
     /// Which snap the preview (and "Use this photo") is about.
     @State private var selectedSnap = 0
-    /// Only for the card's "who sees it" line — a throwaway instance, since
-    /// the Friends tab's own may not exist yet (ios.md).
-    @StateObject private var friendService = FriendService()
     /// Composer launch request — carries the tapped snap (nil = fresh camera).
     /// Item-based so the cover is always built from THIS value; the old
     /// isPresented + separate-selection pair could build the composer with a
@@ -121,11 +112,9 @@ struct PhotoPromptView: View {
     /// Fun dashboard only — nil on Modern, where Flamey doesn't exist.
     private var flameyLook: FlameyLook? { FlameyFacts.look(mood: .done, detail: .compact) }
 
-    /// The preview card's two fixed-height rows. Fixed so the photo area can
-    /// be sized EXACTLY from what's left (a 4:5 frame, like the post), rather
-    /// than predicted; `madTypeCap` keeps the text inside them.
+    /// The walk panel's header row. Fixed so the media can be sized from
+    /// what's left; `madTypeCap` keeps the text inside it.
     private static let cardHeaderHeight: CGFloat = 52
-    private static let cardFooterHeight: CGFloat = 40
 
     var body: some View {
         ZStack {
@@ -151,15 +140,12 @@ struct PhotoPromptView: View {
                 }
 
             VStack(spacing: 0) {
-                header
-                    .padding(.top, MADTheme.Spacing.md)
-                    .padding(.horizontal, MADTheme.Spacing.lg)
-
-                // The preview takes whatever height is left, so the post's
-                // own 4:5 frame is as big as this phone allows and the
-                // buttons never scroll away.
+                // The walk itself first, as friends will get it: its route
+                // (start and finish trimmed) or the snap they took out
+                // there. Takes what height is left so the buttons never
+                // scroll away.
                 GeometryReader { geo in
-                    heroCard(in: geo.size)
+                    walkPanel(in: geo.size)
                         .frame(width: geo.size.width, height: geo.size.height)
                 }
                 .padding(.top, MADTheme.Spacing.md)
@@ -169,6 +155,10 @@ struct PhotoPromptView: View {
                     snapPicker
                         .padding(.top, MADTheme.Spacing.sm)
                 }
+
+                flameyAsk
+                    .padding(.top, MADTheme.Spacing.md)
+                    .padding(.horizontal, MADTheme.Spacing.lg)
 
                 actionBar
             }
@@ -214,25 +204,16 @@ struct PhotoPromptView: View {
                 DispatchQueue.main.async { skip() }
                 return
             }
-            withAnimation(.spring(response: 0.55, dampingFraction: 0.78)) { appeared = true }
-            guard !reduceMotion else { return }
-            // Loops and the one-shot burst start on the NEXT turn, inside
-            // their own transactions (ios.md: a repeatForever attached to the
-            // first commit leaks into every later layout change).
-            DispatchQueue.main.async {
-                withAnimation(.easeOut(duration: 0.9).delay(0.15)) { burst = true }
-                withAnimation(.easeInOut(duration: 1.6).repeatForever(autoreverses: true)) {
-                    floating = true
-                }
+            // One settle-in, then still. There is deliberately no idle loop:
+            // a bobbing Flamey and a breathing glow made the whole screen
+            // look like it was wiggling.
+            if reduceMotion {
+                appeared = true
+            } else {
+                withAnimation(.easeOut(duration: 0.35)) { appeared = true }
             }
         }
-        .onDisappear {
-            var t = Transaction()
-            t.disablesAnimations = true
-            withTransaction(t) { floating = false }
-        }
         .task { await loadRoutePreview() }
-        .task { try? await friendService.loadFriends() }
         .alert("Couldn't add that photo", isPresented: Binding(
             get: { importError != nil },
             set: { if !$0 { importError = nil } }
@@ -259,7 +240,10 @@ struct PhotoPromptView: View {
                 buddySessionId: crew?.sessionId,
                 buddyCrewNames: crew?.coauthorNames
                     ?? joiningAuthorName.map { [$0] } ?? [],
-                crewPhotoPostId: joiningPostId
+                crewPhotoPostId: joiningPostId,
+                cameraTheme: "\(DailyPhotoTheme.today.emoji) \(DailyPhotoTheme.today.title)",
+                cameraCompanion: cameraBadge,
+                cameraCompanionCaption: cameraBadgeCaption
             ) { outcome in
                 composerLaunch = nil
                 switch outcome {
@@ -293,172 +277,169 @@ struct PhotoPromptView: View {
             RadialGradient(colors: [accent.opacity(0.38), .clear],
                            center: .init(x: 0.5, y: 0.42),
                            startRadius: 10, endRadius: 360)
-                .scaleEffect(floating ? 1.05 : 0.97)
         }
         .ignoresSafeArea()
     }
 
-    // MARK: - Header
+    // MARK: - The ask
 
-    /// The reward first ("WALK DONE · DAY 42"), then ONE line of what this
-    /// screen is for. It used to be an eyebrow, a headline, a two-clause
-    /// subheadline, a crew note, a countdown and its caption — six lines of
-    /// grey before anyone saw what they were being asked to make.
-    private var header: some View {
-        VStack(spacing: 8) {
-            achievementPill
-                .scaleEffect(appeared ? 1 : 0.7)
-
-            Text(headline)
-                .madFont(size: 28, weight: .black, design: .rounded, maxScale: 1.3)
-                .foregroundColor(.white)
-                .multilineTextAlignment(.center)
-                .lineLimit(2)
-                .minimumScaleFactor(0.8)
-
-            Text(subheadline)
-                .madFont(size: 14, weight: .medium, design: .rounded, maxScale: 1.3)
-                .foregroundColor(.white.opacity(0.62))
-                .multilineTextAlignment(.center)
-                .lineLimit(3)
-                .fixedSize(horizontal: false, vertical: true)
+    /// Flamey ASKS, after the walk, instead of the screen demanding a photo:
+    /// two short chat bubbles (well done + would you like to add one, with
+    /// today's theme), answered by the buttons under them. It replaced a
+    /// badge row, a two-line headline, a grey theme sentence, a post mock-up
+    /// with a viewfinder, a tilted map tile and a who-sees-it footer, all at
+    /// once, before anyone had said whether they even wanted to post.
+    private var flameyAsk: some View {
+        HStack(alignment: .bottom, spacing: 10) {
+            if let look = flameyLook {
+                FlameyDressedFigure(look: look, health: .healthy, size: 46, scale: 1, mood: .done)
+                    .frame(width: 46, height: 46)
+                    .accessibilityHidden(true)
+            }
+            VStack(alignment: .leading, spacing: 6) {
+                bubble {
+                    Text(greeting)
+                        .madFont(size: 16, weight: .bold, design: .rounded, maxScale: 1.3)
+                        .foregroundColor(.white)
+                        .madBodyLines(3)
+                }
+                if joiningPostId == nil { promptBubble }
+            }
+            Spacer(minLength: 0)
         }
         .opacity(appeared ? 1 : 0)
-        .offset(y: appeared ? 0 : -8)
+        .accessibilityElement(children: .combine)
     }
 
-    /// ✓ WALK DONE · 🔥 DAY 42 — the thing they just earned, said before the
-    /// thing we're asking for.
-    private var achievementPill: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "checkmark")
-                .font(.system(size: 9, weight: .black))
-                .foregroundColor(.white)
-                .frame(width: 18, height: 18)
-                .background(Circle().fill(accent))
-            Text(doneLabel)
-                .font(.system(size: 11, weight: .heavy, design: .rounded))
-                .tracking(1.2)
-                .foregroundColor(.white)
-                .lineLimit(1)
-                .fixedSize()
-            if let streak = stats.streak, streak > 0 {
-                Text("·")
-                    .font(.system(size: 11, weight: .heavy))
-                    .foregroundColor(.white.opacity(0.5))
-                HStack(spacing: 3) {
-                    Image(systemName: "flame.fill")
-                        .font(.system(size: 10, weight: .bold))
-                    Text("DAY \(streak)")
-                        .font(.system(size: 11, weight: .heavy, design: .rounded))
-                        .tracking(1.2)
-                        .monospacedDigit()
-                        .lineLimit(1)
-                        .fixedSize()
-                }
-                .foregroundColor(.orange)
-            }
-        }
-        .padding(.leading, 5)
-        .padding(.trailing, 12)
-        .padding(.vertical, 5)
-        .background(
-            Capsule().fill(Color.white.opacity(0.1))
-                .overlay(Capsule().strokeBorder(Color.white.opacity(0.14), lineWidth: 1))
-        )
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(achievementSpoken)
+    private func bubble<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        content()
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(
+                UnevenRoundedRectangle(
+                    topLeadingRadius: 18, bottomLeadingRadius: 6,
+                    bottomTrailingRadius: 18, topTrailingRadius: 18,
+                    style: .continuous)
+                .fill(Color.white.opacity(0.09))
+            )
     }
 
-    private var doneLabel: String {
-        isBuddyWalk
-            ? (isWalk ? "BUDDY WALK" : "BUDDY RUN")
-            : (isWalk ? "WALK DONE" : "RUN DONE")
-    }
-
-    private var achievementSpoken: String {
-        let done = isBuddyWalk
-            ? "Buddy \(noun) done"
-            : "\(noun.capitalized) done"
-        guard let streak = stats.streak, streak > 0 else { return done }
-        return "\(done), day \(streak) of your streak"
-    }
-
-    private var headline: String {
-        if !midRunSnaps.isEmpty {
-            return midRunSnaps.count == 1 ? "Great shot. Post it?" : "Pick your best shot"
-        }
-        if joiningPostId != nil { return "Add your shot" }
-        if crew != nil { return cameraOpen ? "Snap the crew" : "Add a photo of the crew" }
-        return cameraOpen ? "Snap your \(noun)" : "Add a photo from your \(noun)"
-    }
-
-    private var subheadline: String {
+    /// Bubble one: well done, then the question, in one short line.
+    private var greeting: String {
         if !midRunSnaps.isEmpty {
             return midRunSnaps.count == 1
-                ? "You took this one out there."
-                : "You took \(midRunSnaps.count) photos out there — tap one to preview it."
+                ? "Nice \(noun)! Want to post the photo you took?"
+                : "Nice \(noun)! Want to post one of your \(midRunSnaps.count) photos?"
         }
-        if joiningPostId != nil {
-            let whose = joiningAuthorName.map { "\($0)'s post" } ?? "the walk's post"
-            return "It joins \(whose) as your slide — one card, everyone's photos."
+        if let author = joiningAuthorName, joiningPostId != nil {
+            return "\(author) posted your \(noun). Add your photo to it?"
         }
-        if let note = crew?.note { return note }
-        if crew != nil { return "One post for the whole walk, with everyone's routes on it." }
-        // Today's photo theme (`DailyPhotoTheme`): the same light prompt the
-        // home page's done card shows, so a reason to shoot is right here.
-        let theme = DailyPhotoTheme.today
-        return cameraOpen
-            ? "Today's theme: \(theme.emoji) \(theme.title). Your route and stats ride along."
-            : "Today's theme: \(theme.emoji) \(theme.title). Any photo from this \(noun) can still go up today."
+        if crew != nil { return crew?.note ?? "Nice \(noun), crew! Want to add a photo?" }
+        if let streak = stats.streak, streak > 0 {
+            return "Day \(streak) done! 🔥 Want to add a photo?"
+        }
+        return "Nice \(noun)! 🔥 Want to add a photo?"
     }
 
-    // MARK: - Hero: the post, as friends will see it
+    /// Bubble two: today's prompt (`DailyPhotoTheme`, the same one the home
+    /// page's card shows) as an idea, never a rule: the quieter line under
+    /// it says anything goes.
+    private var promptBubble: some View {
+        let theme = DailyPhotoTheme.today
+        return bubble {
+            VStack(alignment: .leading, spacing: 3) {
+                (Text("Today's prompt: ")
+                    + Text("\(theme.title) \(theme.emoji)")
+                        .foregroundColor(Color(red: 1, green: 0.66, blue: 0.3)))
+                    .madFont(size: 16, weight: .bold, design: .rounded, maxScale: 1.3)
+                    .foregroundColor(.white)
+                    .madBodyLines(2)
+                Text("Or post anything you like.")
+                    .madFont(size: 13, weight: .semibold, design: .rounded, maxScale: 1.3)
+                    .foregroundColor(.white.opacity(0.6))
+                    .madBodyLines(2)
+            }
+        }
+    }
 
-    /// A preview of the actual feed card — who it's from, the photo frame
-    /// it's waiting for, and who'll see it — rather than a diagram of two
-    /// small cards and a "+". What people didn't get was what they were
-    /// making; this is that thing, with a hole where their photo goes.
-    private func heroCard(in available: CGSize) -> some View {
-        let chrome = Self.cardHeaderHeight + Self.cardFooterHeight
-        // The photo area: 4:5 like the post, as big as the space allows,
-        // never wider than a comfortable card on a Plus/Max phone.
-        let mediaWidth = max(150, min(available.width - 16, (available.height - chrome) * 0.8, 300))
-        let mediaSize = CGSize(width: mediaWidth, height: mediaWidth * 1.25)
+    // MARK: - The walk panel
 
+    /// The walk as friends get it: a header (you / the crew / the post
+    /// you're joining) over its route art (privacy-trimmed, the same line
+    /// friends see) or, once there are snaps, the chosen snap.
+    private func walkPanel(in available: CGSize) -> some View {
+        // Up to the post's own 4:5, then centred in what's left.
+        let mediaHeight = max(120, min(available.height - Self.cardHeaderHeight - 8, (available.width - 16) * 1.25))
+        let mediaSize = CGSize(width: available.width - 16, height: mediaHeight)
         return VStack(spacing: 0) {
             cardHeader
                 .frame(height: Self.cardHeaderHeight)
-            media(size: mediaSize)
-                .padding(.horizontal, 8)
-            cardFooter
-                .frame(height: Self.cardFooterHeight)
+            Group {
+                if let entry = selectedSnapEntry {
+                    snapPreview(entry, size: mediaSize)
+                } else {
+                    walkCard
+                        .frame(width: mediaSize.width, height: mediaSize.height)
+                        // RouteArtView keeps the map it first drew, so a
+                        // panel that settles to a new size would crop the
+                        // line (seen on a 320pt phone): redraw per size.
+                        .id("\(Int(mediaSize.width))x\(Int(mediaSize.height))")
+                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                        .accessibilityHidden(true)
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.bottom, 8)
         }
-        .frame(width: mediaSize.width + 16)
         .background(
             RoundedRectangle(cornerRadius: 26, style: .continuous)
                 .fill(Color.white.opacity(0.07))
         )
-        .overlay(
-            RoundedRectangle(cornerRadius: 26, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.11), lineWidth: 1)
-        )
-        .shadow(color: .black.opacity(0.5), radius: 24, y: 14)
-        .shadow(color: accent.opacity(0.25), radius: 30)
-        .overlay { sparkleBurst.allowsHitTesting(false) }
-        // Fun dashboard: their Flamey peeks over the card's top edge, beside
-        // the header's empty right side — never over the photo or the text.
-        .overlay(alignment: .topTrailing) {
-            if let look = flameyLook {
-                FlameyDressedFigure(look: look, health: .healthy, size: 54, scale: 1, mood: .done)
-                    .frame(width: 54, height: 54)
-                    .offset(x: 10, y: -24 + (floating ? -3 : 0))
-                    .opacity(appeared ? 1 : 0)
-                    .accessibilityHidden(true)
-            }
-        }
-        .scaleEffect(appeared ? 1 : 0.9)
+        .frame(maxHeight: .infinity, alignment: .center)
         .opacity(appeared ? 1 : 0)
+    }
+
+    /// Said on the map so nobody wonders whether friends see where they
+    /// live: the drawn line is `RoutePrivacyTrim.friendsView`, ends removed.
+    @ViewBuilder
+    private var trimmedChip: some View {
+        if crew == nil, let coords = routeCoords, coords.count >= 2 {
+            HStack(spacing: 4) {
+                Image(systemName: "eye.slash.fill")
+                    .font(.system(size: 10, weight: .bold))
+                    .accessibilityHidden(true)
+                Text("Ends hidden")
+                    .madFont(size: 12, weight: .bold, design: .rounded, maxScale: 1.2)
+                    .lineLimit(1)
+                    .fixedSize()
+            }
+            .foregroundColor(.white.opacity(0.85))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(Capsule().fill(Color.white.opacity(0.1)))
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Your start and finish are hidden from friends")
+        }
+    }
+
+    /// The walk's route as a square thumbnail for the camera's top-right
+    /// corner and its prompt card (`MADCameraView.companion`); the caption
+    /// under it on the card is `cameraBadgeCaption`.
+    private var cameraBadge: AnyView {
+        let scale: CGFloat = 0.4
+        return AnyView(
+            walkCard
+                .frame(width: 140, height: 175)
+                .scaleEffect(scale)
+                .frame(width: 140 * scale, height: 175 * scale)
+        )
+    }
+
+    private var cameraBadgeCaption: String {
+        let distance = stats.distance > 0 ? stats.distance.distanceFormatted : (isWalk ? "Walk" : "Run")
+        guard crew == nil, routeCoords != nil else { return distance }
+        return "\(distance) · start and finish hidden"
     }
 
     // MARK: Card header — who it's from
@@ -476,7 +457,10 @@ struct PhotoPromptView: View {
                     .foregroundColor(.white.opacity(0.55))
                     .lineLimit(1)
             }
-            Spacer(minLength: 0)
+            Spacer(minLength: 4)
+            // On the header, never on the map, where it covered the line's
+            // end marker on small phones.
+            trimmedChip
         }
         .padding(.horizontal, 12)
         .accessibilityElement(children: .combine)
@@ -517,173 +501,18 @@ struct PhotoPromptView: View {
         return me.name
     }
 
-    /// "Walk · 1.24 mi · now" — the feed header's own subtitle shape.
+    /// "Walk · 1.24 mi" — short enough to sit beside the "Ends hidden" tag
+    /// on a 320pt phone.
     private var cardMeta: String {
         if joiningPostId != nil { return "Your photo becomes a slide on it" }
         let kind = isBuddyWalk
             ? (isWalk ? "Buddy walk" : "Buddy run")
             : (isWalk ? "Walk" : "Run")
-        guard stats.distance > 0 else { return "\(kind) · now" }
-        return "\(kind) · \(stats.distance.distanceFormatted) · now"
+        guard stats.distance > 0 else { return kind }
+        return "\(kind) · \(stats.distance.distanceFormatted)"
     }
 
     // MARK: Card media — the hole their photo goes in
-
-    @ViewBuilder
-    private func media(size: CGSize) -> some View {
-        if let entry = selectedSnapEntry {
-            snapPreview(entry, size: size)
-        } else {
-            viewfinder(size: size)
-        }
-    }
-
-    /// An empty frame that's obviously a camera: corner brackets, a shutter,
-    /// the clock for the camera window, and the walk's map tucked in the
-    /// corner with a "+" — the photo and the map become one post.
-    private func viewfinder(size: CGSize) -> some View {
-        Button {
-            MADHaptics.action()
-            openPrimaryAction()
-        } label: {
-            ZStack {
-                LinearGradient(
-                    colors: [accent.opacity(0.22), Color(white: 0.07), Color(white: 0.04)],
-                    startPoint: .top, endPoint: .bottom)
-
-                ViewfinderBrackets()
-                    .stroke(Color.white.opacity(0.85),
-                            style: StrokeStyle(lineWidth: 3, lineCap: .round))
-                    .padding(14)
-
-                VStack(spacing: 12) {
-                    shutterGlyph(diameter: size.width < 220 ? 72 : 86)
-                    VStack(spacing: 3) {
-                        Text(cameraOpen ? "Tap to snap" : "Pick a photo")
-                            .font(.system(size: 15, weight: .heavy, design: .rounded))
-                            .foregroundColor(.white)
-                        if cameraOpen, size.height > 260 {
-                            Text("or choose one from this \(noun)")
-                                .font(.system(size: 12, weight: .semibold, design: .rounded))
-                                .foregroundColor(.white.opacity(0.6))
-                        }
-                    }
-                }
-                .offset(y: -6)
-            }
-            .frame(width: size.width, height: size.height)
-            .overlay(alignment: .top) {
-                if cameraOpen { cameraClock.padding(.top, 12) }
-            }
-            .overlay(alignment: .bottomTrailing) { mapTuck }
-            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-        }
-        .buttonStyle(ScaleButtonStyle())
-        .accessibilityLabel(cameraOpen ? "Take a photo" : "Choose a photo from this \(noun)")
-        .accessibilityHint("Your photo leads the post, with your route and stats on it")
-    }
-
-    private func shutterGlyph(diameter: CGFloat) -> some View {
-        ZStack {
-            // The breathing halo: transform + opacity only, off under
-            // Reduce Motion (`floating` never starts there).
-            Circle()
-                .stroke(accent.opacity(0.7), lineWidth: 2)
-                .frame(width: diameter, height: diameter)
-                .scaleEffect(floating ? 1.3 : 1)
-                .opacity(floating ? 0 : 0.9)
-            Circle()
-                .fill(Color.white.opacity(0.08))
-                .frame(width: diameter + 18, height: diameter + 18)
-            Circle()
-                .strokeBorder(Color.white, lineWidth: 4)
-                .frame(width: diameter, height: diameter)
-            Circle()
-                .fill(LinearGradient(colors: [accent.opacity(0.85), accent],
-                                     startPoint: .top, endPoint: .bottom))
-                .frame(width: diameter - 18, height: diameter - 18)
-            Image(systemName: cameraOpen ? "camera.fill" : "photo.on.rectangle.angled")
-                .font(.system(size: diameter * 0.3, weight: .bold))
-                .foregroundColor(.white)
-        }
-        .accessibilityHidden(true)
-    }
-
-    /// "Camera open · 9:41". A deadline for SHOOTING, not for sharing — the
-    /// library stays open all day, and the secondary button says so.
-    private var cameraClock: some View {
-        HStack(spacing: 5) {
-            Image(systemName: "camera.fill")
-                .font(.system(size: 10, weight: .bold))
-                .accessibilityHidden(true)
-            Text("Camera open ·")
-                .font(.system(size: 12, weight: .bold, design: .rounded))
-                .lineLimit(1)
-                .fixedSize()
-            Text(
-                timerInterval: (freshWindow.windowOpenedAt ?? Date())...freshWindow.windowEndDate,
-                countsDown: true
-            )
-            .font(.system(size: 12, weight: .heavy, design: .rounded))
-            .monospacedDigit()
-            // A lighter cut of the activity colour, legible on the dark chip.
-            .foregroundColor(isWalk
-                ? Color(red: 0.6, green: 0.8, blue: 1)
-                : Color(red: 1, green: 0.55, blue: 0.68))
-            .lineLimit(1)
-            .fixedSize()
-        }
-        .foregroundColor(.white)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 5)
-        .background(
-            Capsule().fill(Color.black.opacity(0.55))
-                .overlay(Capsule().strokeBorder(Color.white.opacity(0.18), lineWidth: 1))
-        )
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Camera open for a few more minutes")
-    }
-
-    /// The walk's own card, small and tilted in the frame's corner, with a
-    /// "+": the photo leads, the map is the post's second face. Rendered at
-    /// the old preview size and scaled down so the route art lays out as it
-    /// was designed to.
-    private var mapTuck: some View {
-        let full = CGSize(width: 140, height: 175)
-        let scale: CGFloat = 0.46
-        return ZStack(alignment: .bottom) {
-            walkCard
-                .frame(width: full.width, height: full.height)
-                .scaleEffect(scale)
-                .frame(width: full.width * scale, height: full.height * scale)
-            Text(isBuddyWalk ? "ROUTES" : "MAP")
-                .font(.system(size: 8, weight: .black, design: .rounded))
-                .tracking(0.6)
-                .foregroundColor(.white)
-                .padding(.horizontal, 5)
-                .padding(.vertical, 2)
-                .background(Capsule().fill(Color.black.opacity(0.6)))
-                .padding(.bottom, 4)
-        }
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .strokeBorder(Color.white, lineWidth: 2)
-        )
-        .overlay(alignment: .topLeading) {
-            Image(systemName: "plus")
-                .font(.system(size: 10, weight: .black))
-                .foregroundColor(.black)
-                .frame(width: 20, height: 20)
-                .background(Circle().fill(Color.white))
-                .offset(x: -9, y: -9)
-        }
-        .shadow(color: .black.opacity(0.5), radius: 8, y: 4)
-        .rotationEffect(.degrees(appeared ? 6 : 0))
-        .padding(14)
-        .accessibilityHidden(true)
-    }
 
     /// A mid-run snap, in the post's own frame. Tapping it opens the full
     /// review (save / delete / pick); the primary button posts it.
@@ -721,65 +550,6 @@ struct PhotoPromptView: View {
         .transition(.opacity)
         .accessibilityLabel("Your photo")
         .accessibilityHint("Opens it full screen to review, save or delete")
-    }
-
-    // MARK: Card footer — who sees it
-
-    /// Who this reaches, said on the card itself. "Will my whole friends list
-    /// see this?" and "why can't Sam see my photo?" had no answer anywhere
-    /// before the share step; the earn-to-view rule (photos unlock once the
-    /// viewer has done their own mile) is the second half of that answer.
-    private var cardFooter: some View {
-        HStack(spacing: 8) {
-            friendFaces
-            Text(audienceText)
-                .font(.system(size: 12, weight: .semibold, design: .rounded))
-                .foregroundColor(.white.opacity(0.8))
-                .lineLimit(1)
-                .minimumScaleFactor(0.85)
-            Spacer(minLength: 4)
-            HStack(spacing: 3) {
-                Image(systemName: "lock.fill")
-                    .font(.system(size: 9, weight: .bold))
-                Text("after their mile")
-                    .font(.system(size: 11, weight: .semibold, design: .rounded))
-                    .lineLimit(1)
-                    .fixedSize()
-            }
-            .foregroundColor(.white.opacity(0.45))
-        }
-        .padding(.horizontal, 12)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(
-            "\(audienceText). They see the photo once they've done their own mile today.")
-    }
-
-    @ViewBuilder
-    private var friendFaces: some View {
-        let friends = Array(friendService.friends.prefix(3))
-        if friends.isEmpty {
-            Image(systemName: "person.2.fill")
-                .font(.system(size: 12, weight: .bold))
-                .foregroundColor(.white.opacity(0.7))
-        } else {
-            HStack(spacing: -7) {
-                ForEach(friends, id: \.user_id) { friend in
-                    AvatarView(name: friend.username ?? "?",
-                               imageURL: friend.profile_image_url, size: 20)
-                        .overlay(Circle().strokeBorder(Color.black, lineWidth: 1.5))
-                }
-            }
-        }
-    }
-
-    private var audienceText: String {
-        if isBuddyWalk { return "Your friends and the crew's" }
-        let count = friendService.friends.count
-        switch count {
-        case 0: return "For your friends"
-        case 1: return "For your 1 friend"
-        default: return "For your \(count) friends"
-        }
     }
 
     // MARK: Mid-run snap picker
@@ -836,30 +606,7 @@ struct PhotoPromptView: View {
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
-    // MARK: - Celebration sparkle
-
-    /// One small burst off the card as it lands — the moment reads as a
-    /// reward, not a form. One-shot, transform + opacity, nothing under
-    /// Reduce Motion (`burst` never flips there).
-    private var sparkleBurst: some View {
-        ZStack {
-            ForEach(0..<10, id: \.self) { i in
-                let angle = CGFloat(i) / 10 * 2 * .pi + 0.3
-                let reach: CGFloat = i.isMultiple(of: 2) ? 150 : 115
-                Image(systemName: i.isMultiple(of: 3) ? "sparkle" : "circle.fill")
-                    .font(.system(size: i.isMultiple(of: 3) ? 14 : 5, weight: .bold))
-                    .foregroundColor(i.isMultiple(of: 2) ? .white : accent)
-                    .offset(x: burst ? cos(angle) * reach : 0,
-                            y: burst ? sin(angle) * reach * 1.2 : 0)
-                    .scaleEffect(burst ? 1 : 0.01)
-                    .opacity(burst ? 0 : 1)
-            }
-        }
-        .opacity(appeared && !reduceMotion ? 1 : 0)
-        .accessibilityHidden(true)
-    }
-
-    // MARK: - The walk's card (inside the map tuck)
+    // MARK: - The walk's card
 
     /// The walk side of the post: its real route art with the feed's stats
     /// band when friends will get a route, else a stats card.
@@ -929,11 +676,10 @@ struct PhotoPromptView: View {
 
     private func title(_ action: PromptAction, primary: Bool) -> String {
         switch action {
-        case .useSnap: return "Use this photo"
-        case .camera: return primary || selectedSnapEntry == nil ? "Take a photo" : "New photo"
+        case .useSnap: return midRunSnaps.count > 1 ? "Post this one" : "Yes, post it"
+        case .camera: return primary ? "Yes, open the camera" : "New photo"
         case .library:
-            if primary { return "Choose from this \(noun)" }
-            return selectedSnapEntry == nil ? "Choose from this \(noun)" : "From library"
+            return primary ? "Pick a photo from this \(noun)" : "Use a \(noun) photo"
         }
     }
 
@@ -949,6 +695,10 @@ struct PhotoPromptView: View {
         let all = actions
         let primary = all[0]
         let rest = Array(all.dropFirst())
+        // One secondary answer sits beside "just the route"; two (a snap,
+        // a new photo AND the library) take the row and the skip drops
+        // under it as text.
+        let skipInRow = rest.count <= 1
         return VStack(spacing: 10) {
             Button {
                 MADHaptics.action()
@@ -957,83 +707,70 @@ struct PhotoPromptView: View {
                 HStack(spacing: 8) {
                     Image(systemName: icon(primary))
                         .font(.system(size: 17, weight: .bold))
+                        .accessibilityHidden(true)
                     Text(title(primary, primary: true))
-                        .font(.system(size: 17, weight: .heavy, design: .rounded))
+                        .madFont(size: 17, weight: .heavy, design: .rounded, maxScale: 1.3)
                         .lineLimit(1)
-                        .minimumScaleFactor(0.85)
+                        .minimumScaleFactor(0.8)
                 }
                 .foregroundColor(.white)
-                .frame(maxWidth: .infinity)
-                .frame(height: 54)
-                .background(
-                    Capsule().fill(LinearGradient(
-                        colors: [accent, accent.opacity(0.78)],
-                        startPoint: .leading, endPoint: .trailing))
-                )
-                .overlay(Capsule().strokeBorder(Color.white.opacity(0.18), lineWidth: 1))
-                .shadow(color: accent.opacity(0.45), radius: 16, y: 6)
+                .frame(maxWidth: .infinity, minHeight: 54)
+                .background(Capsule().fill(MADTheme.Colors.madRed))
                 .contentShape(Capsule())
             }
             .buttonStyle(ScaleButtonStyle())
 
-            if !rest.isEmpty {
-                HStack(spacing: 10) {
-                    ForEach(rest, id: \.self) { action in
-                        Button {
-                            MADHaptics.tap()
-                            perform(action)
-                        } label: {
-                            HStack(spacing: 7) {
-                                Image(systemName: icon(action))
-                                    .font(.system(size: 14, weight: .semibold))
-                                Text(title(action, primary: false))
-                                    .font(.system(size: 15, weight: .bold, design: .rounded))
-                                    .lineLimit(1)
-                                    .minimumScaleFactor(0.8)
-                            }
-                            .foregroundColor(.white.opacity(0.92))
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 46)
-                            .background(
-                                Capsule().fill(Color.white.opacity(0.09))
-                                    .overlay(Capsule().strokeBorder(Color.white.opacity(0.13), lineWidth: 1))
-                            )
-                            .contentShape(Capsule())
-                        }
-                        .buttonStyle(ScaleButtonStyle())
+            HStack(spacing: 10) {
+                ForEach(rest, id: \.self) { action in
+                    secondaryButton(title(action, primary: false)) {
+                        MADHaptics.tap()
+                        perform(action)
                     }
+                }
+                if skipInRow {
+                    secondaryButton(skipTitle) { skip() }
                 }
             }
 
-            Button { skip() } label: {
-                VStack(spacing: 2) {
+            if !skipInRow {
+                Button { skip() } label: {
                     Text(skipTitle)
-                        .font(.system(size: 15, weight: .semibold, design: .rounded))
+                        .madFont(size: 15, weight: .semibold, design: .rounded, maxScale: 1.3)
                         .foregroundColor(.white.opacity(0.65))
-                    // What skipping does, when it does something — said
-                    // quietly here so it's never a surprise later.
-                    if let skipNote {
-                        Text(skipNote)
-                            .font(.system(size: 11, weight: .medium, design: .rounded))
-                            .foregroundColor(.white.opacity(0.4))
-                    }
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .contentShape(Rectangle())
                 }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 6)
-                .contentShape(Rectangle())
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
+
+            // What skipping does, when the caller has something to say.
+            if let skipNote {
+                Text(skipNote)
+                    .madFont(size: 12, weight: .medium, design: .rounded, maxScale: 1.3)
+                    .foregroundColor(.white.opacity(0.5))
+                    .multilineTextAlignment(.center)
+                    .madBodyLines(2)
+            }
         }
         .padding(.horizontal, MADTheme.Spacing.lg)
         .padding(.top, MADTheme.Spacing.md)
         .padding(.bottom, MADTheme.Spacing.xs)
         .opacity(appeared ? 1 : 0)
-        .offset(y: appeared ? 0 : 20)
     }
 
-    /// The photo frame does what the primary button does.
-    private func openPrimaryAction() {
-        perform(actions[0])
+    private func secondaryButton(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .madFont(size: 15, weight: .bold, design: .rounded, maxScale: 1.3)
+                .foregroundColor(.white.opacity(0.92))
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+                .padding(.horizontal, 8)
+                .frame(maxWidth: .infinity, minHeight: 48)
+                .background(Capsule().fill(Color.white.opacity(0.09)))
+                .contentShape(Capsule())
+        }
+        .buttonStyle(ScaleButtonStyle())
     }
 
     private func reloadSnaps() {
@@ -1134,42 +871,5 @@ private struct ComposerLaunch: Identifiable {
         self.image = full?.primary ?? entry.image
         self.secondary = full?.secondary ?? entry.secondary
         self.primaryWasFront = entry.primaryWasFront
-    }
-}
-
-/// The four corner brackets of a camera viewfinder — what makes an empty
-/// frame read as "a photo goes here" rather than a placeholder box.
-private struct ViewfinderBrackets: Shape {
-    var arm: CGFloat = 24
-    var radius: CGFloat = 10
-
-    func path(in rect: CGRect) -> Path {
-        var p = Path()
-        let r = min(radius, arm)
-        // Top-left
-        p.move(to: CGPoint(x: rect.minX, y: rect.minY + arm))
-        p.addLine(to: CGPoint(x: rect.minX, y: rect.minY + r))
-        p.addQuadCurve(to: CGPoint(x: rect.minX + r, y: rect.minY),
-                       control: CGPoint(x: rect.minX, y: rect.minY))
-        p.addLine(to: CGPoint(x: rect.minX + arm, y: rect.minY))
-        // Top-right
-        p.move(to: CGPoint(x: rect.maxX - arm, y: rect.minY))
-        p.addLine(to: CGPoint(x: rect.maxX - r, y: rect.minY))
-        p.addQuadCurve(to: CGPoint(x: rect.maxX, y: rect.minY + r),
-                       control: CGPoint(x: rect.maxX, y: rect.minY))
-        p.addLine(to: CGPoint(x: rect.maxX, y: rect.minY + arm))
-        // Bottom-right
-        p.move(to: CGPoint(x: rect.maxX, y: rect.maxY - arm))
-        p.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY - r))
-        p.addQuadCurve(to: CGPoint(x: rect.maxX - r, y: rect.maxY),
-                       control: CGPoint(x: rect.maxX, y: rect.maxY))
-        p.addLine(to: CGPoint(x: rect.maxX - arm, y: rect.maxY))
-        // Bottom-left
-        p.move(to: CGPoint(x: rect.minX + arm, y: rect.maxY))
-        p.addLine(to: CGPoint(x: rect.minX + r, y: rect.maxY))
-        p.addQuadCurve(to: CGPoint(x: rect.minX, y: rect.maxY - r),
-                       control: CGPoint(x: rect.minX, y: rect.maxY))
-        p.addLine(to: CGPoint(x: rect.minX, y: rect.maxY - arm))
-        return p
     }
 }
