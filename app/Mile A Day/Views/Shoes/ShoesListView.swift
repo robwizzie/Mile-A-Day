@@ -55,7 +55,7 @@ struct ShoesListView: View {
     }
 
     @ViewBuilder
-    private func section(_ title: String, shoes: [Shoe]) -> some View {
+    private func section(_ title: LocalizedStringKey, shoes: [Shoe]) -> some View {
         if !shoes.isEmpty {
             VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
                 ProfileCardLabel(text: title)

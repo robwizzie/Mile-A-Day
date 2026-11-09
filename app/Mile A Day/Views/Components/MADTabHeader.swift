@@ -45,22 +45,29 @@ struct MADTabHeader: View {
     let subtitle: String?
     let subtitleHighlight: String?
     let actions: [MADHeaderAction]
+    /// Dashboard only: the app icon before a smaller title. The launch splash
+    /// flies its icon onto this exact spot (`SplashGate.logoFrame`).
+    let showsLogo: Bool
 
-    init(title: String, subtitle: String? = nil, subtitleHighlight: String? = nil, actions: [MADHeaderAction] = []) {
+    init(title: String, subtitle: String? = nil, subtitleHighlight: String? = nil,
+         actions: [MADHeaderAction] = [], showsLogo: Bool = false) {
         self.title = title
         self.subtitle = subtitle
         self.subtitleHighlight = subtitleHighlight
         self.actions = actions
+        self.showsLogo = showsLogo
     }
 
     var body: some View {
         // Center alignment: baseline-aligning the 38pt icon circles against the
         // big title pushed the buttons below the title's visual line. Centering
         // keeps title and buttons level at any text size.
-        HStack(alignment: .center) {
+        HStack(alignment: .center, spacing: showsLogo ? 10 : 8) {
+            if showsLogo { MADHeaderLogo() }
+
             VStack(alignment: .leading, spacing: 1) {
                 Text(title)
-                    .madFont(size: 26, weight: .heavy, design: .rounded)
+                    .madFont(size: showsLogo ? 21 : 26, weight: .heavy, design: .rounded)
                     .foregroundColor(.white)
                     .lineLimit(1)
                     .minimumScaleFactor(0.65)
@@ -229,6 +236,30 @@ struct MADTabHeader: View {
     }
 }
 
+/// The app icon in the Dashboard header. Hidden while the launch splash is
+/// over the app: the splash flies its own copy of this image onto exactly
+/// this frame, then the overlay goes and this one is already in place, so
+/// the hand-off is a swap of identical pixels (no cross-fade, no jump).
+struct MADHeaderLogo: View {
+    static let size: CGFloat = 36
+    @ObservedObject private var appState = AppStateManager.shared
+    @ObservedObject private var splashGate = SplashGate.shared
+
+    var body: some View {
+        Image("mad-logo")
+            .resizable()
+            .aspectRatio(contentMode: .fill)
+            .frame(width: Self.size, height: Self.size)
+            .clipShape(RoundedRectangle(cornerRadius: Self.size * 0.23, style: .continuous))
+            .opacity(appState.splashOverlay && !splashGate.logoHandedOff ? 0 : 1)
+            .animation(.easeOut(duration: 0.12), value: splashGate.logoHandedOff)
+            .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: {
+                SplashGate.shared.reportLogo(frame: $0)
+            }
+            .accessibilityHidden(true)
+    }
+}
+
 /// Pill-style segmented control used inside tabs for sub-navigation. Replaces
 /// the old underline-style `TabButton` used on Compete. Matches the Friends ↔
 /// Leaderboard mode picker and the Requests sheet picker so all in-page tabs
@@ -296,6 +327,9 @@ struct MADPillPicker<Tag: Hashable>: View {
                 }
             }
             .foregroundColor(isSelected ? .white : .white.opacity(0.5))
+            // Inset so a scaled-down label never runs into the capsule's
+            // rounded end (large text: "Leaderboard" touched the edge).
+            .padding(.horizontal, 8)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 9)
             .background(

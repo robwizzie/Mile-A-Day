@@ -623,7 +623,7 @@ struct WorkoutsView: View {
         if calendar.isDateInToday(day) { return "Today" }
         if calendar.isDateInYesterday(day) { return "Yesterday" }
         let f = DateFormatter()
-        f.dateFormat = "EEE, MMM d"
+        f.setLocalizedDateFormatFromTemplate("EEEMMMd")
         return f.string(from: day)
     }
 }

@@ -104,6 +104,9 @@ struct PlusPaywallView: View {
     @State private var tryOn: FlameyItem = .roseGold
     @State private var celebrating = false
     @State private var recordedView = false
+    /// Short screens (SE, mini under Display Zoom): the pinned purchase bar
+    /// drops to one line per plan so the selling copy keeps most of the screen.
+    @State private var compactHeight = false
 
     private struct PaywallAlert: Identifiable {
         let id = UUID()
@@ -181,6 +184,7 @@ struct PlusPaywallView: View {
             }
         }
         .preferredColorScheme(.dark)
+        .onGeometryChange(for: Bool.self) { $0.size.height < 700 } action: { compactHeight = $0 }
         .task {
             await store.loadProducts()
             loadAttempted = true
@@ -504,7 +508,7 @@ struct PlusPaywallView: View {
                     }
                     .madFont(size: 13, weight: .bold, design: .rounded, maxScale: 1.3)
                     .foregroundColor(.white.opacity(selected == PlusProducts.lifetime ? 1 : 0.72))
-                    .frame(minHeight: 30)
+                    .frame(minHeight: compactHeight ? 26 : 30)
                 }
                 .buttonStyle(.plain)
                 .accessibilityAddTraits(selected == PlusProducts.lifetime ? .isSelected : [])
@@ -520,7 +524,10 @@ struct PlusPaywallView: View {
                 MADHaptics.tap()
                 withAnimation(.easeOut(duration: 0.15)) { selected = id }
             } label: {
-                VStack(spacing: 1) {
+                let layout = compactHeight
+                    ? AnyLayout(HStackLayout(spacing: 5))
+                    : AnyLayout(VStackLayout(spacing: 1))
+                layout {
                     Text(PlusPlanCopy.title(product))
                         .madFont(size: 14, weight: .black, design: .rounded, maxScale: 1.3)
                         .lineLimit(1)
@@ -529,15 +536,16 @@ struct PlusPaywallView: View {
                         .madFont(size: 13, weight: .heavy, design: .rounded, maxScale: 1.3)
                         .lineLimit(1)
                         .minimumScaleFactor(0.75)
-                    if id == PlusProducts.yearly, let savings = yearlySavings {
+                    if !compactHeight, id == PlusProducts.yearly, let savings = yearlySavings {
                         Text("Save \(savings)%")
                             .madFont(size: 11, weight: .heavy, design: .rounded, maxScale: 1.2)
                             .foregroundColor(on ? Color(red: 0.75, green: 0.35, blue: 0.0) : .orange)
                     }
                 }
                 .foregroundColor(on ? Color(red: 0.1, green: 0.04, blue: 0.06) : .white.opacity(0.78))
-                .padding(.vertical, 6)
-                .frame(maxWidth: .infinity, minHeight: 44)
+                .padding(.vertical, compactHeight ? 4 : 6)
+                .padding(.horizontal, 4)
+                .frame(maxWidth: .infinity, minHeight: compactHeight ? 38 : 44)
                 .background(RoundedRectangle(cornerRadius: 11, style: .continuous).fill(on ? Color.white : Color.clear))
             }
             .buttonStyle(.plain)
@@ -869,14 +877,22 @@ struct PlusPaywallView: View {
         .padding(.horizontal, MADTheme.Spacing.screenGutter)
         .padding(.top, 12)
         .padding(.bottom, 6)
+        // Opaque under the controls, with a short fade ABOVE the bar, so
+        // scrolled copy never shows through the plan picker.
         .background(
-            LinearGradient(colors: [Color(red: 0.05, green: 0.03, blue: 0.06).opacity(0.0),
-                                    Color(red: 0.05, green: 0.03, blue: 0.06).opacity(0.96),
-                                    Color(red: 0.05, green: 0.03, blue: 0.06)],
-                           startPoint: .top, endPoint: .init(x: 0.5, y: 0.25))
-                .ignoresSafeArea(edges: .bottom)
+            VStack(spacing: 0) {
+                LinearGradient(colors: [Self.barColor.opacity(0), Self.barColor],
+                               startPoint: .top, endPoint: .bottom)
+                    .frame(height: 24)
+                Self.barColor
+            }
+            .padding(.top, -24)
+            .ignoresSafeArea(edges: .bottom)
+            .allowsHitTesting(false)
         )
     }
+
+    private static let barColor = Color(red: 0.05, green: 0.03, blue: 0.06)
 
     private var purchaseButton: some View {
         Button {

@@ -188,7 +188,7 @@ enum CompeteFormat {
         guard let date = parser.date(from: ymd) else { return ymd }
 
         let out = DateFormatter()
-        out.dateFormat = "MMM d"
+        out.setLocalizedDateFormatFromTemplate("MMMd")
         out.locale = Locale.current
         return out.string(from: date)
     }

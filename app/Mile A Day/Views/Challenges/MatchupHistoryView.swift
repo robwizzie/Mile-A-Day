@@ -395,7 +395,7 @@ enum MatchupDateFormat {
 
     private static let dayFormatter: DateFormatter = {
         let fmt = DateFormatter()
-        fmt.dateFormat = "EEE, MMM d"
+        fmt.setLocalizedDateFormatFromTemplate("EEEMMMd")
         return fmt
     }()
 

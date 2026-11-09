@@ -1422,7 +1422,7 @@ struct DailyActivityCalendar: View {
     private func dayDetailPanel(for date: Date) -> some View {
         let formatter: DateFormatter = {
             let f = DateFormatter()
-            f.dateFormat = "EEEE, MMM d"
+            f.setLocalizedDateFormatFromTemplate("EEEEMMMd")
             return f
         }()
         let breakdown = allUsers

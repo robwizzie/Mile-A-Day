@@ -283,7 +283,7 @@ struct StealthModeView: View {
 
     private static func describe(_ window: StealthWindow) -> String {
         let formatter = DateFormatter()
-        formatter.dateFormat = "MMM d"
+        formatter.setLocalizedDateFormatFromTemplate("MMMd")
         let start = formatter.string(from: window.start)
         guard let end = window.end else { return "Since \(start)" }
         if end > Date() { return "\(start) – until \(formatter.string(from: end))" }
@@ -375,7 +375,7 @@ struct StealthAttentionRow: View {
 
     private static func subtitle(_ store: StealthModeStore) -> String {
         let formatter = DateFormatter()
-        formatter.dateFormat = "MMM d"
+        formatter.setLocalizedDateFormatFromTemplate("MMMd")
         if let until = store.until {
             return "Turns off \(formatter.string(from: until)) — tap to change"
         }

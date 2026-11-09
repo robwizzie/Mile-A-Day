@@ -129,10 +129,10 @@ struct ProfileView: View {
         ProfileTabBar(
             selection: $profileTab,
             items: [
-                .init(id: .activity, title: "Activity"),
-                .init(id: .posts, title: "Posts"),
-                .init(id: .stats, title: "Stats"),
-                .init(id: .badges, title: "Badges")
+                .init(id: .activity, title: String(localized: "Activity")),
+                .init(id: .posts, title: String(localized: "Posts")),
+                .init(id: .stats, title: String(localized: "Stats")),
+                .init(id: .badges, title: String(localized: "Badges"))
             ],
             fillsWidth: fillsWidth
         )
@@ -524,10 +524,10 @@ struct ProfileView: View {
         // row per body pass was the cost here.
         guard let date = RelativeTime.date(from: iso) else { return "" }
         let secs = Date().timeIntervalSince(date)
-        if secs < 60 { return "just now" }
-        if secs < 3600 { return "\(Int(secs / 60))m ago" }
-        if secs < 86400 { return "\(Int(secs / 3600))h ago" }
-        return "\(Int(secs / 86400))d ago"
+        if secs < 60 { return String(localized: "just now") }
+        if secs < 3600 { return String(localized: "\(Int(secs / 60))m ago") }
+        if secs < 86400 { return String(localized: "\(Int(secs / 3600))h ago") }
+        return String(localized: "\(Int(secs / 86400))d ago")
     }
 
     /// Performance metrics — same role as the friend profile's Stats tab.

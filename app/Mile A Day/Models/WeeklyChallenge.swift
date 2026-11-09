@@ -71,10 +71,10 @@ struct WeeklyChallengeResponse: Codable {
         var id: String { user_id }
 
         var displayName: String {
-            if is_me { return "You" }
+            if is_me { return String(localized: "You") }
             if let username, !username.isEmpty { return username }
             if let first_name, !first_name.isEmpty { return first_name }
-            return "Someone"
+            return String(localized: "Someone")
         }
     }
 
@@ -157,10 +157,10 @@ enum WeeklyChallengeFormat {
     /// "3 days left" / "Last day" / "Week over".
     static func daysLeft(_ days: Int) -> String {
         switch days {
-        case ..<0: return "Week over"
-        case 0: return "Week over"
-        case 1: return "Last day"
-        default: return "\(days) days left"
+        case ..<0: return String(localized: "Week over")
+        case 0: return String(localized: "Week over")
+        case 1: return String(localized: "Last day")
+        default: return String(localized: "\(days) days left")
         }
     }
 
@@ -173,7 +173,7 @@ enum WeeklyChallengeFormat {
         guard let date = parser.date(from: ymd) else { return ymd }
 
         let out = DateFormatter()
-        out.dateFormat = "MMM d"
+        out.setLocalizedDateFormatFromTemplate("MMMd")
         out.locale = Locale.current
         return out.string(from: date)
     }

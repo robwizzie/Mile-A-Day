@@ -404,7 +404,7 @@ struct WeeklyMileChartView: View {
     private func tooltip(for data: DayData, at point: CGPoint, chartWidth: CGFloat) -> some View {
         let dateFormatter: DateFormatter = {
             let f = DateFormatter()
-            f.dateFormat = "MMM d"
+            f.setLocalizedDateFormatFromTemplate("MMMd")
             return f
         }()
         let distText = data.isFuture ? "—" : data.distance.milesFormatted

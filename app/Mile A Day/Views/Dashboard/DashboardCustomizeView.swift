@@ -122,8 +122,8 @@ struct DashboardCardsBlock: View {
         if active.isEmpty {
             DashboardQuietCard(
                 style: style, icon: "trophy.fill", tint: .orange,
-                title: "No competitions right now",
-                subtitle: "Start or join one from the Compete tab and it shows up here.")
+                title: String(localized: "No competitions right now"),
+                subtitle: String(localized: "Start or join one from the Compete tab and it shows up here."))
         } else {
             ForEach(active, id: \.competition_id) { competition in
                 ActiveCompetitionBannerCard(competition: competition)
@@ -186,20 +186,20 @@ struct DashboardCardsBlock: View {
             } label: {
                 DashboardQuietCard(
                     style: style, icon: "arrow.clockwise", tint: MADTheme.Colors.madRed,
-                    title: "Couldn't load this week's challenge",
-                    subtitle: "Tap to try again.")
+                    title: String(localized: "Couldn't load this week's challenge"),
+                    subtitle: String(localized: "Tap to try again."))
             }
             .buttonStyle(.plain)
         } else if !weeklyChallengeService.hasLoadedOnce {
             DashboardQuietCard(
                 style: style, icon: "calendar.badge.checkmark", tint: MADTheme.Colors.madRed,
-                title: "Loading this week's challenge…",
-                subtitle: "One moment.")
+                title: String(localized: "Loading this week's challenge…"),
+                subtitle: String(localized: "One moment."))
         } else {
             DashboardQuietCard(
                 style: style, icon: "calendar.badge.checkmark", tint: MADTheme.Colors.madRed,
-                title: "No weekly challenge yet",
-                subtitle: "A new one lands every Sunday.")
+                title: String(localized: "No weekly challenge yet"),
+                subtitle: String(localized: "A new one lands every Sunday."))
         }
     }
 }
@@ -217,8 +217,8 @@ struct RouteMapCard: View {
         } label: {
             DashboardQuietCard(
                 style: style, icon: "map.fill", tint: .blue,
-                title: "Your routes",
-                subtitle: "Every walk and run you've mapped, on one map",
+                title: String(localized: "Your routes"),
+                subtitle: String(localized: "Every walk and run you've mapped, on one map"),
                 chevron: true)
         }
         .buttonStyle(.plain)
@@ -382,9 +382,6 @@ struct DashboardCustomizeView: View {
     private var onCards: [DashboardCard] { DashboardCards.ordered(in: raw, for: style) }
     private var offCards: [DashboardCard] { DashboardCards.off(in: raw, for: style) }
 
-    /// The width the system reorder control takes beside a movable row, so
-    /// the toggles line up down the whole list.
-    private static let handleSlot: CGFloat = 40
 
     var body: some View {
         NavigationStack {
@@ -392,7 +389,7 @@ struct DashboardCustomizeView: View {
                 List {
                     plainRow(header("On your dashboard"))
                     if onCards.isEmpty {
-                        cardRow(text: "Nothing here — just the day's cards.", position: .only)
+                        cardRow(text: String(localized: "Nothing here — just the day's cards."), position: .only)
                     }
                     ForEach(Array(onCards.enumerated()), id: \.element.id) { index, card in
                         row(card, movable: true, proxy: proxy)
@@ -409,7 +406,7 @@ struct DashboardCustomizeView: View {
 
                     plainRow(header("Add cards"))
                     if offCards.isEmpty {
-                        cardRow(text: "Everything's on. More cards will show up here as we build them.", position: .only)
+                        cardRow(text: String(localized: "Everything's on. More cards will show up here as we build them."), position: .only)
                     }
                     ForEach(Array(offCards.enumerated()), id: \.element.id) { index, card in
                         row(card, movable: false, proxy: proxy)
@@ -514,6 +511,7 @@ struct DashboardCustomizeView: View {
     /// Centre-aligned so the toggle sits level with the system drag handle;
     /// rows without a handle reserve its width so every toggle lines up.
     private func row(_ card: DashboardCard, movable: Bool, proxy: ScrollViewProxy) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
         HStack(alignment: .center, spacing: MADTheme.Spacing.md) {
             ZStack {
                 Circle()
@@ -523,22 +521,29 @@ struct DashboardCustomizeView: View {
                     .font(.system(size: 15, weight: .medium))
                     .foregroundColor(MADTheme.Colors.madRed)
             }
-            VStack(alignment: .leading, spacing: 3) {
-                Text(card.title)
-                    .madFont(size: 17, weight: .semibold, design: .rounded)
-                    .foregroundColor(.white)
-                Text(card.subtitle)
-                    .madFont(size: 12, design: .rounded)
-                    .foregroundColor(.white.opacity(0.5))
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+            // The title on ONE line, shrinking a little before it would wrap:
+            // between the icon, the toggle and the handle slot it had ~140pt
+            // at 375pt and broke mid-word ("Your competition / s").
+            Text(card.title)
+                .madFont(size: 17, weight: .semibold, design: .rounded)
+                .foregroundColor(.white)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
             Spacer(minLength: 8)
             Toggle("", isOn: binding(for: card, proxy: proxy))
                 .labelsHidden()
                 .tint(MADTheme.Colors.madRed)
-            if !movable {
-                Color.clear.frame(width: Self.handleSlot, height: 1)
-            }
+            // No reserved handle slot on rows without a handle: lining their
+            // toggles up with the handled rows above cost the titles ~40pt
+            // and they truncated ("This week's mi…").
+        }
+        // What it shows, under the row at full width (beside the title it
+        // was squeezed into the same ~140pt column).
+        Text(card.subtitle)
+            .madFont(size: 12, design: .rounded)
+            .foregroundColor(.white.opacity(0.5))
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.leading, 36 + MADTheme.Spacing.md)
         }
     }
 

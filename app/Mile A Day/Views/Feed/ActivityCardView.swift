@@ -103,7 +103,7 @@ struct ActivityCardView: View {
 
     private static let cardDateFormatter: DateFormatter = {
         let f = DateFormatter()
-        f.dateFormat = "MMM d"
+        f.setLocalizedDateFormatFromTemplate("MMMd")
         return f
     }()
 

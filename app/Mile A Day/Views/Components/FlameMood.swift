@@ -113,41 +113,41 @@ struct FlameMood: Equatable {
         // ≤ 16 characters each: the bubble sits over a flame that shares its
         // card with a stat column, so it is width-capped and two-line at most.
         switch kind {
-        case .unlit: return ["Light me up!", "One mile, lit", "Ready when you are"]
+        case .unlit: return [String(localized: "Light me up!"), String(localized: "One mile, lit"), String(localized: "Ready when you are")]
         // Snores and sleep-talk only. Every line here is said with his eyes
         // shut, so none of them may sound awake.
-        case .sleepy: return ["Zzz…", "Hnnnk… shoo…", "zzZZzz…", "*snore*", "mmm… donuts…", "…one more mi…"]
-        case .groggy: return ["Mornin'…", "I'm up, I'm up", "Coffee first?", "*yaaawn*", "Mile o'clock?"]
-        case .ready: return ["Let's walk!", "Mile o'clock?", "Shoes on!", "Waiting…"]
-        case .going: return ["Nice start!", "Keep it rolling", "Warming up"]
-        case .halfway: return ["Halfway!", "Don't stop now", "Half to go"]
-        case .almost: return ["Almost!", "So close", "Finish strong"]
-        case .nervous: return ["Tick tock…", "Still time!", "Not like this…", "A mile. Tonight."]
-        case .done: return ["Nailed it", "Streak safe", "Look at us", "Again tomorrow?"]
-        case .party: return ["\(streak) days!", "Legend", "Cake?", "Party time"]
+        case .sleepy: return [String(localized: "Zzz…"), String(localized: "Hnnnk… shoo…"), String(localized: "zzZZzz…"), String(localized: "*snore*"), String(localized: "mmm… donuts…"), String(localized: "…one more mi…")]
+        case .groggy: return [String(localized: "Mornin'…"), String(localized: "I'm up, I'm up"), String(localized: "Coffee first?"), String(localized: "*yaaawn*"), String(localized: "Mile o'clock?")]
+        case .ready: return [String(localized: "Let's walk!"), String(localized: "Mile o'clock?"), String(localized: "Shoes on!"), String(localized: "Waiting…")]
+        case .going: return [String(localized: "Nice start!"), String(localized: "Keep it rolling"), String(localized: "Warming up")]
+        case .halfway: return [String(localized: "Halfway!"), String(localized: "Don't stop now"), String(localized: "Half to go")]
+        case .almost: return [String(localized: "Almost!"), String(localized: "So close"), String(localized: "Finish strong")]
+        case .nervous: return [String(localized: "Tick tock…"), String(localized: "Still time!"), String(localized: "Not like this…"), String(localized: "A mile. Tonight.")]
+        case .done: return [String(localized: "Nailed it"), String(localized: "Streak safe"), String(localized: "Look at us"), String(localized: "Again tomorrow?")]
+        case .party: return [String(localized: "\(streak) days!"), String(localized: "Legend"), String(localized: "Cake?"), String(localized: "Party time")]
         // Said drifting off and asleep — drowsy, never chirpy.
-        case .bedtime: return ["Night night", "*yaaawn*", "Big day tmrw", "Zzz…", "Good mile today"]
+        case .bedtime: return [String(localized: "Night night"), String(localized: "*yaaawn*"), String(localized: "Big day tmrw"), String(localized: "Zzz…"), String(localized: "Good mile today")]
         }
     }
 
-    static let pokeQuips = ["Hey!", "That tickles", "Working here", "Boop", "Careful, hot", "Again!"]
+    static let pokeQuips = [String(localized: "Hey!"), String(localized: "That tickles"), String(localized: "Working here"), String(localized: "Boop"), String(localized: "Careful, hot"), String(localized: "Again!")]
 
     /// What a poke gets out of him, by what he was doing when it landed.
     /// Poking a SLEEPER wakes him, so those lines are the startle.
     /// What a play gesture gets out of him.
     static func reactionQuips(_ reaction: Reaction) -> [String] {
         switch reaction {
-        case .highFive: return ["Up top!", "Yeah!", "Nailed it!"]
-        case .refuse: return ["Earn it first!", "Mile first!", "Not yet!"]
-        case .tickle: return ["Hehe stop!", "Tickles!", "Hahaha!"]
+        case .highFive: return [String(localized: "Up top!"), String(localized: "Yeah!"), String(localized: "Nailed it!")]
+        case .refuse: return [String(localized: "Earn it first!"), String(localized: "Mile first!"), String(localized: "Not yet!")]
+        case .tickle: return [String(localized: "Hehe stop!"), String(localized: "Tickles!"), String(localized: "Hahaha!")]
         case .feed(let treat):
             // FOOD lines only. Flamey is never shown drinking — `food(for:)`
             // swaps an alcoholic pick for a donut before a feed can start, so
             // `.tipsy` is unreachable here; it still gets food lines rather
             // than a toast, belt and braces.
             switch food(for: treat).effect {
-            case .stuffed, .tipsy: return ["Nom!", "So good", "Nom nom nom"]
-            case .wired: return ["Zoom zoom!", "Mmm, latte"]
+            case .stuffed, .tipsy: return [String(localized: "Nom!"), String(localized: "So good"), String(localized: "Nom nom nom")]
+            case .wired: return [String(localized: "Zoom zoom!"), String(localized: "Mmm, latte")]
             }
         }
     }
@@ -173,12 +173,12 @@ struct FlameMood: Equatable {
 
     static func pokeQuips(for kind: Kind) -> [String] {
         switch kind {
-        case .sleepy: return ["Huh?! I'm up!", "Wha—? Who?", "I wasn't asleep!", "*snort* Huh?", "Five more mi… ok"]
-        case .groggy: return ["Okay, okay…", "Still waking up", "Gentle! I'm up"]
-        case .nervous: return ["No time! Walk!", "Tickle me later", "Shoes. On. Now."]
-        case .done: return ["I was chilling!", "Careful, hot", "Boop"]
-        case .party: return ["Party foul!", "Boop!", "Cake first"]
-        case .bedtime: return ["Lights out!", "Five more hours…", "Shhh… sleeping", "Mmf. Night."]
+        case .sleepy: return [String(localized: "Huh?! I'm up!"), String(localized: "Wha—? Who?"), String(localized: "I wasn't asleep!"), String(localized: "*snort* Huh?"), String(localized: "Five more mi… ok")]
+        case .groggy: return [String(localized: "Okay, okay…"), String(localized: "Still waking up"), String(localized: "Gentle! I'm up")]
+        case .nervous: return [String(localized: "No time! Walk!"), String(localized: "Tickle me later"), String(localized: "Shoes. On. Now.")]
+        case .done: return [String(localized: "I was chilling!"), String(localized: "Careful, hot"), String(localized: "Boop")]
+        case .party: return [String(localized: "Party foul!"), String(localized: "Boop!"), String(localized: "Cake first")]
+        case .bedtime: return [String(localized: "Lights out!"), String(localized: "Five more hours…"), String(localized: "Shhh… sleeping"), String(localized: "Mmf. Night.")]
         default: return pokeQuips
         }
     }

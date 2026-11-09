@@ -26,6 +26,14 @@ enum DisplayDistanceUnit: String, CaseIterable, Identifiable {
     /// "/mi" / "/km"
     var paceSuffix: String { "/" + abbreviation }
 
+    /// "Miles" / "Kilometers", localized, for a stat tile's label.
+    var pluralTitle: String {
+        switch self {
+        case .miles: return String(localized: "Miles")
+        case .kilometers: return String(localized: "Kilometers")
+        }
+    }
+
     /// "miles" / "kilometers"
     var plural: String {
         switch self {

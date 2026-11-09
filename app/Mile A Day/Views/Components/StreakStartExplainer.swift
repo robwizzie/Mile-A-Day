@@ -264,7 +264,7 @@ enum StreakDateText {
     private static let longFormat: DateFormatter = {
         let f = DateFormatter()
         f.timeZone = TimeZone(identifier: "UTC")
-        f.dateFormat = "MMMM d, yyyy"
+        f.setLocalizedDateFormatFromTemplate("MMMMdyyyy")
         return f
     }()
 }

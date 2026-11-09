@@ -955,15 +955,15 @@ enum CompetitionType: String, Codable, CaseIterable {
     var description: String {
         switch self {
         case .streaks:
-            return "Hold a running streak as long as you can. First to break the streak loses"
+            return String(localized: "Hold a running streak as long as you can. First to break the streak loses")
         case .apex:
-            return "Over a period of time (ex: 1 week) whoever has the most distance during that time wins"
+            return String(localized: "Over a period of time (ex: 1 week) whoever has the most distance during that time wins")
         case .targets:
-            return "Anyone who completes the goal in a given day gets a point. Whoever has the most points at the end of the period wins"
+            return String(localized: "Anyone who completes the goal in a given day gets a point. Whoever has the most points at the end of the period wins")
         case .clash:
-            return "Whoever goes the furthest each day wins a point. First to reach the target score or most points at the end wins"
+            return String(localized: "Whoever goes the furthest each day wins a point. First to reach the target score or most points at the end wins")
         case .race:
-            return "There is a distance goal set and whoever gets there first wins"
+            return String(localized: "There is a distance goal set and whoever gets there first wins")
         }
     }
 
@@ -982,11 +982,11 @@ enum CompetitionType: String, Codable, CaseIterable {
     /// selector renders it); this is the version you can read at a glance.
     var tagline: String {
         switch self {
-        case .streaks: return "Last one standing."
-        case .apex: return "Most miles wins."
-        case .targets: return "Hit your goal, bank a point."
-        case .clash: return "Win the day, take the point."
-        case .race: return "First to the finish line."
+        case .streaks: return String(localized: "Last one standing.")
+        case .apex: return String(localized: "Most miles wins.")
+        case .targets: return String(localized: "Hit your goal, bank a point.")
+        case .clash: return String(localized: "Win the day, take the point.")
+        case .race: return String(localized: "First to the finish line.")
         }
     }
 
@@ -997,33 +997,33 @@ enum CompetitionType: String, Codable, CaseIterable {
         switch self {
         case .streaks:
             return [
-                "Everyone has to hit the same daily goal.",
-                "Miss a day and you spend one of your lives.",
-                "Run out of lives and you're out. Last one alive wins."
+                String(localized: "Everyone has to hit the same daily goal."),
+                String(localized: "Miss a day and you spend one of your lives."),
+                String(localized: "Run out of lives and you're out. Last one alive wins.")
             ]
         case .apex:
             return [
-                "Run and walk as normal for the set window.",
-                "Every counted mile adds to your total.",
-                "Highest total when the clock runs out wins."
+                String(localized: "Run and walk as normal for the set window."),
+                String(localized: "Every counted mile adds to your total."),
+                String(localized: "Highest total when the clock runs out wins.")
             ]
         case .targets:
             return [
-                "A goal is set for each day.",
-                "Everyone who hits it that day banks a point.",
-                "Most points at the end wins — you're racing the goal, not each other."
+                String(localized: "A goal is set for each day."),
+                String(localized: "Everyone who hits it that day banks a point."),
+                String(localized: "Most points at the end wins — you're racing the goal, not each other.")
             ]
         case .clash:
             return [
-                "Every day is its own mini-contest.",
-                "Whoever goes furthest that day takes the point.",
-                "First to the target score wins — or most points when time's up."
+                String(localized: "Every day is its own mini-contest."),
+                String(localized: "Whoever goes furthest that day takes the point."),
+                String(localized: "First to the target score wins — or most points when time's up.")
             ]
         case .race:
             return [
-                "One distance is set as the finish line.",
-                "Every mile you log moves you toward it.",
-                "First person there wins. No clock, no daily goals."
+                String(localized: "One distance is set as the finish line."),
+                String(localized: "Every mile you log moves you toward it."),
+                String(localized: "First person there wins. No clock, no daily goals.")
             ]
         }
     }
@@ -1033,26 +1033,26 @@ enum CompetitionType: String, Codable, CaseIterable {
     var example: String {
         switch self {
         case .streaks:
-            return "Everyone owes a mile a day with 3 lives. You miss Tuesday and Friday — two lives gone, one left. Dave misses four days and he's out."
+            return String(localized: "Everyone owes a mile a day with 3 lives. You miss Tuesday and Friday — two lives gone, one left. Dave misses four days and he's out.")
         case .apex:
-            return "Over one week you cover 12.4 mi and Dave covers 9.1. You win — it doesn't matter how you split it up."
+            return String(localized: "Over one week you cover 12.4 mi and Dave covers 9.1. You win — it doesn't matter how you split it up.")
         case .targets:
-            return "The goal is 2 mi a day. You hit it Mon, Wed and Sat for 3 points; Dave hits it twice. You win 3–2."
+            return String(localized: "The goal is 2 mi a day. You hit it Mon, Wed and Sat for 3 points; Dave hits it twice. You win 3–2.")
         case .clash:
-            return "Monday you run 3 mi to Dave's 2.6 — your point. Tuesday he runs 4 to your 1. First to 5 daily wins takes it."
+            return String(localized: "Monday you run 3 mi to Dave's 2.6 — your point. Tuesday he runs 4 to your 1. First to 5 daily wins takes it.")
         case .race:
-            return "First to 20 mi. You're at 14.2 after five days, Dave's at 16.8. He needs 3.2 more; you need 5.8."
+            return String(localized: "First to 20 mi. You're at 14.2 after five days, Dave's at 16.8. He needs 3.2 more; you need 5.8.")
         }
     }
 
     /// One line on the gallery card answering "should I pick this one?".
     var bestFor: String {
         switch self {
-        case .streaks: return "Best for holding each other accountable."
-        case .apex: return "Best for a whole-week push with 2–6 friends."
-        case .targets: return "Best when everyone's at a different fitness level."
-        case .clash: return "Best for a daily back-and-forth with one rival."
-        case .race: return "Best for a long-haul goal with no deadline."
+        case .streaks: return String(localized: "Best for holding each other accountable.")
+        case .apex: return String(localized: "Best for a whole-week push with 2–6 friends.")
+        case .targets: return String(localized: "Best when everyone's at a different fitness level.")
+        case .clash: return String(localized: "Best for a daily back-and-forth with one rival.")
+        case .race: return String(localized: "Best for a long-haul goal with no deadline.")
         }
     }
 

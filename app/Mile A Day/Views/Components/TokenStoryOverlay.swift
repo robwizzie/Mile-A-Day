@@ -148,7 +148,7 @@ struct TokenStoryOverlay: View {
             return weekday.string(from: date)
         }
         let short = DateFormatter()
-        short.dateFormat = "MMM d"
+        short.setLocalizedDateFormatFromTemplate("MMMd")
         return short.string(from: date)
     }
 

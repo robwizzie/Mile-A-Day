@@ -303,7 +303,7 @@ struct SaveFriendStreakView: View {
         parser.timeZone = TimeZone(secondsFromGMT: 0)
         guard let date = parser.date(from: isoDay) else { return isoDay }
         let out = DateFormatter()
-        out.dateFormat = "EEEE, MMM d"
+        out.setLocalizedDateFormatFromTemplate("EEEEMMMd")
         out.timeZone = TimeZone(secondsFromGMT: 0)
         return out.string(from: date)
     }

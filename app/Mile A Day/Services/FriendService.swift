@@ -991,14 +991,14 @@ struct FriendWorkout: Codable, Identifiable {
         formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"
         
         if let parsedDate = formatter.date(from: date) {
-            formatter.dateFormat = "MMM d, yyyy"
+            formatter.setLocalizedDateFormatFromTemplate("MMMdyyyy")
             return formatter.string(from: parsedDate)
         }
         
         // Try date-only format
         formatter.dateFormat = "yyyy-MM-dd"
         if let parsedDate = formatter.date(from: date) {
-            formatter.dateFormat = "MMM d, yyyy"
+            formatter.setLocalizedDateFormatFromTemplate("MMMdyyyy")
             return formatter.string(from: parsedDate)
         }
         

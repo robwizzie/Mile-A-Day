@@ -468,7 +468,7 @@ struct CompetitionDetailView: View {
 
     private func formatShortDate(_ date: Date) -> String {
         let f = DateFormatter()
-        f.dateFormat = "MMM d, yyyy"
+        f.setLocalizedDateFormatFromTemplate("MMMdyyyy")
         return f.string(from: date)
     }
 
