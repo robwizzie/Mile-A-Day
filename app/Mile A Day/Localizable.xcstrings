@@ -31678,6 +31678,46 @@
         }
       }
     },
+    "Comment with a sticker" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mit einem Sticker kommentieren"
+          }
+        }
+      }
+    },
+    "Send sticker: %@" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sticker senden: %@"
+          }
+        }
+      }
+    },
+    "Show keyboard" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tastatur anzeigen"
+          }
+        }
+      }
+    },
+    "Sticker: %@" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sticker: %@"
+          }
+        }
+      }
+    },
     "Miss %lld days and you're out" : {
       "localizations" : {
         "de" : {

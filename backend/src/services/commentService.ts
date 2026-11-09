@@ -26,6 +26,8 @@ export interface CommentRow {
   profile_image_url: string | null;
   parent_comment_id: string | null;
   content: string;
+  /** A sticker comment's id (`COMMENT_STICKERS`); null for a text comment. */
+  sticker_id: string | null;
   created_at: string;
   is_self: boolean;
 }
@@ -34,7 +36,7 @@ const COMMENT_SELECT = `
 	c.comment_id, COALESCE(c.post_id::text, c.workout_id) AS post_id,
 	c.workout_id, c.user_id,
 	u.username, u.first_name, u.last_name, u.profile_image_url,
-	c.parent_comment_id, c.content, c.created_at,
+	c.parent_comment_id, c.content, c.sticker_id, c.created_at,
 	(c.user_id = $1) AS is_self`;
 
 /**
@@ -116,6 +118,7 @@ export async function addComment(
   postId: string,
   content: string,
   parentCommentId?: string | null,
+  stickerId: string | null = null,
 ): Promise<CommentRow | "not_found" | "parent_not_found"> {
   const postAuthor = await visiblePostAuthor(commenterId, postId);
   if (!postAuthor) return "not_found";
@@ -146,14 +149,14 @@ export async function addComment(
 
   const rows = await db.query<CommentRow>(
     `WITH inserted AS (
-			INSERT INTO post_comments (post_id, user_id, parent_comment_id, content)
-			VALUES ($2, $1, $3, $4)
+			INSERT INTO post_comments (post_id, user_id, parent_comment_id, content, sticker_id)
+			VALUES ($2, $1, $3, $4, $5)
 			RETURNING *
 		)
 		SELECT ${COMMENT_SELECT}
 		FROM inserted c
 		JOIN users u ON u.user_id = c.user_id`,
-    [commenterId, postId, parentId, content],
+    [commenterId, postId, parentId, content, stickerId],
   );
   const comment = rows[0];
 
@@ -172,6 +175,7 @@ export async function addWorkoutComment(
   workoutId: string,
   content: string,
   parentCommentId?: string | null,
+  stickerId: string | null = null,
 ): Promise<CommentRow | "not_found" | "parent_not_found"> {
   const workoutAuthor = await visibleWorkoutAuthor(commenterId, workoutId);
   if (!workoutAuthor) return "not_found";
@@ -195,14 +199,14 @@ export async function addWorkoutComment(
 
   const rows = await db.query<CommentRow>(
     `WITH inserted AS (
-			INSERT INTO post_comments (workout_id, user_id, parent_comment_id, content)
-			VALUES ($2, $1, $3, $4)
+			INSERT INTO post_comments (workout_id, user_id, parent_comment_id, content, sticker_id)
+			VALUES ($2, $1, $3, $4, $5)
 			RETURNING *
 		)
 		SELECT ${COMMENT_SELECT}
 		FROM inserted c
 		JOIN users u ON u.user_id = c.user_id`,
-    [commenterId, workoutId, parentId, content],
+    [commenterId, workoutId, parentId, content, stickerId],
   );
   const comment = rows[0];
 

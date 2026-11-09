@@ -14,8 +14,35 @@ import {
   ReportReason,
 } from "../services/moderationService.js";
 import { isUuid } from "./postsController.js";
+import {
+  isCommentSticker,
+  stickerFallbackText,
+} from "../services/commentStickers.js";
 
 const MAX_COMMENT = 1000;
+
+/**
+ * The comment body: a sticker (`sticker_id`, its stand-in text stored as
+ * content, any typed text ignored) or text (`content`, 1-MAX_COMMENT chars).
+ */
+function parseCommentBody(
+  body: any,
+):
+  | { content: string; stickerId: string | null }
+  | { error: string } {
+  if (body?.sticker_id != null) {
+    if (!isCommentSticker(body.sticker_id)) return { error: "invalid_sticker" };
+    return {
+      content: stickerFallbackText(body.sticker_id),
+      stickerId: body.sticker_id,
+    };
+  }
+  const content = typeof body?.content === "string" ? body.content.trim() : "";
+  if (content.length === 0 || content.length > MAX_COMMENT) {
+    return { error: `content must be 1-${MAX_COMMENT} characters` };
+  }
+  return { content, stickerId: null };
+}
 
 /** GET /posts/:postId/comments — all live comments, oldest first. */
 export async function listCommentsController(
@@ -59,7 +86,7 @@ export async function listWorkoutCommentsController(
   }
 }
 
-/** POST /posts/:postId/comments — { content, parent_comment_id? } */
+/** POST /posts/:postId/comments — { content | sticker_id, parent_comment_id? } */
 export async function addCommentController(
   req: AuthenticatedRequest,
   res: Response,
@@ -68,12 +95,9 @@ export async function addCommentController(
     if (!isUuid(req.params.postId)) {
       return res.status(404).json({ error: "post_not_found" });
     }
-    const content =
-      typeof req.body?.content === "string" ? req.body.content.trim() : "";
-    if (content.length === 0 || content.length > MAX_COMMENT) {
-      return res
-        .status(400)
-        .json({ error: `content must be 1-${MAX_COMMENT} characters` });
+    const parsed = parseCommentBody(req.body);
+    if ("error" in parsed) {
+      return res.status(400).json({ error: parsed.error });
     }
     const parentCommentId = req.body?.parent_comment_id;
     if (parentCommentId != null && !isUuid(parentCommentId)) {
@@ -86,8 +110,9 @@ export async function addCommentController(
     const result = await addComment(
       req.userId!,
       req.params.postId,
-      content,
+      parsed.content,
       parentCommentId ?? null,
+      parsed.stickerId,
     );
     if (result === "not_found") {
       return res.status(404).json({ error: "post_not_found" });
@@ -102,7 +127,7 @@ export async function addCommentController(
   }
 }
 
-/** POST /posts/workouts/:workoutId/comments — { content, parent_comment_id? } */
+/** POST /posts/workouts/:workoutId/comments — { content | sticker_id, parent_comment_id? } */
 export async function addWorkoutCommentController(
   req: AuthenticatedRequest,
   res: Response,
@@ -113,12 +138,9 @@ export async function addWorkoutCommentController(
     if (!workoutId) {
       return res.status(404).json({ error: "workout_not_found" });
     }
-    const content =
-      typeof req.body?.content === "string" ? req.body.content.trim() : "";
-    if (content.length === 0 || content.length > MAX_COMMENT) {
-      return res
-        .status(400)
-        .json({ error: `content must be 1-${MAX_COMMENT} characters` });
+    const parsed = parseCommentBody(req.body);
+    if ("error" in parsed) {
+      return res.status(400).json({ error: parsed.error });
     }
     const parentCommentId = req.body?.parent_comment_id;
     if (parentCommentId != null && !isUuid(parentCommentId)) {
@@ -130,8 +152,9 @@ export async function addWorkoutCommentController(
     const result = await addWorkoutComment(
       req.userId!,
       workoutId,
-      content,
+      parsed.content,
       parentCommentId ?? null,
+      parsed.stickerId,
     );
     if (result === "not_found") {
       return res.status(404).json({ error: "workout_not_found" });

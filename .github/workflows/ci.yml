@@ -390,6 +390,10 @@ jobs:
       # with signed urls and no extra columns.
       - name: Showcase photos check
         run: node scripts/showcase-check.mjs
+      # Sticker comments: the id is served to the thread and the feed preview,
+      # and the stand-in text keeps them readable on shipped apps.
+      - name: Comment sticker check
+        run: node scripts/comment-sticker-check.mjs
       # Mile A Day+: what we do with an Apple-VERIFIED transaction. Founding
       # Runners by signup date; a subscription is Plus until expiry (renewing
       # ⇒ 1-day grace), re-posts idempotent, never rolled back by an older

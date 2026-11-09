@@ -65,6 +65,7 @@ Details: docs/conventions/ios.md § Key Patterns
 - Post-card controls sit in `mediaControls` UNDER the media; on-media items go after `.instagramZoomable`; flyover entry is always `FlyoverChipButton(accent:)`; no-photo media is 1:1 (`FeedMediaAspect`).
 - Media faces are one `TabView(selection: $mediaPage)`; never gate hypes on `is_self`/`isMine`; wire `HypersListSheet`'s `onSelectUser`; one `DashboardMilestoneBar`; Activity labels go inside `profileCard()`; toolbar back = bare chevron.
 - Buddy cards share `PostCardView.crewColors`; `WorkoutSplitsSheet(walkers:)` keeps split-less walkers; pace via `DisplayPace`/`Walker.servedPace`; `hasSplits` = anyone has splits.
+- Sticker comments: `PostComment.sticker`/`PostCommentPreview.sticker` (`sticker_id` → `FlameyPackSticker`) draw the art, else `content`; send via `CommentService.add(sticker:)`; a new pack sticker also needs a row in backend `COMMENT_STICKERS`.
 - `CommentsSheet(post:)` leads with the post's caption (`CaptionHeader`, folded at 6 lines with "more"), scrolling with the thread; `CommentsSheet(target:)` (raw workouts) has none.
 - Captions follow the face; name links via `MentionText.nameLink`, never nested Buttons; `PostDetailView` always wires profiles.
 - On a buddy card the viewer's own slide leads (`myPhotoFirst`), never ahead of the lock.

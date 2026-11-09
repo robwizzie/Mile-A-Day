@@ -41,6 +41,7 @@ struct CommentsSheet: View {
     var onCountChange: ((Int) -> Void)? = nil
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var comments: [PostComment] = []
     @State private var isLoading = true
     @State private var failed = false
@@ -56,6 +57,10 @@ struct CommentsSheet: View {
     @State private var profileUser: BackendUser?
     /// A long caption starts folded, like Instagram's "… more".
     @State private var captionExpanded = false
+    /// The Flamey sticker tray is open in place of the keyboard.
+    @State private var showStickers = false
+    /// The sticker comment just sent, which lands with a little pop.
+    @State private var poppedCommentId: String?
     @StateObject private var friendService = FriendService()
     @FocusState private var inputFocused: Bool
 
@@ -429,19 +434,23 @@ struct CommentsSheet: View {
                     Spacer(minLength: 8)
                     commentMenu(comment)
                 }
-                Text(MentionText.attributed(comment.content))
-                    .font(.system(size: 14, weight: .medium, design: .rounded))
-                    .foregroundColor(.white.opacity(0.9))
-                    .fixedSize(horizontal: false, vertical: true)
-                    // Tapping an @mention opens that user's profile, same as
-                    // post captions.
-                    .environment(\.openURL, OpenURLAction { url in
-                        if let username = MentionText.username(from: url) {
-                            openMentionProfile(username)
-                            return .handled
-                        }
-                        return .systemAction
-                    })
+                if let sticker = comment.sticker {
+                    stickerBody(sticker, commentId: comment.comment_id, isReply: isReply)
+                } else {
+                    Text(MentionText.attributed(comment.content))
+                        .font(.system(size: 14, weight: .medium, design: .rounded))
+                        .foregroundColor(.white.opacity(0.9))
+                        .fixedSize(horizontal: false, vertical: true)
+                        // Tapping an @mention opens that user's profile, same as
+                        // post captions.
+                        .environment(\.openURL, OpenURLAction { url in
+                            if let username = MentionText.username(from: url) {
+                                openMentionProfile(username)
+                                return .handled
+                            }
+                            return .systemAction
+                        })
+                }
                 Button {
                     replyingTo = comment
                     // Instagram prefills the @handle when replying.
@@ -465,6 +474,20 @@ struct CommentsSheet: View {
         .contextMenu {
             commentActions(comment)
         }
+    }
+
+    /// A sticker comment: the sticker itself, no bubble. The one just sent
+    /// pops in on a spring (still under Reduce Motion).
+    private func stickerBody(_ sticker: FlameyPackSticker, commentId: String, isReply: Bool) -> some View {
+        let popping = poppedCommentId == commentId
+        return Image(sticker.assetName)
+            .resizable()
+            .scaledToFit()
+            .frame(width: isReply ? 92 : 112, height: isReply ? 92 : 112, alignment: .leading)
+            .scaleEffect(popping ? 0.4 : 1, anchor: .bottomLeading)
+            .opacity(popping ? 0 : 1)
+            .padding(.vertical, 2)
+            .accessibilityLabel(Text("Sticker: \(sticker.title)"))
     }
 
     private func commentMenu(_ comment: PostComment) -> some View {
@@ -542,6 +565,7 @@ struct CommentsSheet: View {
                     imageURL: UserManager.shared.currentUser.profileImageUrl,
                     size: 32
                 )
+                stickerToggle
                 TextField("Add a comment…", text: $draft, axis: .vertical)
                     .font(.system(size: 14, weight: .medium, design: .rounded))
                     .foregroundColor(.white)
@@ -575,8 +599,77 @@ struct CommentsSheet: View {
             }
             .padding(.horizontal, MADTheme.Spacing.md)
             .padding(.vertical, 11)
+            if showStickers {
+                stickerTray
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
         }
         .background(Color.black.opacity(0.32))
+        // Typing closes the tray; the tray closes the keyboard.
+        .onChange(of: inputFocused) { _, focused in
+            if focused, showStickers {
+                withAnimation(.easeInOut(duration: 0.2)) { showStickers = false }
+            }
+        }
+    }
+
+    /// Flamey's face opens the sticker tray (a keyboard glyph closes it).
+    private var stickerToggle: some View {
+        Button {
+            MADHaptics.tap()
+            let opening = !showStickers
+            if opening { inputFocused = false }
+            withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) { showStickers = opening }
+            if !opening { inputFocused = true }
+        } label: {
+            Group {
+                if showStickers {
+                    Image(systemName: "keyboard")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.75))
+                } else {
+                    Image(FlameyPackSticker.hiii.assetName)
+                        .resizable()
+                        .scaledToFit()
+                }
+            }
+            .frame(width: 30, height: 30)
+            .frame(width: 34, height: 34)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(ScaleButtonStyle())
+        .accessibilityLabel(showStickers ? "Show keyboard" : "Comment with a sticker")
+    }
+
+    /// Every Flamey sticker, two rows deep, scrolling sideways. One tap sends
+    /// it (as a reply too, when replying), like Instagram's GIF comments.
+    private var stickerTray: some View {
+        let rows = [GridItem(.fixed(84), spacing: 10), GridItem(.fixed(84), spacing: 10)]
+        return ScrollView(.horizontal, showsIndicators: false) {
+            LazyHGrid(rows: rows, spacing: 10) {
+                ForEach(FlameyPackSticker.allCases) { sticker in
+                    Button {
+                        Task { await sendSticker(sticker) }
+                    } label: {
+                        Image(sticker.assetName)
+                            .resizable()
+                            .scaledToFit()
+                            .padding(6)
+                            .frame(width: 84, height: 84)
+                            .background(
+                                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                    .fill(Color.white.opacity(0.05))
+                            )
+                    }
+                    .buttonStyle(ScaleButtonStyle())
+                    .disabled(isSending)
+                    .accessibilityLabel(Text("Send sticker: \(sticker.title)"))
+                }
+            }
+            .padding(.horizontal, MADTheme.Spacing.md)
+            .padding(.vertical, 10)
+        }
+        .frame(height: 198)
     }
 
     private func stateMessage(icon: String, text: String, detail: String? = nil) -> some View {
@@ -656,6 +749,40 @@ struct CommentsSheet: View {
         } catch APIError.apiError("terms_not_accepted") {
             // First-time commenter: run the same UGC terms gate as posting,
             // keeping the draft to auto-send after acceptance.
+            showTermsGate = true
+        } catch {
+            errorMessage = "Check your connection and try again."
+        }
+    }
+
+    private func sendSticker(_ sticker: FlameyPackSticker) async {
+        guard !isSending else { return }
+        isSending = true
+        defer { isSending = false }
+        MADHaptics.action()
+        do {
+            let created = try await CommentService.add(
+                target: target,
+                content: "",
+                parentCommentId: replyingTo.map { $0.parent_comment_id ?? $0.comment_id },
+                sticker: sticker
+            )
+            if !reduceMotion { poppedCommentId = created.comment_id }
+            comments.append(created)
+            if let parent = created.parent_comment_id { expandedThreads.insert(parent) }
+            // A reply's prefilled "@name " was for text; the sticker answers it.
+            if replyingTo != nil { draft = "" }
+            replyingTo = nil
+            onCountChange?(comments.count)
+            // Next frame, once the row exists at its small size, so the
+            // spring has somewhere to start from.
+            if poppedCommentId != nil {
+                try? await Task.sleep(nanoseconds: 60_000_000)
+                withAnimation(.spring(response: 0.38, dampingFraction: 0.55)) {
+                    poppedCommentId = nil
+                }
+            }
+        } catch APIError.apiError("terms_not_accepted") {
             showTermsGate = true
         } catch {
             errorMessage = "Check your connection and try again."

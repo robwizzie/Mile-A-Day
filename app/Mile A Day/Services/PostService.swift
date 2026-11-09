@@ -113,6 +113,11 @@ struct PostCommentPreview: Codable, Identifiable, Equatable {
     let user_id: String
     let username: String?
     let content: String
+    /// A sticker comment's id; nil for text (and from older servers).
+    var sticker_id: String? = nil
+
+    /// The sticker to draw, when this build has its art.
+    var sticker: FlameyPackSticker? { sticker_id.flatMap(FlameyPackSticker.init(rawValue:)) }
 
     var id: String { comment_id }
 

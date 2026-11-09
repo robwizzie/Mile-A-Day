@@ -38,11 +38,19 @@ struct PostComment: Decodable, Identifiable, Equatable {
     let last_name: String?
     let profile_image_url: String?
     let parent_comment_id: String?
+    /// For a sticker comment, the server's stand-in text ("🔥 bruh"), which
+    /// is what older builds show; this one draws `sticker` instead.
     let content: String
+    /// A sticker comment's id (`FlameyPackSticker` raw value); nil for text.
+    let sticker_id: String?
     let created_at: String
     let is_self: Bool
 
     var id: String { comment_id }
+
+    /// The sticker to draw. Nil for text, and for an id this build doesn't
+    /// know yet (it shows `content` then).
+    var sticker: FlameyPackSticker? { sticker_id.flatMap(FlameyPackSticker.init(rawValue:)) }
 
     var displayName: String {
         if let username, !username.isEmpty { return username }
@@ -76,15 +84,18 @@ enum CommentService {
     static func add(
         target: CommentTarget,
         content: String,
-        parentCommentId: String? = nil
+        parentCommentId: String? = nil,
+        sticker: FlameyPackSticker? = nil
     ) async throws -> PostComment {
         struct Body: Encodable {
             let content: String
             let parent_comment_id: String?
+            /// Set = a sticker comment; the server ignores `content` then.
+            let sticker_id: String?
         }
         struct AddResponse: Decodable { let comment: PostComment }
         let bodyData = try JSONEncoder().encode(
-            Body(content: content, parent_comment_id: parentCommentId)
+            Body(content: content, parent_comment_id: parentCommentId, sticker_id: sticker?.rawValue)
         )
         return try await APIClient.fancyFetch(
             endpoint: target.endpoint,

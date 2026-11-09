@@ -1635,6 +1635,30 @@ struct PostCardView: View {
             })
     }
 
+    /// A sticker comment in the preview: the name, then the sticker small,
+    /// so the card shows the joke instead of its stand-in text.
+    private func stickerPreviewRow(name: String, username: String?, sticker: FlameyPackSticker) -> some View {
+        HStack(alignment: .center, spacing: 6) {
+            Text(MentionText.nameLink(name, username: username, size: captionSize))
+                .madFont(size: captionSize, weight: .medium, design: .rounded)
+                .foregroundColor(.white.opacity(0.9))
+                .lineLimit(1)
+                .environment(\.openURL, OpenURLAction { url in
+                    if let username = MentionText.username(from: url) {
+                        onTapMention?(username)
+                        return .handled
+                    }
+                    return .systemAction
+                })
+            Image(sticker.assetName)
+                .resizable()
+                .scaledToFit()
+                .frame(width: 36, height: 36)
+                .accessibilityLabel(Text("Sticker: \(sticker.title)"))
+            Spacer(minLength: 0)
+        }
+    }
+
     /// The last two comments, under the caption — Instagram's rule.
     ///
     /// A conversation nobody sees until they tap through is happening in a
@@ -1667,9 +1691,15 @@ struct PostCardView: View {
                     Button {
                         onOpenComments?()
                     } label: {
-                        captionRow(name: comment.displayName,
-                                   username: comment.username,
-                                   text: comment.content)
+                        if let sticker = comment.sticker {
+                            stickerPreviewRow(name: comment.displayName,
+                                              username: comment.username,
+                                              sticker: sticker)
+                        } else {
+                            captionRow(name: comment.displayName,
+                                       username: comment.username,
+                                       text: comment.content)
+                        }
                     }
                     .buttonStyle(.plain)
                     .disabled(onOpenComments == nil)
