@@ -523,6 +523,7 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
         pedometerErrored = false
         trackingStartedAt = Date()
         clockStartedAt = treadmillSeed?.startDate
+        treadmillEndedWorkout = false
         movingSeconds = 0
         movingCreditedThrough = nil
         effortCurve = [(0, initialDistance)]
@@ -894,6 +895,26 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
         if let base = treadmillConsoleBaseMiles, base > treadmillJoinMiles {
             usedTreadmill = true
             applyIndoorDistance()
+        }
+    }
+
+    /// The connected treadmill's own workout ended (`TreadmillLink`: Stop on
+    /// the console, a console reset, or the machine dropping with its belt
+    /// stopped). The tracker finishes the workout on its next tick
+    /// (`WorkoutTrackingView.startWorkoutTimer`); until then — the tracker may
+    /// be off screen — it's PAUSED now, so nothing walked after stepping off
+    /// counts and the saved time ends here, not when the finish lands.
+    /// Reset by the next `startTracking`.
+    @Published private(set) var treadmillEndedWorkout = false
+
+    func treadmillDidEndWorkout() {
+        guard acceptsTreadmill, !treadmillEndedWorkout else { return }
+        treadmillEndedWorkout = true
+        pause()
+        // Bring the tracker up to finish, only while the user is looking at
+        // the app (never present it from the background).
+        if UIApplication.shared.applicationState == .active {
+            Task { @MainActor in DeepLinkRouter.shared.requestOpenTracker() }
         }
     }
 

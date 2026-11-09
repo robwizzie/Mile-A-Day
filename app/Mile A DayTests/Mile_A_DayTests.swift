@@ -203,4 +203,20 @@ struct TreadmillDataTests {
         #expect(reset.elapsedSeconds == 150)
         #expect(abs(reset.miles - 200 / 1609.344) < 0.0001)
     }
+
+    // MARK: Machine status (ended on the console)
+
+    @Test func statusStopResetAndSafetyKeyEndTheWorkout() {
+        #expect(FTMSMachineStatus.endsWorkout(Self.bytes("0201")))  // stopped by the user
+        #expect(FTMSMachineStatus.endsWorkout(Self.bytes("01")))    // reset
+        #expect(FTMSMachineStatus.endsWorkout(Self.bytes("03")))    // safety key
+    }
+
+    @Test func statusPauseAndOthersDoNot() {
+        #expect(!FTMSMachineStatus.endsWorkout(Self.bytes("0202"))) // paused, not stopped
+        #expect(!FTMSMachineStatus.endsWorkout(Self.bytes("02")))   // no parameter
+        #expect(!FTMSMachineStatus.endsWorkout(Self.bytes("04")))   // started / resumed
+        #expect(!FTMSMachineStatus.endsWorkout(Self.bytes("05E803"))) // target speed changed
+        #expect(!FTMSMachineStatus.endsWorkout(Data()))
+    }
 }

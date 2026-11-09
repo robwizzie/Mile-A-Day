@@ -3006,6 +3006,12 @@ struct WorkoutTrackingView: View {
             guard workoutStartDate != nil else { return }
             // Don't persist state while we're in the middle of stopping
             guard !isStopping else { return }
+            // Ended on the treadmill's console: end it here too (the manager
+            // already paused it at that moment, so the save stops there).
+            if locationManager.treadmillEndedWorkout, isTracking {
+                stopWorkout()
+                return
+            }
             // Freezes on its own while manually paused — `pausedSeconds` grows
             // at exactly the rate wall time does for the length of the pause.
             elapsedTime = activeElapsedTime

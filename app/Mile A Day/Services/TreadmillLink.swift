@@ -16,8 +16,9 @@
 //  workout. Once the machine is PROVEN the user's (below), the tracker starts
 //  from the console's own time and distance (`TreadmillConsoleSeed`), so the
 //  app and the treadmill read the same; from there the belt's movement
-//  (`segmentMiles`, monotonic) counts on top. A console reset (new workout on
-//  the machine) rebases instead of going backwards, a glitchy jump is
+//  (`segmentMiles`, monotonic) counts on top. Ending the workout on the
+//  console (Stop, a reset, the machine dropping with its belt stopped) ends
+//  the app's workout too (`consoleEndedWorkout`), a glitchy jump is
 //  dropped, and a workout ending marks the console (`TreadmillConsoleMark`)
 //  so the next one on it never re-credits that ground. The tracker folds it
 //  all into the indoor distance via `WorkoutLocationManager`.
@@ -123,6 +124,25 @@ struct FTMSTreadmillSample: Equatable {
         if has(11) { guard skip(2) else { return nil } }
         if has(12) { guard skip(4) else { return nil } }
         return sample
+    }
+}
+
+/// Fitness Machine Status (0x2ADA) notifications: the machine announcing
+/// what happened to ITS workout. Read-only, like everything here (this is a
+/// notify characteristic, not the Control Point). Pure, so testable.
+enum FTMSMachineStatus {
+    /// Whether this status means the person on the belt ended their workout
+    /// on the console (FTMS v1.0 §4.17): 0x01 Reset, 0x02 Stopped or Paused
+    /// by the User with parameter 0x01 = Stop (0x02 = Pause, which is not an
+    /// end), 0x03 Stopped by Safety Key.
+    static func endsWorkout(_ data: Data) -> Bool {
+        let bytes = [UInt8](data)
+        guard let op = bytes.first else { return false }
+        switch op {
+        case 0x01, 0x03: return true
+        case 0x02: return bytes.count >= 2 && bytes[1] == 0x01
+        default: return false
+        }
     }
 }
 
@@ -308,6 +328,10 @@ final class TreadmillLink: NSObject {
 
     static let fitnessMachineService = CBUUID(string: "1826")
     static let treadmillDataCharacteristic = CBUUID(string: "2ACD")
+    /// Optional in FTMS: machines that have it say when their workout ends.
+    static let machineStatusCharacteristic = CBUUID(string: "2ADA")
+    /// Belt speed under this is a stopped belt.
+    static let stoppedBeltKmh = 0.1
 
     enum Phase: Equatable {
         case idle
@@ -756,8 +780,15 @@ final class TreadmillLink: NSObject {
         // showing the last known values rather than blanking them.
         if let speed = sample.speedKmh { speedKmh = speed }
         if let incline = sample.inclinePercent { inclinePercent = incline }
+        // The console's clock going BACK means its workout ended and a new
+        // one started (it rolls to zero at the end, or GO started over).
+        let consoleRestarted: Bool = {
+            guard let new = sample.elapsedSeconds, let old = consoleElapsed?.seconds else { return false }
+            return new + 2 < old
+        }()
         if let meters = sample.totalDistanceMeters { consoleTotal = (meters: meters, at: Date()) }
         if let seconds = sample.elapsedSeconds { consoleElapsed = (seconds: seconds, at: Date()) }
+        if consoleRestarted { consoleEndedWorkout() }
         switch phase {
         case .confirming(let name):
             guard ownership.observe(speedKmh: sample.speedKmh) else { return }
@@ -777,6 +808,16 @@ final class TreadmillLink: NSObject {
         guard miles > segmentMiles else { return }
         segmentMiles = miles
         WorkoutLocationManager.shared.ingestTreadmillDistance(miles)
+    }
+
+    /// The person ended their workout on the console (`FTMSMachineStatus`,
+    /// a console reset, or the machine going away with the belt stopped):
+    /// end the app's workout with it, frozen at this moment, so ground walked
+    /// after stepping off (to the locker room, on the phone's pedometer)
+    /// never counts. Only for a PROVEN machine feeding a live workout.
+    private func consoleEndedWorkout() {
+        guard isConnected, WorkoutLocationManager.shared.acceptsTreadmill else { return }
+        WorkoutLocationManager.shared.treadmillDidEndWorkout()
     }
 
     private func connectionLost(_ message: String?) {
@@ -841,6 +882,10 @@ extension TreadmillLink: CBCentralManagerDelegate, CBPeripheralDelegate {
         guard peripheral.identifier == active?.identifier else { return }
         // A disconnect we asked for clears `active` first, so landing here
         // means the machine went away (powered down, walked out of range).
+        // One that drops with its belt STOPPED was switched off or ended its
+        // session; one that drops mid-stride is a flaky link, and the
+        // pedometer carries on.
+        if let speed = speedKmh, speed < Self.stoppedBeltKmh { consoleEndedWorkout() }
         connectionLost("Lost the treadmill. Your distance so far is kept.")
     }
 
@@ -850,7 +895,8 @@ extension TreadmillLink: CBCentralManagerDelegate, CBPeripheralDelegate {
             connectionLost("That machine doesn't share treadmill data.")
             return
         }
-        peripheral.discoverCharacteristics([Self.treadmillDataCharacteristic], for: service)
+        peripheral.discoverCharacteristics(
+            [Self.treadmillDataCharacteristic, Self.machineStatusCharacteristic], for: service)
     }
 
     func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error: Error?) {
@@ -860,6 +906,11 @@ extension TreadmillLink: CBCentralManagerDelegate, CBPeripheralDelegate {
             return
         }
         peripheral.setNotifyValue(true, for: characteristic)
+        // Optional: a machine without it still works, it just can't tell us
+        // its workout ended (the console-reset / drop checks still can).
+        if let status = service.characteristics?.first(where: { $0.uuid == Self.machineStatusCharacteristic }) {
+            peripheral.setNotifyValue(true, for: status)
+        }
     }
 
     func peripheral(_ peripheral: CBPeripheral, didUpdateNotificationStateFor characteristic: CBCharacteristic, error: Error?) {
@@ -875,6 +926,12 @@ extension TreadmillLink: CBCentralManagerDelegate, CBPeripheralDelegate {
     }
 
     func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
+        if characteristic.uuid == Self.machineStatusCharacteristic {
+            if error == nil, let data = characteristic.value, FTMSMachineStatus.endsWorkout(data) {
+                consoleEndedWorkout()
+            }
+            return
+        }
         guard characteristic.uuid == Self.treadmillDataCharacteristic,
               error == nil, let data = characteristic.value,
               let sample = FTMSTreadmillSample.parse(data) else { return }
