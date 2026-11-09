@@ -14,10 +14,9 @@ struct DashboardCardsBlock: View {
     @EnvironmentObject private var competitionService: CompetitionService
     @ObservedObject private var weeklyChallengeService = WeeklyChallengeService.shared
     @AppStorage(DashboardCards.funKey) private var funRaw = ""
-    @AppStorage(DashboardCards.modernKey) private var modernRaw = ""
     @State private var showWorkouts = false
 
-    private var raw: String { style == .fun ? funRaw : modernRaw }
+    private var raw: String { funRaw }
 
     private var cards: [DashboardCard] { DashboardCards.ordered(in: raw, for: style) }
 
@@ -26,7 +25,7 @@ struct DashboardCardsBlock: View {
     /// title, description, bar) read as one thing said twice. It renders at
     /// whichever of the two comes first in the user's order.
     private var combinesChallenges: Bool {
-        style == .fun && weeklyChallengeService.current != nil
+        weeklyChallengeService.current != nil
             && cards.contains(.dailyChallenge) && cards.contains(.weeklyChallenge)
     }
 
@@ -77,11 +76,7 @@ struct DashboardCardsBlock: View {
                 NavigationLink {
                     DailyChallengesView(healthManager: healthManager, userManager: userManager)
                 } label: {
-                    if style == .fun {
-                        DailyChallengeCard(healthManager: healthManager, userManager: userManager)
-                    } else {
-                        ModernChallengeRow(healthManager: healthManager, userManager: userManager)
-                    }
+                    DailyChallengeCard(healthManager: healthManager, userManager: userManager)
                 }
                 .buttonStyle(.plain)
             case .streakTokens:
@@ -300,10 +295,9 @@ struct DashboardCustomizeRow: View {
     let style: DashboardStyle
 
     @AppStorage(DashboardCards.funKey) private var funRaw = ""
-    @AppStorage(DashboardCards.modernKey) private var modernRaw = ""
 
     var body: some View {
-        let count = DashboardCards.ordered(in: style == .fun ? funRaw : modernRaw, for: style).count
+        let count = DashboardCards.ordered(in: funRaw, for: style).count
         Button {
             MADHaptics.tap()
             DashboardCustomizeState.shared.isPresented = true
@@ -380,12 +374,11 @@ struct DashboardInsightsRow: View {
 /// the right corners rounded, so nothing is ever clipped.
 struct DashboardCustomizeView: View {
     @AppStorage(DashboardCards.funKey) private var funRaw = ""
-    @AppStorage(DashboardCards.modernKey) private var modernRaw = ""
     @AppStorage(DashboardStylePreference.key) private var dashboardStyleRaw = DashboardStylePreference.defaultStyle.rawValue
     @Environment(\.dismiss) private var dismiss
 
     private var style: DashboardStyle { DashboardStyle(rawValue: dashboardStyleRaw) ?? DashboardStylePreference.defaultStyle }
-    private var raw: String { style == .fun ? funRaw : modernRaw }
+    private var raw: String { funRaw }
     private var onCards: [DashboardCard] { DashboardCards.ordered(in: raw, for: style) }
     private var offCards: [DashboardCard] { DashboardCards.off(in: raw, for: style) }
 
@@ -397,12 +390,6 @@ struct DashboardCustomizeView: View {
         NavigationStack {
             ScrollViewReader { proxy in
                 List {
-                    if DashboardStylePreference.offersChoice {
-                        plainRow(header("Look"))
-                        plainRow(lookTiles)
-                        plainRow(footnote("Changes right away, behind this sheet."))
-                    }
-
                     plainRow(header("On your dashboard"))
                     if onCards.isEmpty {
                         cardRow(text: "Nothing here — just the day's cards.", position: .only)
@@ -522,74 +509,6 @@ struct DashboardCustomizeView: View {
             .fixedSize(horizontal: false, vertical: true)
     }
 
-    // MARK: Look
-
-    private var lookTiles: some View {
-        HStack(spacing: 10) {
-            ForEach(DashboardStylePreference.offered) { option in
-                styleChoice(option)
-            }
-        }
-    }
-
-    /// The real flames, not icons: Flamey for Fun, the ring flame for
-    /// Modern — the tile shows what you'd get.
-    private func styleChoice(_ option: DashboardStyle) -> some View {
-        let selected = style == option
-        return Button {
-            guard !selected else { return }
-            MADHaptics.tap()
-            withAnimation(.easeInOut(duration: 0.2)) {
-                DashboardStylePreference.choose(option)
-            }
-        } label: {
-            VStack(spacing: 8) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(option == .fun
-                            ? Color(red: 0.18, green: 0.05, blue: 0.06)
-                            : Color(red: 0.09, green: 0.09, blue: 0.10))
-                        .frame(height: 96)
-                    if option == .fun {
-                        // THEIR Flamey, as the dashboard draws him — colour and
-                        // outfit from the Closet (compact: the tile is small).
-                        FlameBuddyView(health: .healthy, size: 72, look: FlameyFacts.ownLook(detail: .compact))
-                    } else {
-                        ProfessionalFlameView(
-                            phase: .burning, health: .healthy, size: 62,
-                            ringProgress: 0.72,
-                            dayEnd: Date().addingTimeInterval(22 * 3600))
-                    }
-                }
-                HStack(spacing: 6) {
-                    Image(systemName: selected ? "checkmark.circle.fill" : "circle")
-                        .madFont(size: 14, maxScale: 1.5)
-                        .foregroundColor(selected ? MADTheme.Colors.madRed : .white.opacity(0.3))
-                    Text(option.title)
-                        .madFont(size: 15, weight: .bold, design: .rounded)
-                        .foregroundColor(.white)
-                }
-                Text(option.subtitle)
-                    .madFont(size: 11, design: .rounded)
-                    .foregroundColor(.white.opacity(0.5))
-                    .lineLimit(2)
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .padding(10)
-            .frame(maxWidth: .infinity)
-            .background(
-                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
-                    .fill(Color.white.opacity(selected ? 0.10 : 0.05))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
-                    .strokeBorder(selected ? MADTheme.Colors.madRed.opacity(0.7) : Color.clear, lineWidth: 1.5)
-            )
-        }
-        .buttonStyle(.plain)
-    }
-
     // MARK: Cards
 
     /// Centre-aligned so the toggle sits level with the system drag handle;
@@ -646,6 +565,6 @@ struct DashboardCustomizeView: View {
     }
 
     private func write(_ value: String) {
-        if style == .fun { funRaw = value } else { modernRaw = value }
+        funRaw = value
     }
 }

@@ -1,37 +1,33 @@
 import Foundation
 
+/// Fun (Flamey) is the only dashboard. The Modern dashboard was retired: a
+/// stored "modern" no longer decodes, so `enforceOffered()` moves it to Fun at
+/// launch. Friends on older app versions can still report "modern", which is
+/// why feed cards keep their author-styled plain variant.
 enum DashboardStyle: String, CaseIterable, Identifiable {
     case fun
-    case modern
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
         case .fun: return "Fun"
-        case .modern: return "Modern"
         }
     }
 
     var subtitle: String {
         switch self {
         case .fun: return "Animated flame buddy"
-        case .modern: return "Calm, focused layout"
         }
     }
 }
 
 enum DashboardStylePreference {
     static let key = "dashboardStyleV1"
-    static let hasChosenKey = "dashboardStyleChosenV1"
 
-    /// The styles users may run, first = the default. Fun (Flamey) is the only
-    /// one for now: the Modern dashboard's code stays so a future style can be
-    /// offered again by adding it here — with more than one entry the first-run
-    /// chooser, the Settings picker and the Customize "Look" tiles come back.
+    /// The styles users may run, first = the default. Fun is the only one.
     static let offered: [DashboardStyle] = [.fun]
     static var defaultStyle: DashboardStyle { offered[0] }
-    static var offersChoice: Bool { offered.count > 1 }
 
     static var current: DashboardStyle {
         get {
@@ -59,18 +55,5 @@ enum DashboardStylePreference {
         if let raw = UserDefaults.standard.string(forKey: key),
            let stored = DashboardStyle(rawValue: raw), offered.contains(stored) { return }
         current = defaultStyle
-    }
-
-    static var hasChosen: Bool {
-        UserDefaults.standard.bool(forKey: hasChosenKey)
-    }
-
-    static func choose(_ style: DashboardStyle) {
-        current = style
-        markChosen()
-    }
-
-    static func markChosen() {
-        UserDefaults.standard.set(true, forKey: hasChosenKey)
     }
 }

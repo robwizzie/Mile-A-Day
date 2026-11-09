@@ -286,7 +286,7 @@ enum WhatsNewCatalog {
                 WhatsNewFeature(
                     icon: "square.grid.2x2.fill",
                     title: "A brand-new Dashboard",
-                    blurb: "Your mile, your streak, and your tokens in one clean view — pick Modern for calm and focused, or Fun for the animated flame buddy.",
+                    blurb: "Your mile, your streak, and your tokens in one clean view, with Flamey cheering you on.",
                     tint: MADTheme.Colors.madRed
                 ),
                 WhatsNewFeature(
