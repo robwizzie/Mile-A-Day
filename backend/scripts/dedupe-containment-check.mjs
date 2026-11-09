@@ -160,6 +160,35 @@ async function main() {
     `SELECT exclusion_reason FROM workouts WHERE workout_id = 'mad-walk'`);
   check("'don't count it' holds too", userExcluded?.exclusion_reason, "duplicate_source");
 
+  // ── The same app writing one activity twice ──────────────────────
+  //
+  // Strava (and Garmin, Fitbit, Oura) were seen writing one run to HealthKit
+  // up to four times under fresh UUIDs. Same app, same end second, same
+  // length, same distance: never two sessions. Excluded even behind the
+  // grandfather line, since the original keeps the day.
+  const DAY2 = "2026-08-07";
+  await db.query(`UPDATE users SET dedupe_since = NOW() + interval '1 day' WHERE user_id = $1`, [USER]);
+  const insertOn = (id, o) => db.query(
+    `INSERT INTO workouts (workout_id, user_id, distance, local_date, date, device_end_date,
+        total_duration, workout_type, source_bundle_id, calories, timezone_offset)
+     VALUES ($1, $2, $3, $4::date, $5::timestamptz, $5::timestamptz, $6, 'running', $7, 0, -18000)`,
+    [id, USER, o.distance, DAY2, o.endsAt, o.duration, o.bundle]);
+  await insertOn("strava-a", { bundle: "com.strava.stravaride", distance: 4.001, endsAt: `${DAY2}T16:19:24Z`, duration: 1859 });
+  await insertOn("strava-b", { bundle: "com.strava.stravaride", distance: 4.001, endsAt: `${DAY2}T16:19:24Z`, duration: 1859 });
+  await insertOn("strava-c", { bundle: "com.strava.stravaride", distance: 4.001, endsAt: `${DAY2}T16:19:24Z`, duration: 1859.4 });
+  // A real second run from the same app later that day.
+  await insertOn("strava-pm", { bundle: "com.strava.stravaride", distance: 4.001, endsAt: `${DAY2}T22:10:00Z`, duration: 1859 });
+  await recomputeDuplicatesForDay(USER, DAY2);
+  const day2 = Object.fromEntries((await db.query(
+    `SELECT workout_id, duplicate_of, exclusion_reason FROM workouts WHERE user_id = $1 AND local_date = $2::date`,
+    [USER, DAY2])).map((r) => [r.workout_id, r]));
+  check("an exact same-app copy is a duplicate", day2["strava-b"]?.duplicate_of, "strava-a");
+  check("a third copy points at the same original", day2["strava-c"]?.duplicate_of, "strava-a");
+  check("the original keeps counting", day2["strava-a"]?.exclusion_reason, null);
+  check("exact copies are excluded even when grandfathered",
+    dedupeEnabledForTest() ? day2["strava-b"]?.exclusion_reason : "duplicate_source", "duplicate_source");
+  check("a later run from the same app is untouched", day2["strava-pm"]?.duplicate_of, null);
+
   // The kill switch's DIRECTION, same regression class as BUDDY_SESSIONS: a
   // pass that is inert unless someone remembers to set an env var is a pass
   // that does nothing in production.
