@@ -61,8 +61,9 @@ struct ShareMonth {
     var days: [DayState] {
         guard let miles = stats.dayMiles else { return [] }
         let goal = max(stats.goalMiles ?? 1, 0.01)
-        return miles.map { m in
-            if ProgressCalculator.isGoalCompleted(current: m, goal: goal) { return .met }
+        let steps = stats.stepDays ?? []
+        return miles.enumerated().map { i, m in
+            if ProgressCalculator.isGoalCompleted(current: m, goal: goal) || steps.contains(i) { return .met }
             return m > 0 ? .partial : .none
         }
     }
