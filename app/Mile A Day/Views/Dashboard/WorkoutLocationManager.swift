@@ -293,6 +293,11 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
     private var committedPausedTreadmillMiles: Double = 0
     private var pauseAnchorTreadmillMiles: Double?
     private var treadmillJoinMiles: Double = 0
+    /// The console's own distance when this segment began (same frame as
+    /// `treadmillJoinMiles`), when the machine's numbers are this workout's
+    /// (`TreadmillConsoleSeed`). The belt then counts on top of whichever of
+    /// the two is larger: they measure the same ground, so never both.
+    private var treadmillConsoleBaseMiles: Double?
     private var hasTreadmillSegment = false
     /// Set when a treadmill stretch ENDS mid-workout (data went quiet, the
     /// machine dropped, the user disconnected): the indoor span credited at
@@ -329,15 +334,32 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
     /// doesn't witness segments, and a treadmill session rarely pauses.
     var raceClockSeconds: TimeInterval {
         if isUsingPedometer {
-            guard let start = trackingStartedAt else { return 0 }
             // Manual pause must come out of the indoor clock explicitly.
             // Outdoors `movingSeconds` only advances inside `accrueDistance`,
             // which a pause blocks, so it freezes for free — but the treadmill
             // clock is wall time, and without this subtraction a racer could
             // beat their ghost by standing on the side rails.
-            return max(0, Date().timeIntervalSince(start) - pausedSeconds)
+            return workoutElapsedSeconds
         }
         return movingSeconds
+    }
+
+    /// When this session's clock starts: tracking start, or earlier when a
+    /// treadmill's console seeded the workout (its distance came with it, so
+    /// the clock must too or the ghost race gets free ground).
+    private var clockStartedAt: Date?
+
+    /// Wall time since the session's clock started, minus manual pauses.
+    var workoutElapsedSeconds: TimeInterval {
+        guard let start = clockStartedAt ?? trackingStartedAt else { return 0 }
+        return max(0, Date().timeIntervalSince(start) - pausedSeconds)
+    }
+
+    /// Whether an indoor session of this type will run on the pedometer path,
+    /// the only one a treadmill feeds (`acceptsTreadmill`). Lets the tracker
+    /// decide BEFORE starting whether to start from the console.
+    static func canFeedTreadmill(locationType: HKWorkoutSessionLocationType) -> Bool {
+        locationType == .indoor && CMPedometer.isDistanceAvailable()
     }
 
     /// Pace over roughly the last minute, in seconds per mile. Nil until the
@@ -476,10 +498,15 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
     ///     (nil `end`) means the workout was paused when the app died, so it
     ///     comes back paused — resuming it silently would count ground the user
     ///     never asked for.
+    ///   - treadmillSeed: A proven treadmill's console reading
+    ///     (`TreadmillLink.consoleSeed`): the clock starts at its `startDate`
+    ///     and the distance at its miles. The caller's own start time must use
+    ///     the same `startDate`.
     func startTracking(
         locationType: HKWorkoutSessionLocationType = .outdoor,
         initialDistance: Double = 0.0,
-        pauseIntervals: [WorkoutPauseInterval] = []
+        pauseIntervals: [WorkoutPauseInterval] = [],
+        treadmillSeed: TreadmillConsoleSeed? = nil
     ) {
         // Prevent double-start
         guard !isTracking else { return }
@@ -495,6 +522,9 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
         lastMotionPollAt = .distantPast
         pedometerErrored = false
         trackingStartedAt = Date()
+        clockStartedAt = treadmillSeed?.startDate
+        treadmillEndedWorkout = false
+        pausedByTreadmill = false
         movingSeconds = 0
         movingCreditedThrough = nil
         effortCurve = [(0, initialDistance)]
@@ -573,8 +603,11 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
         startPauseHeartbeat()
         applyLocationPowerProfile()
         // A treadmill connected and proven in the start wizard starts
-        // counting now, from zero — not from when it was connected.
-        if isUsingPedometer { TreadmillLink.shared.workoutDidStart() }
+        // counting now: from the console's own distance when the caller
+        // seeded the workout with it, else from zero.
+        if isUsingPedometer {
+            TreadmillLink.shared.workoutDidStart(seed: treadmillSeed)
+        }
     }
 
     // MARK: - Manual pause / resume
@@ -623,6 +656,7 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
     func resume() {
         guard isTracking, isPaused else { return }
         isPaused = false
+        pausedByTreadmill = false
         if !pauseIntervals.isEmpty, pauseIntervals[pauseIntervals.count - 1].end == nil {
             pauseIntervals[pauseIntervals.count - 1].end = Date()
         }
@@ -830,7 +864,8 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
             span = max(span, rejoin.base + max(0, countablePedometerMiles - rejoin.pedometerAt))
         }
         if hasTreadmillSegment {
-            span = max(span, treadmillJoinMiles + countableTreadmillMiles)
+            let base = max(treadmillJoinMiles, treadmillConsoleBaseMiles ?? 0)
+            span = max(span, base + countableTreadmillMiles)
         }
         currentDistance = max(currentDistance, pedometerOffset + span)
         refreshLiveDistance()
@@ -850,12 +885,56 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
     var acceptsTreadmill: Bool { isTracking && isUsingPedometer }
 
     /// A treadmill connection just started streaming. Its readings count
-    /// from zero, on top of the indoor span already credited.
-    func beginTreadmillSegment() {
+    /// on top of the indoor span already credited, or on top of the
+    /// console's own distance (`consoleMiles`, this workout's total) when
+    /// that is larger: the distance jumps to match the treadmill at once.
+    func beginTreadmillSegment(consoleMiles: Double? = nil) {
         guard acceptsTreadmill else { return }
         resetTreadmillSegment()
         treadmillJoinMiles = max(0, currentDistance - pedometerOffset)
+        treadmillConsoleBaseMiles = consoleMiles.map { max(0, $0 - pedometerOffset) }
         hasTreadmillSegment = true
+        if let base = treadmillConsoleBaseMiles, base > treadmillJoinMiles {
+            usedTreadmill = true
+            applyIndoorDistance()
+        }
+    }
+
+    /// The connected treadmill's own workout ended (`TreadmillLink`: Stop on
+    /// the console, a console reset, or the machine dropping with its belt
+    /// stopped). The tracker finishes the workout on its next tick
+    /// (`WorkoutTrackingView.startWorkoutTimer`); until then — the tracker may
+    /// be off screen — it's PAUSED now, so nothing walked after stepping off
+    /// counts and the saved time ends here, not when the finish lands.
+    /// Reset by the next `startTracking`.
+    @Published private(set) var treadmillEndedWorkout = false
+
+    func treadmillDidEndWorkout() {
+        guard acceptsTreadmill, !treadmillEndedWorkout else { return }
+        treadmillEndedWorkout = true
+        pause()
+        // Bring the tracker up to finish, only while the user is looking at
+        // the app (never present it from the background).
+        if UIApplication.shared.applicationState == .active {
+            Task { @MainActor in DeepLinkRouter.shared.requestOpenTracker() }
+        }
+    }
+
+    /// True while the current pause is one the treadmill made, so only that
+    /// pause is lifted when the belt moves again — never one the user made.
+    private var pausedByTreadmill = false
+
+    /// The console paused, or the belt stood still (`TreadmillBeltWatch`).
+    func treadmillDidPause() {
+        guard acceptsTreadmill, !treadmillEndedWorkout, !isPaused else { return }
+        pause()
+        pausedByTreadmill = true
+    }
+
+    /// The console resumed, or the belt moved again after a treadmill pause.
+    func treadmillDidResume() {
+        guard acceptsTreadmill, !treadmillEndedWorkout, isPaused, pausedByTreadmill else { return }
+        resume()
     }
 
     /// The treadmill stopped counting mid-workout: hand the distance to the
@@ -884,6 +963,7 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
         // user taps resume is excluded, same as the pedometer.
         pauseAnchorTreadmillMiles = isPaused ? 0 : nil
         treadmillJoinMiles = 0
+        treadmillConsoleBaseMiles = nil
     }
 
     /// Buddy Walk progress from the DATA callbacks, not the view timer.
@@ -1093,6 +1173,7 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
         hasTreadmillSegment = false
         pedometerRejoin = nil
         resetTreadmillSegment()
+        TreadmillLink.shared.workoutDidEnd()
         TreadmillLink.shared.disconnect()
     }
 

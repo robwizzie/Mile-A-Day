@@ -2864,7 +2864,17 @@ struct WorkoutTrackingView: View {
             return
         }
 
-        workoutStartDate = Date()
+        // A treadmill proven in the start wizard: start where its console
+        // is, so the clock and distance match the machine's from the first
+        // second (its distance arrives via `startTracking`). Not on a buddy
+        // walk: the crew starts together, and ground walked before the walk
+        // isn't the room's.
+        let treadmillSeed: TreadmillConsoleSeed? =
+            effectiveBuddySessionId == nil
+                && WorkoutLocationManager.canFeedTreadmill(locationType: selectedLocationType)
+            ? TreadmillLink.shared.consoleSeed()
+            : nil
+        workoutStartDate = treadmillSeed?.startDate ?? Date()
 
         // Resolve the ghost the user armed on the location step (resolved
         // once, so a best set MID-session doesn't morph the target).
@@ -2951,7 +2961,11 @@ struct WorkoutTrackingView: View {
         TrackerLaunchPreference.record(selectedActivityType)
 
         // Start location/pedometer tracking (fresh workout, initialDistance = 0)
-        locationManager.startTracking(locationType: selectedLocationType, initialDistance: 0)
+        locationManager.startTracking(
+            locationType: selectedLocationType,
+            initialDistance: 0,
+            treadmillSeed: treadmillSeed
+        )
 
         // Start Live Activity
         startLiveActivity()
@@ -2959,6 +2973,9 @@ struct WorkoutTrackingView: View {
         // Start the timer IMMEDIATELY — don't wait for HealthKit authorization.
         // The timer drives both the UI clock and periodic state persistence.
         startWorkoutTimer()
+        // A console-seeded clock is already minutes in: show it now, not on
+        // the first tick.
+        elapsedTime = activeElapsedTime
 
         // Set up HKWorkoutBuilder in the background (non-blocking).
         // If this fails, the workout still tracks distance; it just won't save to HealthKit.
@@ -2989,6 +3006,12 @@ struct WorkoutTrackingView: View {
             guard workoutStartDate != nil else { return }
             // Don't persist state while we're in the middle of stopping
             guard !isStopping else { return }
+            // Ended on the treadmill's console: end it here too (the manager
+            // already paused it at that moment, so the save stops there).
+            if locationManager.treadmillEndedWorkout, isTracking {
+                stopWorkout()
+                return
+            }
             // Freezes on its own while manually paused — `pausedSeconds` grows
             // at exactly the rate wall time does for the length of the pause.
             elapsedTime = activeElapsedTime

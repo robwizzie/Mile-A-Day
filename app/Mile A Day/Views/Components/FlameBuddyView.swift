@@ -113,7 +113,10 @@ struct FlameBuddyView: View {
         .onChange(of: resolvedPhase) { oldValue, newValue in
             guard oldValue != newValue else { return }
             if newValue == .blazing {
-                MADHaptics.success()
+                // The dashboard hero blazes when the walk saves, while the
+                // tracker's recap still covers it: no buzz for a flame nobody
+                // can see (the goal celebration plays once it's uncovered).
+                if !CelebrationManager.shared.isScreenCovered { MADHaptics.success() }
                 guard !effectiveStill else { return }
                 ignitionDate = Date()
                 DispatchQueue.main.asyncAfter(deadline: .now() + FlameIgnitionBurst.duration + 0.1) {

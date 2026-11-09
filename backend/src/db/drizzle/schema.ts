@@ -2242,6 +2242,10 @@ export const postComments = pgTable(
     userId: text("user_id").notNull(),
     parentCommentId: uuid("parent_comment_id"),
     content: text().notNull(),
+    // A sticker comment (a `COMMENT_STICKERS` id, iOS `FlameyPackSticker`).
+    // `content` still holds a readable stand-in ("🔥 LET'S GOOO") so older
+    // apps, pushes and admin tools that only read text show something true.
+    stickerId: varchar("sticker_id", { length: 64 }),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
       .defaultNow()
       .notNull(),

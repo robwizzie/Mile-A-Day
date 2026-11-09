@@ -485,6 +485,14 @@ extension MADNotificationService: UNUserNotificationCenterDelegate {
             }
         }
 
+        // The user's OWN achievement (mile done, medal, 10k steps…) while a
+        // full-screen cover like the workout tracker is up: they're looking
+        // at it in the app, and the in-app banner would draw under the cover,
+        // so this was a buzz with nothing to see. File it quietly instead.
+        if CelebrationManager.shared.isScreenCovered, Self.isOwnAchievement(notification) {
+            return [.list]
+        }
+
         // For remote notifications, check user preferences
         let userInfo = notification.request.content.userInfo
         if let type = userInfo["type"] as? String {
@@ -529,6 +537,19 @@ extension MADNotificationService: UNUserNotificationCenterDelegate {
             data: userInfo["data"] as? [String: String] ?? [:]
         )
         return [.list, .sound]
+    }
+
+    /// Notifications about something the user just did themselves (the
+    /// local mile/steps alerts and the server's self pushes).
+    private static let ownAchievementTypes: Set<String> = [
+        "goal_reached", "badge_earned", "weekly_challenge_complete"
+    ]
+
+    private static func isOwnAchievement(_ notification: UNNotification) -> Bool {
+        let id = notification.request.identifier
+        if id == Identifier.mileCompleted || id.hasPrefix("step-goal-") { return true }
+        guard let type = notification.request.content.userInfo["type"] as? String else { return false }
+        return ownAchievementTypes.contains(type)
     }
 
     @MainActor

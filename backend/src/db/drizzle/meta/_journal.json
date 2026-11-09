@@ -743,6 +743,13 @@
       "when": 1794030520862,
       "tag": "0105_community_goals_and_referrals",
       "breakpoints": true
+    },
+    {
+      "idx": 106,
+      "version": "7",
+      "when": 1794267147165,
+      "tag": "0106_comment_stickers",
+      "breakpoints": true
     }
   ]
 }

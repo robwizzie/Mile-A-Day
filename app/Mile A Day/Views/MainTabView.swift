@@ -767,7 +767,9 @@ struct MainTabView: View {
         guard selectedTab == 0 else { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
             let celebrations = CelebrationManager.shared
-            guard !celebrations.isShowingCelebration, celebrations.celebrationQueue.isEmpty else { return }
+            guard !celebrations.isShowingCelebration, celebrations.celebrationQueue.isEmpty,
+                  // Never over the workout tracker / its recap.
+                  !celebrations.isScreenCovered else { return }
             // Never over the system Health sheet (it's up whenever access
             // hasn't been granted yet).
             guard healthManager.isAuthorized else { return }

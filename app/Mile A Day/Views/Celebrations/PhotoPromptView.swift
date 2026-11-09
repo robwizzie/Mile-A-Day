@@ -1,5 +1,6 @@
 import SwiftUI
 import CoreLocation
+import HealthKit
 
 /// THE photo prompt — "make it a post" — shared by the solo finale
 /// (`PostRunPhotoPromptView`, a celebration) and the buddy walk's post step
@@ -95,6 +96,14 @@ struct PhotoPromptView: View {
     /// The walk's real GPS trace for the preview card, when friends will
     /// actually get one (not Stealth, route maps on).
     @State private var routeCoords: [CLLocationCoordinate2D]?
+    /// HealthKit's indoor flag for this walk (nil = not known yet / no
+    /// workout). An indoor walk has no route to show, so its card is the
+    /// lap track friends get in the feed (`IndoorWorkoutCard`).
+    @State private var isIndoor: Bool?
+    /// The route lookup has finished, map or not: until then an outdoor walk
+    /// shows the plain stats card, so the routeless card never flashes up
+    /// ahead of a route that is about to load.
+    @State private var routeResolved = false
 
     private var isWalk: Bool { workoutType == "walking" }
     private var isBuddyWalk: Bool { crew != nil || joiningPostId != nil }
@@ -379,7 +388,7 @@ struct PhotoPromptView: View {
                 if let entry = selectedSnapEntry {
                     snapPreview(entry, size: mediaSize)
                 } else {
-                    walkCard
+                    walkCard(aspect: mediaSize.width / max(mediaSize.height, 1))
                         .frame(width: mediaSize.width, height: mediaSize.height)
                         // RouteArtView keeps the map it first drew, so a
                         // panel that settles to a new size would crop the
@@ -429,7 +438,7 @@ struct PhotoPromptView: View {
     private var cameraBadge: AnyView {
         let scale: CGFloat = 0.4
         return AnyView(
-            walkCard
+            walkCard(aspect: 140.0 / 175.0)
                 .frame(width: 140, height: 175)
                 .scaleEffect(scale)
                 .frame(width: 140 * scale, height: 175 * scale)
@@ -608,10 +617,12 @@ struct PhotoPromptView: View {
 
     // MARK: - The walk's card
 
-    /// The walk side of the post: its real route art with the feed's stats
-    /// band when friends will get a route, else a stats card.
+    /// The walk side of the post: its real route art when friends will get a
+    /// route, else the same routeless card the feed draws for it (the lap
+    /// track for an indoor walk, the mile ribbon otherwise), so the preview
+    /// is what friends will see.
     @ViewBuilder
-    private var walkCard: some View {
+    private func walkCard(aspect: CGFloat) -> some View {
         if let crewCard = crew?.walkCard {
             crewCard
         } else if let coords = routeCoords, coords.count >= 2 {
@@ -621,12 +632,23 @@ struct PhotoPromptView: View {
                 authorAvatar: RouteArtAvatar(name: me.name, imageURL: me.profileImageUrl),
                 showsMileMarkers: false
             )
+        } else if isIndoor == true || routeResolved {
+            IndoorWorkoutCard(
+                stats: stats.snapshot,
+                workoutType: workoutType,
+                avatar: RouteArtAvatar(name: me.name, imageURL: me.profileImageUrl),
+                isIndoor: isIndoor,
+                isOwn: true,
+                aspect: aspect
+            )
+            // The panel clips it; the feed's corner radius would cut it twice.
+            .environment(\.feedMediaCornerRadius, 0)
         } else {
             statsCard
         }
     }
 
-    /// Routeless walks (and the moment before the route loads).
+    /// The moment before the route lookup finishes.
     private var statsCard: some View {
         ZStack {
             LinearGradient(colors: [accent, accent.opacity(0.35), Color.black],
@@ -784,16 +806,44 @@ struct PhotoPromptView: View {
     /// server never stores one) or when route maps are switched off, so the
     /// preview can't promise a map the post won't have.
     private func loadRoutePreview() async {
-        guard crew == nil, routeCoords == nil,
+        defer { routeResolved = true }
+        guard crew == nil, routeCoords == nil, let workoutId else { return }
+        let workout = await Self.workout(id: workoutId)
+        // Read exactly as the sync sends `is_indoor` (absent = unknown), so
+        // the card matches the one friends' feeds draw.
+        if let flag = (workout?.metadata?[HKMetadataKeyIndoorWorkout] as? NSNumber)?.boolValue {
+            isIndoor = flag
+        }
+        // An indoor walk has no route to draw.
+        guard isIndoor != true,
               NotificationPreferences.load().shareRouteMaps,
-              let workoutId,
-              let workout = HealthKitManager.shared.todaysWorkouts
-                .first(where: { $0.uuid.uuidString == workoutId }),
+              let workout,
               !StealthModeStore.shared.isStealth(workout) else { return }
         let full = await WorkoutSyncService.shared.uploadableRoute(for: workout)
         guard let line = RoutePrivacyTrim.friendsView(full, workoutId: workoutId) else { return }
         withAnimation(.easeInOut(duration: 0.3)) {
             routeCoords = line
+        }
+    }
+
+    /// This walk's HKWorkout: today's cached list first, else HealthKit
+    /// directly (the prompt can open before the cache has the walk).
+    private static func workout(id: String) async -> HKWorkout? {
+        if let cached = HealthKitManager.shared.todaysWorkouts.first(where: { $0.uuid.uuidString == id }) {
+            return cached
+        }
+        guard let uuid = UUID(uuidString: id) else { return nil }
+        let store = HealthKitManager.shared.healthStore
+        return await withCheckedContinuation { (continuation: CheckedContinuation<HKWorkout?, Never>) in
+            let query = HKSampleQuery(
+                sampleType: HKObjectType.workoutType(),
+                predicate: HKQuery.predicateForObject(with: uuid),
+                limit: 1,
+                sortDescriptors: nil
+            ) { _, samples, _ in
+                continuation.resume(returning: (samples as? [HKWorkout])?.first)
+            }
+            store.execute(query)
         }
     }
 
