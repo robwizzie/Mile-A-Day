@@ -287,7 +287,13 @@ async function main() {
   await db.query(`UPDATE apple_token_revocations SET attempts = $2 - 1, next_attempt_at = now() - interval '1 minute' WHERE client_id = $1`, [CLIENT, MAX_REVOCATION_ATTEMPTS]);
   await sweepAppleRevocations();
   check("the last failed attempt drops the token", await pending(), 0);
-  check("…and says so", await count("error_log WHERE message = 'Apple token revocation abandoned'"), 1);
+  // logError writes in the background, so give it a moment to land.
+  let abandoned = 0;
+  for (let i = 0; i < 20 && abandoned === 0; i++) {
+    abandoned = await count("error_log WHERE message = 'Apple token revocation abandoned'");
+    if (abandoned === 0) await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  check("…and says so", abandoned, 1);
   apple.revokeStatus = 200;
 
   // ── The tables ─────────────────────────────────────────────────────────

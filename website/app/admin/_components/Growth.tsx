@@ -339,6 +339,154 @@ function RetentionPanel() {
   );
 }
 
+type ReferralOverview = {
+  totals: { pending: number; qualified: number; expired: number; rejected: number };
+  codes: { left: number; used: number };
+  referrers: Array<{
+    user_id: string;
+    username: string | null;
+    qualified: number;
+    pending: number;
+    expired: number;
+    biggest_day: number;
+    free_year: boolean;
+    flagged: boolean;
+  }>;
+  recent: Array<{ referee: string | null; referrer: string | null; status: string; origin: string; created_at: string }>;
+};
+
+/**
+ * The referral program: who's earning, what looks off, and support's two
+ * fixes. A flag is a prompt to look, never a verdict.
+ */
+function ReferralRewardsPanel() {
+  const [data, setData] = useState<ReferralOverview | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [friend, setFriend] = useState("");
+  const [referrer, setReferrer] = useState("");
+  const [note, setNote] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(() => {
+    getData<ReferralOverview>("referral-overview")
+      .then(setData)
+      .catch((e) => {
+        if (e?.message !== "unauthorized") setErr("Failed to load referrals.");
+      });
+  }, []);
+  useEffect(load, [load]);
+
+  async function act(path: string, done: string) {
+    setBusy(true);
+    setNote(null);
+    try {
+      await postData(path);
+      setNote(done);
+      setFriend("");
+      setReferrer("");
+      load();
+    } catch (e) {
+      setNote(e instanceof Error ? e.message : "That didn't work.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function link() {
+    const params = new URLSearchParams({ friend, referrer });
+    void act(`referral-link?${params.toString()}`, `Linked @${friend} to @${referrer}.`);
+  }
+
+  function reject(username: string) {
+    if (!window.confirm(`Remove @${username}'s referral from the count? Rewards already earned stay.`)) return;
+    void act(`referral-reject?${new URLSearchParams({ friend: username }).toString()}`, `Removed @${username}'s referral.`);
+  }
+
+  if (err) return <p className="text-sm text-[#d94059]">{err}</p>;
+  if (!data) return <Loading />;
+
+  const input = "rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none focus:border-white/30";
+  return (
+    <Section title="Referral program" hint="Referrals count after 7 walking days in a friend's first 30.">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <StatCard label="Counted" value={fmt(data.totals.qualified)} accent />
+        <StatCard label="In progress" value={fmt(data.totals.pending)} />
+        <StatCard label="Didn't finish" value={fmt(data.totals.expired)} sub={`${fmt(data.totals.rejected)} removed`} />
+        <StatCard
+          label="Offer codes left"
+          value={fmt(data.codes.left)}
+          sub={`${fmt(data.codes.used)} claimed`}
+        />
+      </div>
+
+      <div className="mt-5 grid gap-5 lg:grid-cols-2">
+        <Card title="Fix a referral" hint="For support. A referral that already counted can't be moved.">
+          <div className="flex flex-col gap-2">
+            <input className={input} placeholder="Friend's username" value={friend} onChange={(e) => setFriend(e.target.value)} />
+            <input className={input} placeholder="Who referred them" value={referrer} onChange={(e) => setReferrer(e.target.value)} />
+            <button
+              type="button"
+              disabled={busy || !friend.trim() || !referrer.trim()}
+              onClick={link}
+              className="rounded-lg bg-[#d94059] px-3 py-2 text-sm font-semibold text-white disabled:opacity-40"
+            >
+              Link referral
+            </button>
+            {note && <p className="text-sm text-[#a0a0a0]">{note}</p>}
+          </div>
+        </Card>
+
+        <Card title="Top referrers" hint="Flagged means 5 or more accounts picked them in one day.">
+          {data.referrers.length === 0 ? (
+            <p className="text-sm text-[#a0a0a0]">No referrals yet.</p>
+          ) : (
+            <ul className="flex flex-col gap-2">
+              {data.referrers.slice(0, 15).map((r) => (
+                <li key={r.user_id} className="flex items-center justify-between gap-3 text-sm">
+                  <span className="truncate text-white">
+                    @{r.username ?? r.user_id}
+                    {r.flagged && <span className="ml-2" style={{ color: MAD_WARNING }}>Flagged</span>}
+                    {r.free_year && <span className="ml-2 text-[#a0a0a0]">Free year</span>}
+                  </span>
+                  <span className="shrink-0 text-[#a0a0a0]">
+                    {r.qualified} counted · {r.pending} in progress
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+      </div>
+
+      <div className="mt-5">
+        <Card title="Recent referrals">
+          {data.recent.length === 0 ? (
+            <p className="text-sm text-[#a0a0a0]">Nothing yet.</p>
+          ) : (
+            <ul className="flex flex-col gap-2">
+              {data.recent.map((r) => (
+                <li key={`${r.referee}-${r.created_at}`} className="flex items-center justify-between gap-3 text-sm">
+                  <span className="truncate text-white">
+                    @{r.referee} <span className="text-[#a0a0a0]">from @{r.referrer} · {r.origin}</span>
+                  </span>
+                  <span className="flex shrink-0 items-center gap-3 text-[#a0a0a0]">
+                    {r.status}
+                    {r.status !== "rejected" && r.referee && (
+                      <button type="button" className="text-[#d94059]" onClick={() => reject(r.referee as string)}>
+                        Remove
+                      </button>
+                    )}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+      </div>
+    </Section>
+  );
+}
+
 export function GrowthTab() {
   const open = useDrilldown();
   const [r, setR] = useState<Referrals | null>(null);
@@ -370,6 +518,7 @@ export function GrowthTab() {
 
   return (
     <div className={STACK_SECTIONS}>
+      <ReferralRewardsPanel />
       <Section
         title="Acquisition"
         hint="Where people say they came from, answered at onboarding."

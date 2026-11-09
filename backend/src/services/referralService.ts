@@ -21,6 +21,8 @@ const db = PostgresService.getInstance();
 export const QUALIFYING_DAYS = 7;
 /** ...within this many days of being linked. */
 export const QUALIFYING_WINDOW_DAYS = 30;
+/** This many accounts picking one person in a day gets a look in admin. */
+const FLAG_LINKS_PER_DAY = 5;
 /** How long after signing up someone can still name their referrer. */
 export const LINK_WINDOW_DAYS = 14;
 
@@ -229,7 +231,7 @@ export async function getReferralStatus(userId: string) {
   const [friends, mine, earned, code, plus] = await Promise.all([
     db.query<{ username: string | null; first_name: string | null; profile_image_url: string | null; status: string; days: number; created_at: string }>(
       `SELECT u.username, u.first_name, u.profile_image_url, p.status, p.days, p.created_at
-         FROM (${progressSql("r.referrer_id = $1")}) p
+         FROM (${progressSql("r.referrer_id = $1 AND r.status <> 'rejected'")}) p
          JOIN users u ON u.user_id = p.referee_id
         ORDER BY CASE p.status WHEN 'pending' THEN 0 WHEN 'qualified' THEN 1 ELSE 2 END, p.created_at DESC`,
       [userId],
@@ -276,6 +278,118 @@ export async function getReferralStatus(userId: string) {
       code: r.kind === "free_year" ? (code[0]?.code ?? null) : null,
     })),
   };
+}
+
+/**
+ * For the admin view: who's referring, what they've earned, and anything that
+ * looks off. Flags are prompts for a human, never automatic decisions.
+ */
+export async function getReferralOverview() {
+  const [totals, referrers, recent, codes] = await Promise.all([
+    db.query<{ pending: number; qualified: number; expired: number; rejected: number }>(
+      `SELECT COUNT(*) FILTER (WHERE status = 'pending')::int AS pending,
+              COUNT(*) FILTER (WHERE status = 'qualified')::int AS qualified,
+              COUNT(*) FILTER (WHERE status = 'expired')::int AS expired,
+              COUNT(*) FILTER (WHERE status = 'rejected')::int AS rejected
+         FROM referrals`,
+    ),
+    db.query<{
+      user_id: string;
+      username: string | null;
+      qualified: number;
+      pending: number;
+      expired: number;
+      biggest_day: number;
+      free_year: boolean;
+    }>(
+      `WITH per_day AS (
+         SELECT referrer_id, created_at::date AS day, COUNT(*)::int AS n
+           FROM referrals WHERE origin = 'picked' GROUP BY 1, 2
+       )
+       SELECT r.referrer_id AS user_id, u.username,
+              COUNT(*) FILTER (WHERE r.status = 'qualified')::int AS qualified,
+              COUNT(*) FILTER (WHERE r.status = 'pending')::int AS pending,
+              COUNT(*) FILTER (WHERE r.status = 'expired')::int AS expired,
+              COALESCE((SELECT MAX(n) FROM per_day p WHERE p.referrer_id = r.referrer_id), 0)::int AS biggest_day,
+              EXISTS (SELECT 1 FROM referral_offer_codes c WHERE c.assigned_to = r.referrer_id) AS free_year
+         FROM referrals r
+         JOIN users u ON u.user_id = r.referrer_id
+        WHERE r.status <> 'rejected'
+        GROUP BY r.referrer_id, u.username
+        ORDER BY qualified DESC, pending DESC
+        LIMIT 100`,
+    ),
+    db.query<{ referee: string | null; referrer: string | null; status: string; origin: string; created_at: string }>(
+      `SELECT friend.username AS referee, referrer.username AS referrer, r.status, r.origin, r.created_at
+         FROM referrals r
+         JOIN users friend ON friend.user_id = r.referee_id
+         JOIN users referrer ON referrer.user_id = r.referrer_id
+        ORDER BY r.created_at DESC LIMIT 50`,
+    ),
+    db.query<{ left: number; used: number }>(
+      `SELECT COUNT(*) FILTER (WHERE assigned_to IS NULL)::int AS left,
+              COUNT(*) FILTER (WHERE assigned_to IS NOT NULL)::int AS used
+         FROM referral_offer_codes`,
+    ),
+  ]);
+  return {
+    totals: totals[0],
+    codes: codes[0],
+    referrers: referrers.map((r) => ({ ...r, flagged: r.biggest_day >= FLAG_LINKS_PER_DAY })),
+    recent,
+  };
+}
+
+/**
+ * Support's fix for a referral that didn't connect. Skips the 14-day window,
+ * since that's usually why they're writing in, but no other rule. It starts
+ * from the friend's sign-up date, like every other referral, and a pending
+ * link can be corrected. A counted one can't: its rewards have gone out.
+ */
+export async function adminLinkReferral(refereeUsername: string, referrerUsername: string): Promise<void> {
+  const find = (handle: string) =>
+    db.query<{ user_id: string }>(
+      `SELECT user_id FROM users WHERE lower(username) = lower($1)`,
+      [handle.trim().replace(/^@/, "")],
+    );
+  const [[friend], [referrer]] = await Promise.all([find(refereeUsername), find(referrerUsername)]);
+  if (!friend) throw new ReferralError("no_friend", "No account with the friend's username.", 404);
+  if (!referrer) throw new ReferralError("no_referrer", "No account with the referrer's username.", 404);
+  if (friend.user_id === referrer.user_id) throw new ReferralError("self", "Those are the same account.");
+
+  const loop = await db.query(`SELECT 1 FROM referrals WHERE referee_id = $1 AND referrer_id = $2`, [
+    referrer.user_id,
+    friend.user_id,
+  ]);
+  if (loop.length > 0) throw new ReferralError("loop", "That would make a loop: they already referred each other.");
+
+  const saved = await db.query(
+    `INSERT INTO referrals (referee_id, referrer_id, origin, created_at)
+     VALUES ($1, $2, 'admin', (SELECT created_at FROM users WHERE user_id = $1))
+     ON CONFLICT (referee_id) DO UPDATE
+       SET referrer_id = EXCLUDED.referrer_id, origin = 'admin'
+       WHERE referrals.status <> 'qualified'
+     RETURNING referee_id`,
+    [friend.user_id, referrer.user_id],
+  );
+  if (saved.length === 0) throw new ReferralError("already_counted", "That referral already counted, so it can't be moved.", 409);
+
+  // A link made late may already have enough days behind it.
+  await settleReferrals();
+}
+
+/**
+ * Takes a suspicious referral out of the count. Rewards already earned stay:
+ * taking one back is a decision for a person, with the user told why.
+ */
+export async function adminRejectReferral(refereeUsername: string): Promise<void> {
+  const rows = await db.query(
+    `UPDATE referrals SET status = 'rejected'
+      WHERE referee_id = (SELECT user_id FROM users WHERE lower(username) = lower($1))
+      RETURNING referee_id`,
+    [refereeUsername.trim().replace(/^@/, "")],
+  );
+  if (rows.length === 0) throw new ReferralError("no_referral", "That account has no referral.", 404);
 }
 
 /** Hands out the free year's offer code. Safe to repeat: the same code returns. */

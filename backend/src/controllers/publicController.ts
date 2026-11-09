@@ -1,3 +1,4 @@
+import { getPublicCommunityGoal } from "../services/communityGoalService.js";
 import { Request, Response } from "express";
 import { getPublicStats } from "../services/publicStatsService.js";
 import { getPublicPostPreview } from "../services/postService.js";
@@ -76,6 +77,17 @@ export async function getPublicDeskController(_req: Request, res: Response) {
   } catch (error) {
     console.error("Failed to build the public desk feed:", error);
     res.status(500).json({ error: "Failed to load" });
+  }
+}
+
+/** GET /public/community-goal: totals for the site's goal page. */
+export async function getPublicCommunityGoalController(_req: Request, res: Response) {
+  try {
+    res.setHeader("Cache-Control", "public, max-age=60");
+    res.json(await getPublicCommunityGoal());
+  } catch (error) {
+    console.error("Failed to build the public community goal:", error);
+    res.status(500).json({ error: "Failed to load the goal" });
   }
 }
 

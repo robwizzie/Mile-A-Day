@@ -21,6 +21,9 @@ struct CommunityGoal: Codable {
     let state: String
     let total_miles: Double
     let walkers: Int
+    /// People who added miles on their own today. Optional: older servers
+    /// don't send it, and it's null outside an active goal.
+    let walkers_today: Int?
     let percent: Int
     let checkpoints: [Checkpoint]
     let rewards: [Reward]
@@ -41,6 +44,7 @@ struct CommunityGoal: Codable {
         let item_id: String?
         let name: String
         let earned: Bool
+        var rarity: String? = nil
 
         var id: String { badge_id }
     }
@@ -50,6 +54,12 @@ struct CommunityGoal: Codable {
         let status: String
         let miles_per_day_needed: Int
         let needs_more_walkers: Bool
+        /// Where today's rate ends up. Nil in the first days of a goal.
+        let projected_miles: Int?
+        /// "2026-12-26", when the rate reaches the target.
+        let projected_finish: String?
+        /// More people at the average rate who would close the gap.
+        let walkers_needed: Int?
     }
 
     enum Phase { case upcoming, active, counting, ended }
@@ -96,6 +106,41 @@ struct CommunityGoal: Codable {
     }
 
     var needsMoreWalkers: Bool { pace?.needs_more_walkers == true }
+
+    var onPace: Bool { (pace?.projected_miles).map { Double($0) >= target_miles } ?? false }
+
+    /// Will we get there? Nil when it's too early to say.
+    var paceLine: String? {
+        guard phase == .active, !reachedTarget, let projected = pace?.projected_miles else { return nil }
+        if onPace {
+            let day = pace?.projected_finish.flatMap(Self.dayParser.date(from:)).map(Self.dayLabel.string(from:))
+            return day.map { "On pace to finish by \($0)" } ?? "On pace to finish"
+        }
+        let short = target_miles - Double(projected)
+        return "At this pace: \(CommunityGoalCopy.whole(Double(projected))), \(CommunityGoalCopy.whole(short)) short"
+    }
+
+    /// Fewer than this reads as an empty room, so the line waits.
+    static let walkingTodayMinimum = 3
+
+    /// "214 walked today". Nil until enough people have, so it never looks quiet.
+    var walkingTodayLine: String? {
+        guard phase == .active, let n = walkers_today, n >= Self.walkingTodayMinimum else { return nil }
+        return "\(n.formatted()) walked today"
+    }
+
+    /// How to get there sooner. Nil once it's no longer in anyone's hands.
+    var inviteLine: String? {
+        switch phase {
+        case .upcoming: return "More walkers, more miles. Bring a friend."
+        case .active where !reachedTarget:
+            if !onPace, let needed = pace?.walkers_needed {
+                return needed == 1 ? "1 more walker gets us there" : "\(needed) more walkers get us there"
+            }
+            return "Every new walker gets us there sooner"
+        default: return nil
+        }
+    }
 
     /// The next tier still ahead of someone with this many days.
     func nextReward(days: Int) -> Reward? { rewards.first { !$0.earned && days < $0.days } }

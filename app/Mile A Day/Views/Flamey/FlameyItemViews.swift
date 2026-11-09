@@ -34,6 +34,9 @@ struct FlameyItemArt: View {
     /// The colour he burns in (arms on held items, the aura's figure).
     var color: FlameyItem = .classic
     var locked: Bool = false
+    /// Stand it on his faint outline when it only reads on him. A small tile
+    /// that can't fit him turns this off and shows the item alone.
+    var mannequin: Bool = true
 
     /// A day with no holiday, so the picture is the item and nothing else.
     static let neutralDate: Date = {
@@ -65,6 +68,7 @@ struct FlameyItemArt: View {
         switch item {
         case .victoryBanner: return (0.8, 0.30, -0.62)
         case .goldenWings, .turkeyFeathers: return (0.62, 0, -0.10)
+        case FlameyItem(rawValue: "horizon_wings"): return (0.48, 0, -0.34)
         case .sweatband: return (1.5, 0, 0.02)
         case .laurelWreath: return (1.2, 0, -0.34)
         case .visor, .directorsBeret, .heartBopper: return (1.45, 0, -0.44)
@@ -115,7 +119,7 @@ struct FlameyItemArt: View {
             let one = look([color, item])
             ZStack {
                 FlameyOutfitLayer(look: one, size: size, side: .behind, still: true)
-                if usesMannequin {
+                if usesMannequin && mannequin {
                     FlameyDressedFigure(look: .plain, health: .healthy, size: size, scale: 1)
                         .saturation(0)
                         .opacity(0.16)

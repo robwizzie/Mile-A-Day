@@ -21,6 +21,11 @@ export default function sitemap(): MetadataRoute.Sitemap {
       priority: 0.6,
     },
     {
+      url: `${BASE_URL}/goal`,
+      changeFrequency: "daily",
+      priority: 0.7,
+    },
+    {
       url: `${BASE_URL}/desk`,
       lastModified: "2026-10-10",
       changeFrequency: "monthly",

@@ -1007,6 +1007,16 @@ const EXTRA_BADGES: Array<{
     sortOrder: 902,
   },
   {
+    badgeId: "community_coast_to_coast_perfect",
+    category: "competition",
+    name: "Horizon",
+    description: "Walked all 31 days of Coast to Coast, December 2026.",
+    icon: "sparkles",
+    rarity: "legendary",
+    requirement: null,
+    sortOrder: 903,
+  },
+  {
     badgeId: "referral_buddy",
     category: "competition",
     name: "Trail Buddy",
