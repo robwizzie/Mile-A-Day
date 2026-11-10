@@ -138,6 +138,8 @@ export interface CommentPreview {
   user_id: string;
   username: string | null;
   content: string;
+  /** Sticker comment id, else null (see commentStickers.ts). */
+  sticker_id?: string | null;
 }
 
 /**

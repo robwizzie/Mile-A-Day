@@ -1,5 +1,5 @@
 {
-  "id": "f1be5b55-1c69-4f04-ae39-de78d7f4f333",
+  "id": "ab6f84bb-c897-4c3f-b72b-753528c8170f",
   "prevId": "f2d16e43-a7dd-42f0-a0de-72640ecdd4ef",
   "version": "7",
   "dialect": "postgresql",
@@ -6203,6 +6203,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "sticker_id": {
+          "name": "sticker_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -7819,67 +7825,6 @@
         }
       },
       "isRLSEnabled": false
-    },
-    "public.special_event_push_log": {
-      "name": "special_event_push_log",
-      "schema": "",
-      "columns": {
-        "event_id": {
-          "name": "event_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "kind": {
-          "name": "kind",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "sent_at": {
-          "name": "sent_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "special_event_push_log_user_id_users_user_id_fk": {
-          "name": "special_event_push_log_user_id_users_user_id_fk",
-          "tableFrom": "special_event_push_log",
-          "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "user_id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "special_event_push_log_pkey": {
-          "name": "special_event_push_log_pkey",
-          "columns": [
-            "event_id",
-            "user_id",
-            "kind"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": true
     },
     "public.stealth_windows": {
       "name": "stealth_windows",

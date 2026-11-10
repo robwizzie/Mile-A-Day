@@ -830,6 +830,12 @@ class CelebrationManager: ObservableObject {
     /// reason so two covers can't release each other.
     @Published private(set) var obscuredBy: Set<String> = []
 
+    /// A full-screen cover (the workout tracker, the buddy recap) hides the
+    /// app underneath. Nothing may buzz, pop up or play for a screen the
+    /// user can't see: anything under the cover checks this and waits (or
+    /// stays quiet), and the queue above plays once the cover is gone.
+    var isScreenCovered: Bool { !obscuredBy.isEmpty }
+
     func setObscured(_ reason: String, _ obscured: Bool) {
         if obscured {
             obscuredBy.insert(reason)

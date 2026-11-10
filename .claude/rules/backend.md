@@ -133,6 +133,7 @@ Details: docs/conventions/backend.md § Hypes & Posts
 - Crew session = `CREW_SESSION_SQL`; duel standing via one `standing()`.
 - Crew figures read `CREW_WORKOUT_ID_SQL`; `coauthors[].distance_miles` reads the participant row.
 - `comment_preview` filters `user_blocks` directly (not the `blocked` CTE); the count doesn't.
+- Sticker comments: `post_comments.sticker_id` from the `COMMENT_STICKERS` allowlist (mirrors iOS `FlameyPackSticker`), `content` = `stickerFallbackText` so text-only readers stay true; serve `sticker_id` in `COMMENT_SELECT` and `commentPreviewSql`. Check: `comment-sticker-check`.
 - `postCommentMatchSql` is the only "comments of this post" rule, for threads and every count.
 - Collabs: hypes authorize on `visiblePostAuthors`, file on `posts.user_id`; use `collabActiveSql`; `coauthorOnProfileSql` is grid-only.
 - Every post-shaped read ships `AUTHOR_ROUTE_SQL`, no `is_auto` gate.

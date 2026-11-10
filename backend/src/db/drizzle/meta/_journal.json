@@ -747,8 +747,15 @@
     {
       "idx": 106,
       "version": "7",
-      "when": 1794268984011,
-      "tag": "0106_special_event_push_log",
+      "when": 1794267147165,
+      "tag": "0106_comment_stickers",
+      "breakpoints": true
+    },
+    {
+      "idx": 107,
+      "version": "7",
+      "when": 1794269784592,
+      "tag": "0107_special_event_push_log",
       "breakpoints": true
     }
   ]

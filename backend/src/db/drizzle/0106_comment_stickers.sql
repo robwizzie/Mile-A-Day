@@ -1,0 +1,1 @@
+ALTER TABLE "post_comments" ADD COLUMN "sticker_id" varchar(64);

@@ -912,10 +912,11 @@ export function commentPreviewSql(matchSql: string): string {
 			'comment_id', recent.comment_id,
 			'user_id', recent.user_id,
 			'username', recent.username,
-			'content', recent.content
+			'content', recent.content,
+			'sticker_id', recent.sticker_id
 		) ORDER BY recent.created_at ASC)
 		FROM (
-			SELECT cp.comment_id, cp.user_id, cu2.username, cp.content, cp.created_at
+			SELECT cp.comment_id, cp.user_id, cu2.username, cp.content, cp.sticker_id, cp.created_at
 			FROM post_comments cp
 			JOIN users cu2 ON cu2.user_id = cp.user_id
 			WHERE cp.deleted_at IS NULL

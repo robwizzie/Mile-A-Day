@@ -13,18 +13,23 @@
 //  incline, and the person on the belt is a stranger in a public gym.
 //
 //  Distance contract: the console's total distance is an odometer for ITS
-//  workout, not ours. We only count what the belt moves after we connect
-//  (`segmentMiles`, monotonic), a console reset (new workout on the machine)
-//  rebases instead of going backwards, and a glitchy jump is dropped. The
-//  tracker then folds the segment into the indoor distance via
-//  `WorkoutLocationManager.ingestTreadmillDistance`.
+//  workout. Once the machine is PROVEN the user's (below), the tracker starts
+//  from the console's own time and distance (`TreadmillConsoleSeed`), so the
+//  app and the treadmill read the same; from there the belt's movement
+//  (`segmentMiles`, monotonic) counts on top. Ending the workout on the
+//  console (Stop, a reset, the machine dropping with its belt stopped) ends
+//  the app's workout too (`consoleEndedWorkout`), a glitchy jump is
+//  dropped, and a workout ending marks the console (`TreadmillConsoleMark`)
+//  so the next one on it never re-credits that ground. The tracker folds it
+//  all into the indoor distance via `WorkoutLocationManager`.
 //
 //  Picking the machine: a gym is a wall of identical `LF…` advertisers. The
 //  sheet asks for the phone to be held on the console and auto-connects only
 //  to a machine that is clearly the strongest signal (`autoPickCandidate`);
 //  everything else is a manual pick from the list, nearest first. Signal
-//  strength only NOMINATES a machine: no belt distance counts until the user
-//  presses speed or GO and THAT machine's speed changes
+//  strength only NOMINATES a machine: nothing from it counts (not the belt,
+//  not the console's earlier distance) until the user presses speed or GO
+//  and THAT machine's speed changes
 //  (`TreadmillOwnershipCheck`, phase `.confirming`). No change in 20 s →
 //  `.unconfirmed`, with "Try the next one" moving down the list.
 //
@@ -119,6 +124,72 @@ struct FTMSTreadmillSample: Equatable {
         if has(11) { guard skip(2) else { return nil } }
         if has(12) { guard skip(4) else { return nil } }
         return sample
+    }
+}
+
+/// Fitness Machine Status (0x2ADA) notifications: the machine announcing
+/// what happened to ITS workout. Read-only, like everything here (this is a
+/// notify characteristic, not the Control Point). Pure, so testable.
+enum FTMSMachineStatus: Equatable {
+    case ended
+    case paused
+    case resumed
+
+    /// What a status says about the person's workout on the console (FTMS
+    /// v1.0 §4.17): 0x01 Reset and 0x03 Stopped by Safety Key end it; 0x02
+    /// Stopped or Paused by the User ends it with parameter 0x01 (Stop) and
+    /// pauses it with 0x02 (Pause); 0x04 Started or Resumed by the User.
+    /// Nil for everything else (target changes, etc.).
+    static func parse(_ data: Data) -> FTMSMachineStatus? {
+        let bytes = [UInt8](data)
+        guard let op = bytes.first else { return nil }
+        switch op {
+        case 0x01, 0x03: return .ended
+        case 0x02:
+            guard bytes.count >= 2 else { return nil }
+            switch bytes[1] {
+            case 0x01: return .ended
+            case 0x02: return .paused
+            default: return nil
+            }
+        case 0x04: return .resumed
+        default: return nil
+        }
+    }
+}
+
+/// Pause/resume from the belt itself, for machines that don't send Status
+/// (or as a second witness): the belt standing still for `stoppedFor` is a
+/// pause, moving again after that is a resume. Edges only, so it never
+/// fights the user: resume the app by hand while the belt is stopped and it
+/// stays resumed until the belt moves and stops again. Pure, so testable.
+struct TreadmillBeltWatch: Equatable {
+    enum Edge: Equatable { case stopped, moving }
+
+    /// Belt speed under this is a stopped belt.
+    static let stoppedKmh = 0.1
+    /// How long the belt must stand still: a speed change through zero, or
+    /// one odd packet, is not a pause.
+    static let stoppedFor: TimeInterval = 3
+
+    private var stoppedSince: Date?
+    private var reportedStopped = false
+
+    /// Feed each reading's speed (nil — a split "More Data" half — says
+    /// nothing); returns an edge when one happens.
+    mutating func observe(speedKmh: Double?, at now: Date) -> Edge? {
+        guard let speed = speedKmh else { return nil }
+        if speed < Self.stoppedKmh {
+            let since = stoppedSince ?? now
+            stoppedSince = since
+            guard !reportedStopped, now.timeIntervalSince(since) >= Self.stoppedFor else { return nil }
+            reportedStopped = true
+            return .stopped
+        }
+        stoppedSince = nil
+        guard reportedStopped else { return nil }
+        reportedStopped = false
+        return .moving
     }
 }
 
@@ -224,6 +295,78 @@ struct TreadmillOwnershipCheck: Equatable {
     }
 }
 
+/// Where a machine's console stood when a workout on it ended. The next
+/// workout on the SAME machine, while the console hasn't started a new
+/// workout of its own, starts from here instead of from the console's zero,
+/// so finishing and starting again never credits the same ground twice.
+struct TreadmillConsoleMark: Codable, Equatable {
+    var machine: UUID
+    var totalMeters: Int
+    var elapsedSeconds: Int
+    var at: Date
+}
+
+/// The workout's starting point, read off a PROVEN machine's console: how
+/// long the console's own workout has been running and how far its belt has
+/// gone. The tracker starts its clock and distance there, so the app and the
+/// treadmill read the same and nothing walked before connecting is lost.
+/// Pure, so every rule is testable.
+///
+/// Nil (count from zero, as before) when the console can't give both
+/// numbers, the reading is stale, the numbers aren't a belt's, or the
+/// console's workout began before today's midnight (a day's mile can't hold
+/// yesterday's ground).
+struct TreadmillConsoleSeed: Equatable {
+    /// Console seconds credited to this workout: the start moves back by this.
+    var elapsedSeconds: TimeInterval
+    /// Console distance credited to this workout.
+    var miles: Double
+    var startDate: Date
+
+    /// Longer than any console session we'd trust as one workout.
+    static let maxElapsed: TimeInterval = 4 * 60 * 60
+    /// A mark older than this is from some other day at the gym.
+    static let markLifetime: TimeInterval = 6 * 60 * 60
+
+    static func resolve(
+        totalMeters: Int?,
+        elapsedSeconds: Int?,
+        elapsedReadAt: Date?,
+        machine: UUID,
+        mark: TreadmillConsoleMark?,
+        now: Date,
+        calendar: Calendar = .current
+    ) -> TreadmillConsoleSeed? {
+        guard let totalMeters, let elapsedSeconds, let elapsedReadAt else { return nil }
+        let age = now.timeIntervalSince(elapsedReadAt)
+        guard age >= 0, age <= TreadmillLink.staleAfter else { return nil }
+
+        var meters = totalMeters
+        var seconds = elapsedSeconds
+        // Same machine, console still on the workout the last one ended on
+        // (neither number went backwards): only what came after counts.
+        if let mark, mark.machine == machine,
+           now.timeIntervalSince(mark.at) < markLifetime,
+           totalMeters >= mark.totalMeters, elapsedSeconds >= mark.elapsedSeconds {
+            meters -= mark.totalMeters
+            seconds -= mark.elapsedSeconds
+        }
+        guard seconds > 0, meters >= 0 else { return nil }
+        // Same ceiling the odometer uses for a belt.
+        guard Double(meters) <= TreadmillOdometer.maxMetersPerSecond * Double(seconds) + 5 else { return nil }
+        // The console's clock kept running since that reading.
+        let elapsed = Double(seconds) + age
+        guard elapsed <= maxElapsed else { return nil }
+        let start = now.addingTimeInterval(-elapsed)
+        guard start >= calendar.startOfDay(for: now) else { return nil }
+        return TreadmillConsoleSeed(
+            elapsedSeconds: elapsed,
+            miles: Double(meters) / 1609.344,
+            startDate: start
+        )
+    }
+}
+
 // MARK: - Connection
 
 @Observable
@@ -232,6 +375,8 @@ final class TreadmillLink: NSObject {
 
     static let fitnessMachineService = CBUUID(string: "1826")
     static let treadmillDataCharacteristic = CBUUID(string: "2ACD")
+    /// Optional in FTMS: machines that have it say when their workout ends.
+    static let machineStatusCharacteristic = CBUUID(string: "2ADA")
 
     enum Phase: Equatable {
         case idle
@@ -272,8 +417,11 @@ final class TreadmillLink: NSObject {
     /// Belt distance from earlier stretches of THIS workout (before the data
     /// went quiet and came back). Display only: the tracker owns the total.
     private(set) var bankedMiles: Double = 0
+    /// The console's own distance this workout started from
+    /// (`TreadmillConsoleSeed`). Display only, like `bankedMiles`.
+    private(set) var seededMiles: Double = 0
     /// Belt miles this workout, for the sheet's "From the belt".
-    var beltMiles: Double { bankedMiles + segmentMiles }
+    var beltMiles: Double { seededMiles + bankedMiles + segmentMiles }
     /// Counting, but no reading for `staleAfter`: the tracker is on the
     /// pedometer until data comes back.
     private(set) var isStale = false
@@ -323,11 +471,22 @@ final class TreadmillLink: NSObject {
     @ObservationIgnored private var lastSampleAt: Date?
     @ObservationIgnored private var staleTimer: Timer?
     @ObservationIgnored private var scanStartedAt: Date?
+    /// The console's latest own numbers (its workout, not ours), each with
+    /// when it arrived: a split "More Data" pair can carry them separately.
+    @ObservationIgnored private var consoleTotal: (meters: Int, at: Date)?
+    @ObservationIgnored private var consoleElapsed: (seconds: Int, at: Date)?
+    @ObservationIgnored private var beltWatch = TreadmillBeltWatch()
+
+    private static let consoleMarkKey = "MAD_TreadmillConsoleMarkV1"
 
     /// No reading for this long while counting = stale.
     static let staleAfter: TimeInterval = 10
     /// How long the wizard looks before offering a normal indoor walk.
     static let searchTimeout: TimeInterval = 20
+
+    /// How far a mid-workout console's clock may run ahead of the workout's
+    /// and still count as the same session (connect + press take a while).
+    static let consoleClockSlack: TimeInterval = 30
 
     /// How long the user has to press a speed button.
     static let confirmWindow: TimeInterval = 20
@@ -405,6 +564,7 @@ final class TreadmillLink: NSObject {
         stopStaleWatch()
         resetLiveNumbers()
         bankedMiles = 0
+        seededMiles = 0
         lostDuringWorkout = false
         searchTimedOut = false
         nearby = []
@@ -429,15 +589,62 @@ final class TreadmillLink: NSObject {
         if phase != .scanning { startScanning() }
     }
 
+    /// Where the proven machine's console stands right now, for the tracker
+    /// to start from (`TreadmillConsoleSeed`). Nil unless a machine is
+    /// proven, live (not stale) and sent both its distance and its time.
+    func consoleSeed(now: Date = Date()) -> TreadmillConsoleSeed? {
+        guard isConnected, !isStale, let active else { return nil }
+        return TreadmillConsoleSeed.resolve(
+            totalMeters: consoleTotal?.meters,
+            elapsedSeconds: consoleElapsed?.seconds,
+            elapsedReadAt: consoleElapsed?.at,
+            machine: active.identifier,
+            mark: Self.loadConsoleMark(),
+            now: now
+        )
+    }
+
     /// The indoor workout just started tracking. A machine proven in the
-    /// start wizard (before there was a workout to feed) counts from here.
-    func workoutDidStart() {
+    /// start wizard (before there was a workout to feed) counts from here:
+    /// from the console's own distance when the tracker took `seed` (its
+    /// clock already starts at `seed.startDate`), else from zero.
+    func workoutDidStart(seed: TreadmillConsoleSeed? = nil) {
         guard isConnected else { return }
-        odometer = TreadmillOdometer()
+        primeOdometer()
         segmentMiles = 0
         bankedMiles = 0
+        seededMiles = seed?.miles ?? 0
         isStale = false
-        WorkoutLocationManager.shared.beginTreadmillSegment()
+        WorkoutLocationManager.shared.beginTreadmillSegment(consoleMiles: seed?.miles)
+    }
+
+    /// The workout using this machine is ending: remember where its console
+    /// stands, so a next workout on it doesn't re-credit the same ground.
+    func workoutDidEnd() {
+        guard isConnected, let active, let total = consoleTotal, let elapsed = consoleElapsed else { return }
+        let mark = TreadmillConsoleMark(
+            machine: active.identifier,
+            totalMeters: total.meters,
+            elapsedSeconds: elapsed.seconds,
+            at: Date()
+        )
+        if let data = try? JSONEncoder().encode(mark) {
+            UserDefaults.standard.set(data, forKey: Self.consoleMarkKey)
+        }
+    }
+
+    private static func loadConsoleMark() -> TreadmillConsoleMark? {
+        guard let data = UserDefaults.standard.data(forKey: consoleMarkKey) else { return nil }
+        return try? JSONDecoder().decode(TreadmillConsoleMark.self, from: data)
+    }
+
+    /// A fresh odometer whose baseline is the console's latest total, so the
+    /// belt's very next metre counts (an unprimed one waits a reading).
+    private func primeOdometer() {
+        odometer = TreadmillOdometer()
+        if let consoleTotal {
+            odometer.ingest(totalMeters: consoleTotal.meters, speedKmh: nil, at: consoleTotal.at)
+        }
     }
 
     /// Start the speed-press check over on the machine already connected.
@@ -511,12 +718,26 @@ final class TreadmillLink: NSObject {
 
     private func confirmOwnership(name: String) {
         confirmTimeout?.cancel()
-        // Distance counts from HERE: a fresh odometer, so the belt ground
-        // covered before the proof is never credited.
-        odometer = TreadmillOdometer()
+        // The belt counts from here, on a fresh odometer. Proven in the start
+        // wizard (no workout yet), `workoutDidStart` takes it from there.
+        primeOdometer()
         segmentMiles = 0
-        WorkoutLocationManager.shared.beginTreadmillSegment()
         phase = .connected(name: name)
+        let tracker = WorkoutLocationManager.shared
+        // Proven mid-workout: the console's distance counts too, but only
+        // when its whole session fits inside this workout's clock. Then all
+        // of it is this workout's ground and the pace stays true; a console
+        // that has been going longer (started before the workout, or kept
+        // running through a pause) falls back to counting from here.
+        var consoleMiles: Double?
+        if tracker.acceptsTreadmill, let seed = consoleSeed(),
+           seed.elapsedSeconds <= tracker.workoutElapsedSeconds + Self.consoleClockSlack {
+            consoleMiles = seed.miles
+            // The console's figure already covers the earlier stretches.
+            seededMiles = seed.miles
+            bankedMiles = 0
+        }
+        tracker.beginTreadmillSegment(consoleMiles: consoleMiles)
         startStaleWatch()
     }
 
@@ -565,6 +786,9 @@ final class TreadmillLink: NSObject {
         segmentMiles = 0
         odometer = TreadmillOdometer()
         lastSampleAt = nil
+        consoleTotal = nil
+        consoleElapsed = nil
+        beltWatch = TreadmillBeltWatch()
     }
 
     private func noteAdvertisement(_ peripheral: CBPeripheral, advertisement: [String: Any], rssi: Int) {
@@ -603,6 +827,15 @@ final class TreadmillLink: NSObject {
         // showing the last known values rather than blanking them.
         if let speed = sample.speedKmh { speedKmh = speed }
         if let incline = sample.inclinePercent { inclinePercent = incline }
+        // The console's clock going BACK means its workout ended and a new
+        // one started (it rolls to zero at the end, or GO started over).
+        let consoleRestarted: Bool = {
+            guard let new = sample.elapsedSeconds, let old = consoleElapsed?.seconds else { return false }
+            return new + 2 < old
+        }()
+        if let meters = sample.totalDistanceMeters { consoleTotal = (meters: meters, at: Date()) }
+        if let seconds = sample.elapsedSeconds { consoleElapsed = (seconds: seconds, at: Date()) }
+        if consoleRestarted { consoleEndedWorkout() }
         switch phase {
         case .confirming(let name):
             guard ownership.observe(speedKmh: sample.speedKmh) else { return }
@@ -610,6 +843,11 @@ final class TreadmillLink: NSObject {
             // Fall through so this reading becomes the odometer's baseline.
         case .connected:
             if isStale { resumeFromStale() }
+            switch beltWatch.observe(speedKmh: sample.speedKmh, at: Date()) {
+            case .stopped: consolePaused()
+            case .moving: consoleResumed()
+            case nil: break
+            }
         default:
             return
         }
@@ -622,6 +860,28 @@ final class TreadmillLink: NSObject {
         guard miles > segmentMiles else { return }
         segmentMiles = miles
         WorkoutLocationManager.shared.ingestTreadmillDistance(miles)
+    }
+
+    /// The person ended their workout on the console (`FTMSMachineStatus`,
+    /// a console reset, or the machine going away with the belt stopped):
+    /// end the app's workout with it, frozen at this moment, so ground walked
+    /// after stepping off (to the locker room, on the phone's pedometer)
+    /// never counts. Only for a PROVEN machine feeding a live workout.
+    private func consoleEndedWorkout() {
+        guard isConnected, WorkoutLocationManager.shared.acceptsTreadmill else { return }
+        WorkoutLocationManager.shared.treadmillDidEndWorkout()
+    }
+
+    /// The belt stopped / the console paused: pause the app's workout with
+    /// it. Resumes only a pause the treadmill made (`treadmillDidResume`).
+    private func consolePaused() {
+        guard isConnected, WorkoutLocationManager.shared.acceptsTreadmill else { return }
+        WorkoutLocationManager.shared.treadmillDidPause()
+    }
+
+    private func consoleResumed() {
+        guard isConnected, WorkoutLocationManager.shared.acceptsTreadmill else { return }
+        WorkoutLocationManager.shared.treadmillDidResume()
     }
 
     private func connectionLost(_ message: String?) {
@@ -686,6 +946,10 @@ extension TreadmillLink: CBCentralManagerDelegate, CBPeripheralDelegate {
         guard peripheral.identifier == active?.identifier else { return }
         // A disconnect we asked for clears `active` first, so landing here
         // means the machine went away (powered down, walked out of range).
+        // One that drops with its belt STOPPED was switched off or ended its
+        // session; one that drops mid-stride is a flaky link, and the
+        // pedometer carries on.
+        if let speed = speedKmh, speed < TreadmillBeltWatch.stoppedKmh { consoleEndedWorkout() }
         connectionLost("Lost the treadmill. Your distance so far is kept.")
     }
 
@@ -695,7 +959,8 @@ extension TreadmillLink: CBCentralManagerDelegate, CBPeripheralDelegate {
             connectionLost("That machine doesn't share treadmill data.")
             return
         }
-        peripheral.discoverCharacteristics([Self.treadmillDataCharacteristic], for: service)
+        peripheral.discoverCharacteristics(
+            [Self.treadmillDataCharacteristic, Self.machineStatusCharacteristic], for: service)
     }
 
     func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error: Error?) {
@@ -705,6 +970,11 @@ extension TreadmillLink: CBCentralManagerDelegate, CBPeripheralDelegate {
             return
         }
         peripheral.setNotifyValue(true, for: characteristic)
+        // Optional: a machine without it still works, it just can't tell us
+        // its workout ended (the console-reset / drop checks still can).
+        if let status = service.characteristics?.first(where: { $0.uuid == Self.machineStatusCharacteristic }) {
+            peripheral.setNotifyValue(true, for: status)
+        }
     }
 
     func peripheral(_ peripheral: CBPeripheral, didUpdateNotificationStateFor characteristic: CBCharacteristic, error: Error?) {
@@ -720,6 +990,16 @@ extension TreadmillLink: CBCentralManagerDelegate, CBPeripheralDelegate {
     }
 
     func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
+        if characteristic.uuid == Self.machineStatusCharacteristic {
+            guard error == nil, let data = characteristic.value else { return }
+            switch FTMSMachineStatus.parse(data) {
+            case .ended: consoleEndedWorkout()
+            case .paused: consolePaused()
+            case .resumed: consoleResumed()
+            case nil: break
+            }
+            return
+        }
         guard characteristic.uuid == Self.treadmillDataCharacteristic,
               error == nil, let data = characteristic.value,
               let sample = FTMSTreadmillSample.parse(data) else { return }
