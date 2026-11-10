@@ -11,8 +11,9 @@ import {
   deskInterestController,
   getShowcaseController,
   getPublicCommunityGoalController,
+  webEventController,
 } from "../controllers/publicController.js";
-import { deskInterestLimiter, publicDeskLimiter } from "../middleware/rateLimit.js";
+import { deskInterestLimiter, publicDeskLimiter, webEventsLimiter } from "../middleware/rateLimit.js";
 
 const router = Router();
 
@@ -50,6 +51,8 @@ router.get("/showcase", publicDeskLimiter, getShowcaseController);
 // The community goal page on the site. Totals and the route only.
 router.get("/community-goal", publicDeskLimiter, getPublicCommunityGoalController);
 router.post("/desk-interest", deskInterestLimiter, deskInterestController);
+// The site's own analytics (page views + clicks). Anonymous; see webAnalyticsService.
+router.post("/web-events", webEventsLimiter, webEventController);
 
 // Unknown /public/* paths should 404 here, not fall through to the auth
 // middleware (which confusingly answers "access token required").

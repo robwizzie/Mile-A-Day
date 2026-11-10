@@ -153,7 +153,7 @@ function pathError(d: unknown): string | null {
   return null;
 }
 function colorError(c: unknown): string | null {
-  if (typeof c === "string") return HEX.test(c) ? null : `colour ${JSON.stringify(c)} not #RRGGBBAA`;
+  if (typeof c === "string") return HEX.test(c) ? null : `color ${JSON.stringify(c)} not #RRGGBBAA`;
   if (c && typeof c === "object" && !Array.isArray(c) && "tok" in c) {
     const t = c as Record<string, unknown>;
     if (typeof t.tok !== "string" || !t.tok) return "token without tok";
@@ -161,7 +161,7 @@ function colorError(c: unknown): string | null {
     if ("fb" in t && !(typeof t.fb === "string" && HEX.test(t.fb))) return "token fb not #RRGGBBAA";
     return null;
   }
-  return "bad colour";
+  return "bad color";
 }
 function paintError(p: unknown): string | null {
   if (p === undefined) return "paint missing";
@@ -169,12 +169,12 @@ function paintError(p: unknown): string | null {
   if (!p || typeof p !== "object" || Array.isArray(p)) return "bad paint";
   const o = p as Record<string, unknown>;
   const kind = (["lin", "rad", "conic"] as const).filter((k) => k in o);
-  if (kind.length !== 1) return "paint is not a colour, token or one gradient";
+  if (kind.length !== 1) return "paint is not a color, token or one gradient";
   const n = { lin: 4, rad: 4, conic: 3 }[kind[0]];
   if (!isNumArr(o[kind[0]], n)) return `${kind[0]} needs ${n} numbers`;
   if (!Array.isArray(o.stops) || o.stops.length < 1) return `${kind[0]} gradient without stops`;
   for (const s of o.stops) {
-    if (!Array.isArray(s) || s.length !== 2 || !isNum(s[0])) return "stop must be [t, colour]";
+    if (!Array.isArray(s) || s.length !== 2 || !isNum(s[0])) return "stop must be [t, color]";
     const e = colorError(s[1]);
     if (e) return `stop ${e}`;
   }
@@ -315,12 +315,12 @@ export function validateSkin(s: Skin, existing: Skin[]): { errors: Problem[]; wa
 export function templateSvg(plainDataUrl: string): string {
   const A = ANCHORS;
   const f = (n: number) => String(Math.round(n * 1000) / 1000);
-  const hLine = (y: number, label: string, colour: string) =>
-    `    <line x1="-1.5" y1="${f(y)}" x2="1.5" y2="${f(y)}" stroke="${colour}" stroke-width="0.004" stroke-dasharray="0.03 0.02"/>\n` +
-    `    <text x="-1.47" y="${f(y - 0.012)}" fill="${colour}" font-size="0.045" font-family="Helvetica, Arial, sans-serif">${label} (y ${f(y)})</text>`;
-  const vLine = (x: number, label: string, colour: string) =>
-    `    <line x1="${f(x)}" y1="-1.5" x2="${f(x)}" y2="1.5" stroke="${colour}" stroke-width="0.004" stroke-dasharray="0.03 0.02"/>\n` +
-    `    <text x="${f(x + 0.012)}" y="1.46" fill="${colour}" font-size="0.04" font-family="Helvetica, Arial, sans-serif">${label} (x ${f(x)})</text>`;
+  const hLine = (y: number, label: string, color: string) =>
+    `    <line x1="-1.5" y1="${f(y)}" x2="1.5" y2="${f(y)}" stroke="${color}" stroke-width="0.004" stroke-dasharray="0.03 0.02"/>\n` +
+    `    <text x="-1.47" y="${f(y - 0.012)}" fill="${color}" font-size="0.045" font-family="Helvetica, Arial, sans-serif">${label} (y ${f(y)})</text>`;
+  const vLine = (x: number, label: string, color: string) =>
+    `    <line x1="${f(x)}" y1="-1.5" x2="${f(x)}" y2="1.5" stroke="${color}" stroke-width="0.004" stroke-dasharray="0.03 0.02"/>\n` +
+    `    <text x="${f(x + 0.012)}" y="1.46" fill="${color}" font-size="0.04" font-family="Helvetica, Arial, sans-serif">${label} (x ${f(x)})</text>`;
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!--
   Mile A Day - Flamey skin template (format 1). One unit = Flamey's body size.
@@ -328,7 +328,7 @@ export function templateSvg(plainDataUrl: string): string {
   Draw your item in the "art" layer, in place on him, then upload this file
   in the Skin Builder (/admin/skins). The "reference" and "guides" layers are
   ignored on upload. Keep the viewBox as it is.
-  Paths, rects, circles, ellipses, lines, polylines, polygons, solid colours,
+  Paths, rects, circles, ellipses, lines, polylines, polygons, solid colors,
   linear/radial gradients, transforms and simple clip-paths are converted.
   Text, masks, filters and patterns are not: outline text before exporting.
   Companions: draw centred on x = 0 standing on the floor; the app moves them

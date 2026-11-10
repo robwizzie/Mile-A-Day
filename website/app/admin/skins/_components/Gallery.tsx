@@ -11,7 +11,7 @@ import { EffectPlaceholder, isEffectSkin } from "./SurfacePreview";
 import { go } from "./SkinBuilder";
 
 export const SLOT_LABELS: Record<string, string> = {
-  color: "Colours",
+  color: "Colors",
   head: "Head",
   eyes: "Eyes",
   chest: "Chest",
@@ -32,15 +32,15 @@ export function unlockText(u: Skin["unlock"]): string {
   return `Month ${u.month}`;
 }
 
-/** A colour skin's palette as swatches (the body itself is drawn by app code). */
+/** A color skin's palette as swatches (the body itself is drawn by app code). */
 export function PaletteSwatches({ palette, size = 14 }: { palette?: Record<string, unknown>; size?: number }) {
   if (!palette) return null;
   const rows: [string, string[]][] = [];
   for (const k of ["outer", "inner", "core", "glow", "rim", "eye"]) {
     const v = palette[k];
     const list = Array.isArray(v) ? v : typeof v === "string" ? [v] : [];
-    const colours = list.filter((c): c is string => typeof c === "string" && c.startsWith("#"));
-    if (colours.length) rows.push([k, colours]);
+    const colors = list.filter((c): c is string => typeof c === "string" && c.startsWith("#"));
+    if (colors.length) rows.push([k, colors]);
   }
   return (
     <div className="flex flex-wrap gap-x-2.5 gap-y-1">
@@ -69,7 +69,7 @@ function Tile({ skin }: { skin: Skin }) {
   const box = 160;
   // Crop centred a little above his middle: hats rise, nothing hangs below the floor.
   const cy = -0.15;
-  const isColour = skin.slot === "color";
+  const isColor = skin.slot === "color";
   return (
     <button onClick={() => go(`skin/${skin.id}`)} className={`${CARD_INTERACTIVE} flex flex-col items-center p-3 text-left`}>
       {isEffectSkin(skin) ? (
@@ -84,7 +84,7 @@ function Tile({ skin }: { skin: Skin }) {
       <div className="mt-2 w-full min-w-0">
         <div className="truncate text-[13px] font-bold text-white/90">{skin.name}</div>
         <div className="truncate font-mono text-[11px] text-white/40">{skin.id}</div>
-        {isColour && (
+        {isColor && (
           <div className="mt-1.5">
             <PaletteSwatches palette={skin.palette} size={10} />
           </div>
@@ -125,7 +125,7 @@ export function Gallery({ skins }: { skins: Skin[] }) {
           title={`${SLOT_LABELS[g.slot]} (${g.skins.length})`}
           hint={
             g.slot === "color"
-              ? "A colour recolours Flamey's body, which the app draws itself: shown here as its palette, plus its crown layer if it has one."
+              ? "A color recolors Flamey's whole body: shown here drawn in its palette, the way the app draws him, with its crown if it has one."
               : g.slot === "aura" || g.slot === "bubble"
                 ? "Built-in effects drawn by app code; the skin file only names them."
                 : undefined

@@ -3,6 +3,7 @@ import { DM_Sans, Bebas_Neue } from 'next/font/google'
 import { Analytics } from '@vercel/analytics/next'
 import './globals.css'
 import { ogVideos } from './_og/video/meta'
+import { SiteTracker } from '@/components/site-tracker'
 
 const dmSans = DM_Sans({
   subsets: ['latin'],
@@ -109,6 +110,7 @@ export default function RootLayout({
       <body className="font-sans antialiased bg-[#0a0a0a] text-[#f5f5f5]">
         {children}
         <Analytics />
+        <SiteTracker />
       </body>
     </html>
   )

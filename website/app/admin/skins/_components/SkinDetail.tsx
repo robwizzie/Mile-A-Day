@@ -108,7 +108,7 @@ export function SkinFacts({ skin }: { skin: Skin }) {
         )}
       </Card>
       {skin.palette && (
-        <Card title="Palette" className="lg:col-span-2" hint="Colour skins recolour Flamey's body; the app draws it from these.">
+        <Card title="Palette" className="lg:col-span-2" hint="Color skins recolor Flamey's body; the app draws him from these.">
           <PaletteSwatches palette={skin.palette} size={20} />
           <div className="mt-4">
             <Json v={skin.palette} />
@@ -152,7 +152,7 @@ export function SkinDetail({ skin }: { skin: Skin }) {
       <Section title="Surfaces" hint="Worn alone on each surface, composed the way the app does: behind layers, Flamey, front layers.">
         {skin.slot === "color" && (
           <p className="-mt-1 text-[12.5px] text-white/45">
-            The body colour is drawn by the app, so Flamey is shown in his plain colours; only this skin&apos;s own layers are drawn.
+            The app draws a color from code, so these previews draw his body the same way, in this palette.
           </p>
         )}
         <SurfaceRow skin={skin} still={still} />

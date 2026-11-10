@@ -4190,3 +4190,33 @@ export const appleTokenRevocations = pgTable(
   },
   (table) => [index("idx_apple_token_revocations_due").on(table.nextAttemptAt)],
 ).enableRLS();
+
+// The marketing site's own analytics (mileaday.run): one row per page view or
+// tracked click, written by POST /public/web-events and read only by the
+// admin Website tab (adminWebService). Anonymous by construction: no cookie,
+// no user id, no IP. `visitor` is a hash of (IP, user agent, a salt that
+// changes every UTC day), so a person is one visitor per day and can't be
+// followed across days or tied back to an address.
+export const webEvents = pgTable(
+  "web_events",
+  {
+    id: bigserial({ mode: "number" }).primaryKey().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+    kind: varchar({ length: 8 }).notNull(),
+    path: varchar({ length: 200 }).notNull(),
+    target: varchar({ length: 80 }),
+    referrerHost: varchar("referrer_host", { length: 100 }),
+    utmSource: varchar("utm_source", { length: 60 }),
+    utmMedium: varchar("utm_medium", { length: 60 }),
+    utmCampaign: varchar("utm_campaign", { length: 80 }),
+    visitor: varchar({ length: 24 }).notNull(),
+    device: varchar({ length: 8 }),
+    country: varchar({ length: 2 }),
+  },
+  (table) => [
+    index("idx_web_events_created_at").on(table.createdAt),
+    index("idx_web_events_kind_created_at").on(table.kind, table.createdAt),
+  ],
+).enableRLS();

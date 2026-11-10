@@ -14,6 +14,8 @@ import {
   cleanInterestPrice,
   normalizeInterestEmail,
 } from "../services/deskInterestService.js";
+import { countryOf, recordWebEvent } from "../services/webAnalyticsService.js";
+import { clientIp } from "../middleware/rateLimit.js";
 
 /** Global community counters for the marketing site. Aggregates only — the
  *  service layer is the gate for what may ever appear in this payload. */
@@ -120,5 +122,21 @@ export async function getShowcaseController(_req: Request, res: Response) {
   } catch (error) {
     console.error("Failed to load showcase photos:", error);
     res.json({ photos: [] });
+  }
+}
+
+/** POST /public/web-events: one page view or click from mileaday.run. Always
+ *  204 (the tracker never waits on, retries or shows anything); bots and
+ *  malformed events are dropped by recordWebEvent. */
+export async function webEventController(req: Request, res: Response) {
+  res.status(204).end();
+  try {
+    await recordWebEvent(req.body ?? {}, {
+      ip: clientIp(req),
+      userAgent: req.headers["user-agent"],
+      country: countryOf(req.headers["cf-ipcountry"]),
+    });
+  } catch (error) {
+    console.error("Failed to record web event:", error);
   }
 }
