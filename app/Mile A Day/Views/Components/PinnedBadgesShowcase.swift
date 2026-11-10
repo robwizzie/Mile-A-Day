@@ -369,6 +369,9 @@ func iconName(for badge: Badge) -> String {
     if let holiday = HolidayKey(badgeId: badge.id) {
         return holiday.medalIcon
     }
+    if badge.id.starts(with: "event_champ_5k") {
+        return "figure.boxing"
+    }
     if badge.id.starts(with: "streak_") || badge.id.starts(with: "consistency_") {
         return "flame.fill"
     } else if badge.id.starts(with: "miles_") {

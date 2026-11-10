@@ -327,10 +327,9 @@ struct SpecialEventView: View {
                         }
                         SpecialEventRewardTile(title: "Champ Medal", rarity: "Legendary",
                                                color: Color(red: 1, green: 0.72, blue: 0.29), earned: event.earned) {
-                            Image(systemName: "medal.fill")
-                                .font(.system(size: 30, weight: .bold))
-                                .foregroundStyle(LinearGradient(colors: [Color(red: 1, green: 0.88, blue: 0.5), Color(red: 0.9, green: 0.6, blue: 0.1)],
-                                                                startPoint: .top, endPoint: .bottom))
+                            // The real medal, so the prize looks like what lands on the shelf.
+                            MedalView(badge: Badge(id: event.badge_id, name: "Champ Medal", description: ""),
+                                      size: 54, showShimmer: true)
                         }
                     }
 
