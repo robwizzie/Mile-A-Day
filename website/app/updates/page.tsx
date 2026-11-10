@@ -10,6 +10,8 @@ import {
   type Release,
 } from "@/lib/releases";
 import { ShowcaseCarousel, type ShowcaseSlide } from "@/components/showcase-carousel";
+import { ReleaseFeatureList } from "@/components/release-feature-list";
+import { AppStoreButton } from "@/components/app-store-button";
 import { APP_STORE_URL, SUPPORT_EMAIL, SUPPORT_MAILTO } from "@/lib/site";
 import { ogVideos } from "../_og/video/meta";
 
@@ -38,63 +40,63 @@ export const metadata: Metadata = {
   },
 };
 
-const APPLE_LOGO =
-  "M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z";
-
 export default function UpdatesPage() {
   return (
     <main className="relative min-h-screen overflow-x-hidden bg-[#0e0809]">
       <Navbar />
 
+      {/* The hero's red: the newest release, then the button */}
       <header
-        className="relative px-6 pb-14 pt-36"
+        className="relative overflow-hidden px-6 pb-16 pt-36 text-white"
+        style={{ background: "linear-gradient(180deg, #ec3047 0%, #dc253b 100%)" }}
       >
-        <div className="mx-auto max-w-6xl">
-          <span className="mb-4 inline-block text-[13px] font-semibold uppercase tracking-[0.18em] text-[#ff5a6e]">
-            Release notes
-          </span>
-          <h1 className="font-heading text-[clamp(56px,10vw,120px)] leading-[0.9] tracking-[-2px] text-[#f5f5f5]">
-            What&apos;s new
-          </h1>
-          <p className="mt-5 max-w-xl text-lg leading-relaxed text-[#a0a0a0]">
-            Every Mile A Day update for iPhone and Apple Watch, newest first.
-          </p>
-
-          <div className="glass-card-highlight mt-10 flex flex-col gap-5 rounded-2xl p-6 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-widest text-[#ff4d7d]">
-                Current version
-              </p>
-              <p className="mt-1 text-[#f5f5f5]">
-                <span className="font-heading text-[40px] leading-none">
-                  {CURRENT_RELEASE.version}
-                </span>
-                <span className="mt-1 block text-sm text-[#a0a0a0] sm:ml-3 sm:mt-0 sm:inline">
-                  {CURRENT_RELEASE.date} · {CURRENT_RELEASE.headline}
-                </span>
-              </p>
-            </div>
-            <a
-              href={APP_STORE_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="glass-button inline-flex shrink-0 items-center justify-center gap-2.5 rounded-full px-6 py-3 text-sm font-semibold text-white"
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute bottom-[-30%] right-[-8%] h-[150%] w-[55%] opacity-[0.09]"
+          style={{
+            background:
+              "url(/images/app-store/flamey-silhouette.svg) no-repeat bottom center / contain",
+          }}
+        />
+        <div className="relative mx-auto grid max-w-6xl items-end gap-10 md:grid-cols-[minmax(0,1fr)_auto]">
+          <div>
+            <p className="mad-rise mb-4 text-[13px] font-semibold uppercase tracking-[0.18em] text-white/85">
+              Release notes
+            </p>
+            <h1
+              className="mad-rise font-heading text-[clamp(56px,10vw,120px)] leading-[0.9]"
+              style={{ "--d": "80ms" } as React.CSSProperties}
             >
-              <svg
-                className="h-4 w-4"
-                viewBox="0 0 24 24"
-                fill="currentColor"
-                aria-hidden
-              >
-                <path d={APPLE_LOGO} />
-              </svg>
-              Get it on the App Store
-            </a>
+              What&apos;s new.
+            </h1>
+            <p
+              className="mad-rise mt-5 max-w-xl text-[18px] leading-relaxed text-white/90"
+              style={{ "--d": "160ms" } as React.CSSProperties}
+            >
+              Every Mile A Day update for iPhone and Apple Watch, newest first.
+            </p>
+          </div>
+          <div
+            className="mad-rise md:text-right"
+            style={{ "--d": "240ms" } as React.CSSProperties}
+          >
+            <p className="text-[13px] font-semibold uppercase tracking-[0.18em] text-white/85">
+              Now on
+            </p>
+            <p className="font-heading text-[clamp(64px,9vw,104px)] leading-none">
+              {CURRENT_RELEASE.version}
+            </p>
+            <p className="mt-2 text-[15px] font-semibold text-white/90">
+              {CURRENT_RELEASE.date} · {CURRENT_RELEASE.headline}
+            </p>
+            <div className="mt-5 flex md:justify-end">
+              <AppStoreButton />
+            </div>
           </div>
         </div>
       </header>
 
-      <div className="px-6 pb-24">
+      <div className="px-6 pb-24 pt-16">
         {/* minmax(0,1fr) on phones too: an `auto` column takes the min-content
             width of what's inside it, and a carousel's track is every slide
             side by side, so each release card went 1090px wide and was clipped. */}
@@ -104,7 +106,7 @@ export default function UpdatesPage() {
             aria-label="Versions"
             className="lg:sticky lg:top-28 lg:self-start"
           >
-            <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-[#707070]">
+            <p className="mb-3 text-[13px] font-semibold uppercase tracking-[0.18em] text-white/50">
               All versions
             </p>
             <ul className="flex flex-wrap gap-2 lg:flex-col lg:gap-1">
@@ -112,14 +114,14 @@ export default function UpdatesPage() {
                 <li key={r.version}>
                   <a
                     href={`#${releaseAnchor(r.version)}`}
-                    className="flex items-center gap-3 rounded-xl border border-white/[0.06] px-3 py-2 transition-colors hover:border-white/15 hover:bg-white/[0.03] lg:border-transparent"
+                    className="flex items-center gap-3 rounded-full bg-white/[0.04] px-4 py-2 transition-colors hover:bg-white/[0.08] lg:bg-transparent"
                   >
-                    <span className="font-heading text-[20px] leading-none text-[#f5f5f5]">
+                    <span className="font-heading text-[20px] leading-none text-white">
                       {r.version}
                     </span>
-                    <span className="whitespace-nowrap text-xs text-[#a0a0a0]">{r.date}</span>
+                    <span className="whitespace-nowrap text-xs text-white/50">{r.date}</span>
                     {i === 0 && (
-                      <span className="rounded-full bg-[#c72554]/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-[#ff4d7d]">
+                      <span className="rounded-full bg-[#ec3047] px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white">
                         Current
                       </span>
                     )}
@@ -128,13 +130,13 @@ export default function UpdatesPage() {
               ))}
             </ul>
 
-            <div className="mt-8 hidden rounded-2xl border border-white/[0.06] p-4 lg:block">
-              <p className="text-sm font-semibold text-[#f5f5f5]">
+            <div className="mt-8 hidden rounded-3xl bg-white/[0.04] p-5 lg:block">
+              <p className="text-sm font-semibold text-white">
                 Something not working?
               </p>
               <a
                 href={SUPPORT_MAILTO}
-                className="mt-2 inline-flex items-center gap-1.5 text-sm font-semibold text-[#ff4d7d] hover:underline"
+                className="mt-2 inline-flex items-center gap-1.5 text-sm font-semibold text-white underline decoration-white/30 underline-offset-4 hover:decoration-white"
               >
                 <Mail className="h-4 w-4" />
                 {SUPPORT_EMAIL}
@@ -142,7 +144,7 @@ export default function UpdatesPage() {
             </div>
           </nav>
 
-          <div className="relative space-y-8">
+          <div className="relative">
             {RELEASES.map((release, i) => (
               <ReleaseEntry
                 key={release.version}
@@ -178,58 +180,38 @@ function ReleaseEntry({
   return (
     <article
       id={releaseAnchor(release.version)}
-      className={`scroll-mt-28 rounded-3xl p-6 sm:p-8 ${current ? "glass-card" : "border border-white/[0.06]"}`}
+      className="relative scroll-mt-28 border-l border-white/10 pb-16 pl-7 last:pb-0 sm:pl-10"
     >
-      <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
-        <h2 className="font-heading text-[44px] leading-none text-[#f5f5f5]">
-          {release.version}
-        </h2>
-        <span className="text-sm font-medium text-[#a0a0a0]">
-          {release.date}
-        </span>
-        {current && (
-          <span className="rounded-full bg-[#c72554] px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wider text-white">
-            Latest
-          </span>
-        )}
+      {/* The timeline's dot for this release */}
+      <span
+        aria-hidden="true"
+        className={`absolute -left-[7px] top-3 h-[13px] w-[13px] rounded-full ${
+          current ? "bg-[#ec3047] ring-4 ring-[#ec3047]/25" : "bg-white/30"
+        }`}
+      />
+      <div data-reveal="">
+        <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+          <h2 className="font-heading text-[48px] leading-none text-white">{release.version}</h2>
+          <span className="text-sm font-medium text-white/50">{release.date}</span>
+          {current && (
+            <span className="rounded-full bg-[#ec3047] px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wider text-white">
+              Latest
+            </span>
+          )}
+        </div>
+        <p className="mt-3 text-[22px] font-semibold leading-snug text-white">{release.headline}</p>
+        <p className="mt-2 max-w-2xl text-[16px] leading-relaxed text-white/70">{release.summary}</p>
       </div>
-      <p className="mt-3 text-xl font-semibold text-[#f5f5f5]">
-        {release.headline}
-      </p>
-      <p className="mt-1.5 max-w-2xl text-[15px] leading-relaxed text-[#a0a0a0]">
-        {release.summary}
-      </p>
 
       {slides.length > 0 && (
-        <div className="mt-6">
+        <div className="mt-8" data-reveal="">
           <ShowcaseCarousel slides={slides} label={`${release.version} screenshots`} />
         </div>
       )}
 
-      <ul className="mt-7 grid gap-x-8 gap-y-5 sm:grid-cols-2">
-        {release.features.map((f) => (
-          <li key={f.title} className="flex items-start gap-3.5">
-            <span
-              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl"
-              style={{ background: `${f.color}1f` }}
-            >
-              <f.icon
-                className="h-5 w-5"
-                style={{ color: f.color }}
-                aria-hidden
-              />
-            </span>
-            <span className="min-w-0">
-              <span className="block text-[15px] font-semibold text-[#f5f5f5]">
-                {f.title}
-              </span>
-              <span className="mt-0.5 block text-sm leading-relaxed text-[#a0a0a0]">
-                {f.desc}
-              </span>
-            </span>
-          </li>
-        ))}
-      </ul>
+      <div className="mt-8">
+        <ReleaseFeatureList features={release.features} />
+      </div>
     </article>
   );
 }

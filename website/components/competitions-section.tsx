@@ -1,3 +1,4 @@
+import type { CSSProperties } from "react";
 import { PanelBand } from "./feature-panels";
 
 // The five modes, named and described as the app's CompetitionType does
@@ -54,8 +55,13 @@ export function CompetitionsSection() {
       }}
     >
       <dl className="mt-8 max-w-lg divide-y divide-white/20 border-y border-white/20">
-        {modes.map((mode) => (
-          <div key={mode.name} className="py-3.5">
+        {modes.map((mode, i) => (
+          <div
+            key={mode.name}
+            data-reveal=""
+            style={{ "--d": `${200 + i * 80}ms` } as CSSProperties}
+            className="py-3.5"
+          >
             <dt className="text-[16px] font-semibold">
               {mode.name}
               <span className="font-normal text-white/80">

@@ -23,6 +23,7 @@ export function SectionHeader({
   const centered = align === "center";
   return (
     <div
+      data-reveal=""
       className={`${centered ? "mx-auto text-center" : ""} max-w-3xl ${className}`}
     >
       <p

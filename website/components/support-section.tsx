@@ -44,7 +44,9 @@ export function SupportSection() {
 
           <a
             href={SUPPORT_MAILTO}
-            className="group mt-8 flex max-w-md items-center gap-4 rounded-3xl bg-white/[0.05] p-5 transition-colors hover:bg-white/[0.08]"
+            data-reveal=""
+            style={{ "--d": "120ms" } as React.CSSProperties}
+            className="lift group mt-8 flex max-w-md items-center gap-4 rounded-3xl bg-white/[0.05] p-5 hover:bg-white/[0.08]"
           >
             <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-[#ec3047]">
               <Mail className="h-5 w-5 text-white" aria-hidden="true" />
@@ -69,7 +71,7 @@ export function SupportSection() {
 
         <div>
           <h3 className="sr-only">Frequently asked questions</h3>
-          <div className="divide-y divide-white/10 border-y border-white/10">
+          <div data-reveal="" style={{ "--d": "150ms" } as React.CSSProperties} className="divide-y divide-white/10 border-y border-white/10">
             {FAQ.map((item) => (
               <details
                 key={item.q}

@@ -55,7 +55,7 @@ export function StorySection() {
               </>
             }
           />
-          <p className="mt-6 text-[17px] leading-[1.8] text-[#4a3a3d]">
+          <p data-reveal="" style={{ "--d": "80ms" } as React.CSSProperties} className="mt-6 text-[17px] leading-[1.8] text-[#4a3a3d]">
             <span className="font-semibold text-[#1d1214]">Rob Wiscount</span>{" "}
             and{" "}
             <span className="font-semibold text-[#1d1214]">David Simmerman</span>{" "}
@@ -65,7 +65,7 @@ export function StorySection() {
             who refused to lose.
           </p>
 
-          <blockquote className="my-7 border-l-4 border-[#ec3047] pl-6">
+          <blockquote data-reveal="" style={{ "--d": "140ms" } as React.CSSProperties} className="my-7 border-l-4 border-[#ec3047] pl-6">
             <p className="font-heading text-[20px] leading-[1.3] md:text-[24px]">
               &ldquo;We&apos;re over 500 days in without missing a single one.
               What started as a dumb CoD skin bet became the best habit either
@@ -73,7 +73,7 @@ export function StorySection() {
             </p>
           </blockquote>
 
-          <p className="text-[17px] leading-[1.8] text-[#4a3a3d]">
+          <p data-reveal="" style={{ "--d": "200ms" } as React.CSSProperties} className="text-[17px] leading-[1.8] text-[#4a3a3d]">
             Mile A Day isn&apos;t backed by venture capital. We&apos;re not in
             this for the money. We built this because this challenge genuinely
             changed our lives, and we think it can change yours too.
@@ -81,7 +81,7 @@ export function StorySection() {
         </div>
 
         {/* Right column: founders card */}
-        <div className="rounded-3xl bg-white p-7 md:p-10">
+        <div data-reveal="" style={{ "--d": "150ms" } as React.CSSProperties} className="rounded-3xl bg-white p-7 md:p-10">
           <div className="mb-7 flex flex-col gap-5 sm:flex-row sm:gap-8">
             <Founder name="Rob Wiscount" image={robImage} />
             <Founder name="David Simmerman" image={daveImage} />
@@ -105,7 +105,7 @@ export function StorySection() {
           </div>
 
           {/* Streak badge */}
-          <div className="mt-7 inline-flex items-center gap-2 rounded-full bg-[#ec3047] px-5 py-2.5 text-[15px] font-semibold text-white">
+          <div data-reveal="pop" style={{ "--d": "450ms" } as React.CSSProperties} className="mt-7 inline-flex items-center gap-2 rounded-full bg-[#ec3047] px-5 py-2.5 text-[15px] font-semibold text-white">
             <span aria-hidden="true">🔥</span> Founders&apos; streak:{" "}
             {streakDays.toLocaleString()} days and counting
           </div>

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { LiveDot, SectionHeader } from "./section-header";
+import { useInView } from "./reveal";
 
 const API_URL =
   process.env.NEXT_PUBLIC_API_URL || "https://mad.mindgoblin.tech";
@@ -53,14 +54,20 @@ function StatCard({
   suffix,
   label,
   sublabel,
+  index,
 }: {
   value: string;
   suffix?: string;
   label: string;
   sublabel: string;
+  index: number;
 }) {
   return (
-    <div className="rounded-3xl bg-white/[0.04] px-6 py-7">
+    <div
+      data-reveal=""
+      style={{ "--d": `${index * 70}ms` } as React.CSSProperties}
+      className="lift rounded-3xl bg-white/[0.04] px-6 py-7 hover:bg-white/[0.06]"
+    >
       <div className="mb-5 h-1 w-10 rounded-full bg-[#ec3047]" />
       <div className="font-heading text-[clamp(34px,4.2vw,50px)] leading-none text-white tabular-nums">
         {value}
@@ -102,21 +109,25 @@ export function LiveStatsBand() {
     };
   }, []);
 
-  const totalMiles = useCountUp(stats ? stats.total_miles : null);
-  const milesToday = useCountUp(stats ? stats.miles_today : null, 1);
-  const totalUsers = useCountUp(stats ? stats.total_users : null);
+  // The numbers count up when the band comes on screen, not while it's
+  // still below the fold.
+  const [bandRef, inView] = useInView<HTMLElement>(0.2);
+  const live = inView ? stats : null;
+  const totalMiles = useCountUp(live ? live.total_miles : null);
+  const milesToday = useCountUp(live ? live.miles_today : null, 1);
+  const totalUsers = useCountUp(live ? live.total_users : null);
   // `?? 0` guards the brief window where the site deploys before the backend
   // ships the new fields; a missing value would otherwise animate to NaN.
-  const activeWeek = useCountUp(stats ? (stats.active_7d ?? 0) : null);
-  const photosShared = useCountUp(stats ? (stats.photos_shared ?? 0) : null);
-  const longestStreak = useCountUp(stats ? (stats.longest_streak ?? 0) : null);
-  const hypes = useCountUp(stats ? stats.total_hypes : null);
-  const nudges = useCountUp(stats ? stats.total_nudges : null);
+  const activeWeek = useCountUp(live ? (live.active_7d ?? 0) : null);
+  const photosShared = useCountUp(live ? (live.photos_shared ?? 0) : null);
+  const longestStreak = useCountUp(live ? (live.longest_streak ?? 0) : null);
+  const hypes = useCountUp(live ? live.total_hypes : null);
+  const nudges = useCountUp(live ? live.total_nudges : null);
 
   if (stats === null) return null;
 
   return (
-    <section className="bg-[#0e0809] px-6 py-24 text-white">
+    <section ref={bandRef} className="bg-[#0e0809] px-6 py-24 text-white">
       <div className="mx-auto max-w-6xl">
         <SectionHeader
           className="mb-12"
@@ -131,14 +142,14 @@ export function LiveStatsBand() {
         />
 
         <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
-          <StatCard value={Math.round(totalMiles).toLocaleString()} suffix="mi" label="Total miles logged" sublabel="every single one earned" />
-          <StatCard value={milesToday.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })} suffix="mi" label="Miles today" sublabel="and the day isn't over" />
-          <StatCard value={Math.round(totalUsers).toLocaleString()} label="Members strong" sublabel="the whole community" />
-          <StatCard value={Math.round(activeWeek).toLocaleString()} label="Out moving this week" sublabel="in the last 7 days" />
-          <StatCard value={Math.round(photosShared).toLocaleString()} label="Photos shared" sublabel="milestones worth capturing" />
-          <StatCard value={Math.round(longestStreak).toLocaleString()} suffix="days" label="Longest active streak" sublabel="unbroken and still going" />
-          <StatCard value={Math.round(hypes).toLocaleString()} label="Hypes sent" sublabel="double-taps of pure support" />
-          <StatCard value={Math.round(nudges).toLocaleString()} label="Nudges delivered" sublabel="friendly kicks off the couch" />
+          <StatCard index={0} value={Math.round(totalMiles).toLocaleString()} suffix="mi" label="Total miles logged" sublabel="every single one earned" />
+          <StatCard index={1} value={milesToday.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })} suffix="mi" label="Miles today" sublabel="and the day isn't over" />
+          <StatCard index={2} value={Math.round(totalUsers).toLocaleString()} label="Members strong" sublabel="the whole community" />
+          <StatCard index={3} value={Math.round(activeWeek).toLocaleString()} label="Out moving this week" sublabel="in the last 7 days" />
+          <StatCard index={4} value={Math.round(photosShared).toLocaleString()} label="Photos shared" sublabel="milestones worth capturing" />
+          <StatCard index={5} value={Math.round(longestStreak).toLocaleString()} suffix="days" label="Longest active streak" sublabel="unbroken and still going" />
+          <StatCard index={6} value={Math.round(hypes).toLocaleString()} label="Hypes sent" sublabel="double-taps of pure support" />
+          <StatCard index={7} value={Math.round(nudges).toLocaleString()} label="Nudges delivered" sublabel="friendly kicks off the couch" />
         </div>
       </div>
     </section>

@@ -1,5 +1,5 @@
 import Image from "next/image";
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 
 /**
  * The headline features, told the way the App Store screenshots tell them
@@ -143,21 +143,43 @@ export function PanelBand({
         }`}
       >
         <div className={`flex flex-col justify-center md:py-24 ${hero ? "md:flex-[1.35] md:pt-36" : "flex-1"}`}>
-          <p className="mb-4 text-[13px] font-semibold uppercase tracking-[0.18em] text-white/85">
+          {/* The hero plays once on load; every other panel reveals on scroll. */}
+          <p
+            className={`mb-4 text-[13px] font-semibold uppercase tracking-[0.18em] text-white/85 ${hero ? "mad-rise" : ""}`}
+            {...(hero ? {} : { "data-reveal": "" })}
+          >
             {panel.eyebrow}
           </p>
-          <Heading className="font-heading text-[clamp(40px,4.8vw,68px)] leading-[0.95] text-white">
+          <Heading
+            className={`font-heading text-[clamp(40px,4.8vw,68px)] leading-[0.95] text-white ${hero ? "mad-rise" : ""}`}
+            style={{ "--d": "90ms" } as CSSProperties}
+            {...(hero ? {} : { "data-reveal": "" })}
+          >
             {panel.title[0]}
             <br />
             {panel.title[1]}
           </Heading>
-          <p className="mt-5 max-w-md text-[18px] leading-relaxed text-white/90 md:text-[20px]">
-            {panel.body}
-          </p>
-          {children}
+          <div
+            className={hero ? "mad-rise" : ""}
+            style={{ "--d": "180ms" } as CSSProperties}
+            {...(hero ? {} : { "data-reveal": "" })}
+          >
+            <p className="mt-5 max-w-md text-[18px] leading-relaxed text-white/90 md:text-[20px]">
+              {panel.body}
+            </p>
+            {children}
+          </div>
         </div>
         <div className={`flex flex-1 items-end justify-center ${hero ? "md:pt-32" : "md:pt-20"}`}>
-          <Phone shot={panel.shot} alt={panel.alt} priority={priority} />
+          <div
+            className={hero ? "mad-phone-in" : ""}
+            style={{ "--d": "120ms" } as CSSProperties}
+            {...(hero ? {} : { "data-reveal": "phone" })}
+          >
+            <div className={hero ? "mad-float" : ""}>
+              <Phone shot={panel.shot} alt={panel.alt} priority={priority} />
+            </div>
+          </div>
         </div>
       </div>
     </section>

@@ -38,9 +38,18 @@ export function HowItWorksSection() {
         />
 
         <ol className="mt-14 grid gap-4 md:grid-cols-3">
-          {steps.map((step) => (
-            <li key={step.number} className="rounded-3xl bg-white px-7 py-8">
-              <span className="flex h-11 w-11 items-center justify-center rounded-full bg-[#ec3047] font-heading text-[20px] text-white">
+          {steps.map((step, i) => (
+            <li
+              key={step.number}
+              data-reveal=""
+              style={{ "--d": `${i * 110}ms` } as React.CSSProperties}
+              className="lift rounded-3xl bg-white px-7 py-8"
+            >
+              <span
+                data-reveal="pop"
+                style={{ "--d": `${i * 110 + 200}ms` } as React.CSSProperties}
+                className="flex h-11 w-11 items-center justify-center rounded-full bg-[#ec3047] font-heading text-[20px] text-white"
+              >
                 {step.number}
               </span>
               <h3 className="mt-6 font-heading text-[26px] leading-tight">
@@ -53,7 +62,7 @@ export function HowItWorksSection() {
           ))}
         </ol>
 
-        <div className="mt-10">
+        <div className="mt-10" data-reveal="">
           <AppStoreButton tone="dark" />
         </div>
       </div>

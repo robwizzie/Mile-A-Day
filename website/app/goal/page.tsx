@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import Image from "next/image";
+import { Navbar } from "@/components/navbar";
 import { Footer } from "@/components/footer";
 import { APP_STORE_URL } from "@/lib/site";
 import { ogVideos } from "../_og/video/meta";
@@ -63,22 +63,22 @@ export default async function GoalPage({
 
   return (
     <div className="min-h-screen bg-[#0e0809] text-white">
-      <main className="mx-auto flex max-w-2xl flex-col gap-6 px-5 py-14">
-        <div className="flex items-center gap-3">
-          <Image src="/images/mad-circle-icon.png" alt="" width={40} height={40} className="rounded-xl" />
-          <p className="text-sm font-semibold text-[#a0a0a0]">Mile A Day community goal</p>
-        </div>
+      <Navbar />
+      <main className="mx-auto flex max-w-2xl flex-col gap-6 px-5 pb-20 pt-32">
+        <p className="text-[13px] font-semibold uppercase tracking-[0.18em] text-[#ff5a6e]">
+          Community goal
+        </p>
 
         {goal ? (
           <>
             <div className="flex flex-col gap-2">
               <p className="text-sm font-semibold text-[#ff4d7d]">{statusLine(goal)}</p>
-              <h1 className="text-4xl font-extrabold tracking-tight sm:text-5xl">{goal.title}</h1>
+              <h1 className="font-heading text-[clamp(40px,7vw,64px)] leading-[0.95]">{goal.title}</h1>
               <p className="text-lg text-[#a0a0a0]">{goal.description}</p>
             </div>
 
-            <section className="flex flex-col gap-3 rounded-2xl bg-white/5 p-6">
-              <p className="text-4xl font-extrabold">
+            <section className="flex flex-col gap-3 rounded-3xl bg-white/[0.045] p-6 sm:p-7">
+              <p className="font-heading text-[48px] leading-none">
                 {Math.floor(goal.total_miles).toLocaleString("en-US")} mi
               </p>
               <p className="text-sm text-[#a0a0a0]">
@@ -115,9 +115,9 @@ export default async function GoalPage({
               </ul>
             </section>
 
-            <section className="flex flex-col gap-4 rounded-2xl bg-white/5 p-6">
+            <section className="flex flex-col gap-4 rounded-3xl bg-white/[0.045] p-6 sm:p-7">
               <div>
-                <h2 className="text-lg font-bold">Rewards you can unlock</h2>
+                <h2 className="font-heading text-[26px]">Rewards you can unlock.</h2>
                 <p className="text-sm text-[#a0a0a0]">Limited to this goal. Earn them even if we miss the target.</p>
               </div>
               <GoalRewards rewards={goal.rewards ?? []} />
@@ -125,7 +125,7 @@ export default async function GoalPage({
           </>
         ) : (
           <div className="flex flex-col gap-2">
-            <h1 className="text-4xl font-extrabold tracking-tight">The next goal is on its way</h1>
+            <h1 className="font-heading text-[clamp(40px,7vw,64px)] leading-[0.95]">The next goal is on its way.</h1>
             <p className="text-lg text-[#a0a0a0]">
               Community goals bring everyone&rsquo;s miles together. Download the app so you&rsquo;re ready.
             </p>
@@ -135,7 +135,7 @@ export default async function GoalPage({
         <div className="flex flex-col gap-2">
           <a
             href={APP_STORE_URL}
-            className="rounded-full bg-[#ec3047] px-6 py-4 text-center text-lg font-bold text-white transition-colors hover:bg-[#d6243a]"
+            className="lift rounded-full bg-[#ec3047] px-6 py-4 text-center text-lg font-bold text-white hover:bg-[#d6243a]"
           >
             Join on the App Store
           </a>

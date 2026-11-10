@@ -1,19 +1,10 @@
 import Image from "next/image";
-import Link from "next/link";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import {
-  Apple,
-  Flame,
-  Footprints,
-  Lock,
-  Medal,
-  Route,
-  Trophy,
-  Zap,
-  type LucideIcon,
-} from "lucide-react";
+import { Apple, Lock, Pin } from "lucide-react";
+import { Navbar } from "@/components/navbar";
 import { Footer } from "@/components/footer";
+import { HangingMedal, RARITY_LABEL } from "@/components/medal";
 import { APP_STORE_URL } from "@/lib/site";
 import {
   bannerGradient,
@@ -84,23 +75,6 @@ const ROUNDED = "[font-family:ui-rounded,var(--font-body),system-ui,sans-serif]"
 // MADTheme.Colors.madRed — the app's red, not the site's #c72554.
 const MAD_RED = "#D94059";
 
-// Rarity colours = the app's (PremiumBadgeCard / BadgeRarity), as on the
-// home page's medal showcase.
-const RARITY: Record<string, { from: string; to: string; accent: string }> = {
-  legendary: { from: "#FFD966", to: "#D98C26", accent: "#FF9F0A" },
-  rare: { from: "#B380E6", to: "#804DBF", accent: "#BF5AF2" },
-  common: { from: "#73A6F2", to: "#4D80CC", accent: "#0A84FF" },
-};
-
-const CATEGORY_ICON: Record<string, LucideIcon> = {
-  streak: Flame,
-  miles: Footprints,
-  pace: Zap,
-  daily: Route,
-  challenge: Trophy,
-  weekly_challenge: Trophy,
-  competition: Trophy,
-};
 
 export default async function ProfilePage({
   params,
@@ -137,12 +111,13 @@ export default async function ProfilePage({
 
   return (
     <main className="relative min-h-screen overflow-x-hidden bg-[#0e0809]">
+      <Navbar />
       {/* ProfileHero: full-bleed banner (photo, else the preset gradient),
           scrims top and bottom, the wordmark bar riding on it, and the
           avatar in its goal ring hanging off the bottom edge. */}
       <header className="relative">
         <div
-          className="relative h-[190px] w-full overflow-hidden sm:h-[260px]"
+          className="relative h-[220px] w-full overflow-hidden sm:h-[300px]"
           style={{ background: `${bannerGradient(profile.profile_banner_style)}, #000` }}
         >
           {bannerSrc && (
@@ -155,33 +130,9 @@ export default async function ProfilePage({
               className="object-cover"
             />
           )}
-          <div className="absolute inset-0 bg-[linear-gradient(to_bottom,rgba(0,0,0,0.42),transparent_50%,transparent_50%,rgba(0,0,0,0.62))]" />
+          <div className="absolute inset-0 bg-[linear-gradient(to_bottom,rgba(0,0,0,0.5),transparent_45%,transparent_55%,rgba(14,8,9,0.85))]" />
         </div>
 
-        <nav className="absolute inset-x-0 top-0">
-          <div className="mx-auto flex max-w-2xl items-center justify-between gap-4 px-5 pt-4">
-            <Link href="/" className="flex min-w-0 items-center gap-2.5">
-              <Image
-                src="/images/mad-circle-icon.png"
-                alt="Mile A Day logo"
-                width={34}
-                height={34}
-                className="shrink-0 rounded-full"
-              />
-              <span
-                className={`${ROUNDED} text-[11px] font-black tracking-[2.2px] text-white/85`}
-              >
-                MILE A DAY
-              </span>
-            </Link>
-            <Link
-              href="/"
-              className="shrink-0 rounded-full border border-white/20 bg-black/35 px-3.5 py-2 text-[13px] font-semibold text-white transition-colors hover:bg-black/50"
-            >
-              What is Mile A Day?
-            </Link>
-          </div>
-        </nav>
 
         <div className="mx-auto max-w-2xl px-5">
           {/* The ring is ~half on the banner: 88 avatar + 2·4 gap + 2·5 ring
@@ -234,16 +185,18 @@ export default async function ProfilePage({
         {/* ProfileStatTiles: Streak · Miles · Friends. */}
         <div className="mt-5 grid grid-cols-3 gap-2.5">
           <StatTile
-            label="STREAK"
+            label="Streak"
             value={profile.current_streak.toLocaleString("en-US")}
             accent={MAD_RED}
+            index={0}
           />
           {sharesStats ? (
             <>
-              <StatTile label="MILES" value={formatMiles(miles)} />
+              <StatTile label="Miles" value={formatMiles(miles)} index={1} />
               <StatTile
-                label={friends === 1 ? "FRIEND" : "FRIENDS"}
+                label={friends === 1 ? "Friend" : "Friends"}
                 value={friends.toLocaleString("en-US")}
+                index={2}
               />
             </>
           ) : withheld ? (
@@ -283,60 +236,67 @@ export default async function ProfilePage({
   );
 }
 
+/** ProfileStatTiles: a rimless card, a sentence-case label (the streak's in red), a big rounded number. */
 function StatTile({
   label,
   value,
   accent,
+  index,
 }: {
   label: string;
   value: string;
   accent?: string;
+  index: number;
 }) {
   return (
     <div
-      className="min-w-0 rounded-[14px] border px-3.5 py-3"
-      style={
-        accent
-          ? { background: `${accent}24`, borderColor: `${accent}47` }
-          : { background: "rgba(255,255,255,0.05)", borderColor: "rgba(255,255,255,0.08)" }
-      }
+      data-reveal=""
+      style={{ "--d": `${index * 70}ms` } as React.CSSProperties}
+      className="min-w-0 rounded-2xl bg-white/[0.045] px-4 py-3.5"
     >
       <div
-        className="text-[9px] font-extrabold tracking-[1.2px]"
-        style={{ color: accent ?? "rgba(255,255,255,0.55)" }}
+        className="text-[14px] font-bold"
+        style={{ color: accent ?? "rgba(255,255,255,0.6)" }}
       >
         {label}
       </div>
-      <div className="mt-1.5 truncate text-[24px] font-black leading-none tabular-nums text-white">
+      <div className="mt-1 truncate text-[28px] font-black leading-none tabular-nums text-white sm:text-[32px]">
         {value}
       </div>
     </div>
   );
 }
 
+/** The medals they've chosen to show, hanging from their ribbons as the app draws them. */
 function MedalRow({ medals }: { medals: PublicMedal[] }) {
   return (
-    <div className="mt-3 rounded-[14px] border border-white/[0.08] bg-white/[0.04] px-3.5 pb-3.5 pt-3">
-      <div className="text-[11px] font-extrabold tracking-[1.2px] text-white/50">
-        MEDALS
+    <div className="mt-3 rounded-2xl bg-white/[0.045] p-4">
+      <div className="flex items-center gap-2 text-[15px] font-bold text-white">
+        <Pin className="h-4 w-4 text-[#D94059]" aria-hidden />
+        Medals
       </div>
-      <ul className="mt-3 grid grid-cols-5 gap-2">
-        {medals.map((medal) => {
-          const rarity = RARITY[medal.rarity] ?? RARITY.common;
-          const Icon = CATEGORY_ICON[medal.category] ?? Medal;
+      <ul className="mt-4 grid grid-cols-3 gap-2.5 sm:grid-cols-5">
+        {medals.map((medal, i) => {
+          const rarity = RARITY_LABEL[medal.rarity] ?? RARITY_LABEL.common;
           return (
-            <li key={medal.badge_id} className="flex min-w-0 flex-col items-center text-center">
-              <div
-                className="flex h-12 w-12 items-center justify-center rounded-full sm:h-14 sm:w-14"
-                style={{
-                  background: `linear-gradient(135deg, ${rarity.from}, ${rarity.to})`,
-                  boxShadow: `0 0 18px ${rarity.accent}40, inset 0 0 0 2px rgba(255,255,255,0.25)`,
-                }}
-              >
-                <Icon className="h-5 w-5 text-white drop-shadow sm:h-6 sm:w-6" aria-hidden />
-              </div>
-              <span className="mt-1.5 line-clamp-2 w-full break-words text-[10px] font-bold leading-tight text-white/75">
+            <li
+              key={medal.badge_id}
+              data-reveal="pop"
+              style={{ "--d": `${150 + i * 80}ms` } as React.CSSProperties}
+              className="flex min-w-0 flex-col items-center rounded-2xl bg-white/[0.04] px-2 pb-3 pt-2 text-center"
+            >
+              <HangingMedal
+                id={`m-${medal.badge_id}`}
+                icon={medal.icon}
+                category={medal.category}
+                rarity={medal.rarity}
+                size={60}
+              />
+              <span className="mt-2 line-clamp-2 w-full break-words text-[13px] font-bold leading-tight text-white">
                 {medal.name}
+              </span>
+              <span className="mt-0.5 text-[11px] font-bold" style={{ color: rarity.color }}>
+                {rarity.label}
               </span>
             </li>
           );

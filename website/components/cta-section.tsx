@@ -49,22 +49,22 @@ export function CtaSection() {
         }}
       />
       <div className="relative mx-auto max-w-3xl text-center">
-        <p className="mb-6 text-[13px] font-semibold uppercase tracking-[0.18em] text-white/85">
+        <p data-reveal="" style={{ "--d": "0ms" } as React.CSSProperties} className="mb-6 text-[13px] font-semibold uppercase tracking-[0.18em] text-white/85">
           Join the movement
         </p>
-        <div className="mb-9 flex justify-center">
+        <div data-reveal="pop" style={{ "--d": "100ms" } as React.CSSProperties} className="mb-9 flex justify-center">
           <LiveCommunityCount />
         </div>
-        <h2 className="font-heading text-[clamp(48px,8vw,96px)] leading-[0.92]">
+        <h2 data-reveal="" style={{ "--d": "180ms" } as React.CSSProperties} className="font-heading text-[clamp(48px,8vw,96px)] leading-[0.92]">
           Your streak
           <br />
           starts today.
         </h2>
-        <p className="mx-auto mt-6 max-w-lg text-[18px] leading-relaxed text-white/90">
+        <p data-reveal="" style={{ "--d": "260ms" } as React.CSSProperties} className="mx-auto mt-6 max-w-lg text-[18px] leading-relaxed text-white/90">
           One mile. Every day. That&apos;s all it takes to build a habit that
           lasts a lifetime. Download Mile A Day free and never look back.
         </p>
-        <div className="mt-9 flex justify-center">
+        <div data-reveal="" style={{ "--d": "320ms" } as React.CSSProperties} className="mt-9 flex justify-center">
           <AppStoreButton />
         </div>
 

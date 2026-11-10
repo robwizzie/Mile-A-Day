@@ -23,7 +23,7 @@ export function AppStoreButton({
       href={APP_STORE_URL}
       target="_blank"
       rel="noopener noreferrer"
-      className={`inline-flex items-center gap-2.5 rounded-full px-6 py-3.5 text-[15px] font-semibold transition-colors ${colors} ${className}`}
+      className={`inline-flex items-center gap-2.5 lift rounded-full px-6 py-3.5 text-[15px] font-semibold ${colors} ${className}`}
     >
       <svg
         className="h-[18px] w-[18px]"

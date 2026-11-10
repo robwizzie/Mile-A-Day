@@ -3,6 +3,7 @@ import { Inter, Inter_Tight } from 'next/font/google'
 import { Analytics } from '@vercel/analytics/next'
 import './globals.css'
 import { ogVideos } from './_og/video/meta'
+import { RevealObserver } from '@/components/reveal'
 
 // The App Store screenshots set their headlines in a heavy, tightly tracked
 // grotesk (SF Pro Display on device); Inter Tight is its web stand-in, and
@@ -109,7 +110,8 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className={`${inter.variable} ${interTight.variable}`}>
-      <body className="font-sans antialiased bg-[#0a0a0a] text-[#f5f5f5]">
+      <body className="font-sans antialiased bg-[#0e0809] text-[#f5f5f5]">
+        <RevealObserver />
         {children}
         <Analytics />
       </body>
