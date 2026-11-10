@@ -282,7 +282,7 @@ struct FriendActivitySettingsView: View {
 	}
 
 	private var footerNote: some View {
-		Text("Gray “Default” follows your main setting above. Pink means set individually. Walking can track its Running setting with “Same as Running.”")
+		Text("Gray “Default” follows your main setting above. Pink means set individually. Walking can track its Running setting with “Same as Running.” On Default, an extra workout only reaches friends when it's a big one: 3+ miles, or a fast mile or more. Pick an audience for Extra workout to share every one.")
 			.font(.system(size: 11, weight: .regular, design: .rounded))
 			.foregroundColor(.white.opacity(0.4))
 			.fixedSize(horizontal: false, vertical: true)

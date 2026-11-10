@@ -27,6 +27,49 @@ enum WhatsNewCatalog {
     /// names, no "beta"), one short line per feature.
     static let releases: [WhatsNewRelease] = [
         WhatsNewRelease(
+            id: 9,
+            versionLabel: "Version 1.2.10",
+            headline: "Champ 5K Day is Saturday",
+            features: [
+                WhatsNewFeature(
+                    icon: "figure.boxing",
+                    title: "Champ 5K Day",
+                    blurb: "Walk or run a 5K on Saturday, Nov 14, in your own time zone. Every walk that day adds up, and finishing unlocks Champ Shorts, Boxing Gloves and a Legendary medal.",
+                    tint: MADTheme.Colors.madRed
+                ),
+                WhatsNewFeature(
+                    icon: "map.fill",
+                    title: "Coast to Coast",
+                    blurb: "Our first community goal: every mile anyone walks moves all of us across the country, with Flamey gear to earn along the way.",
+                    tint: .orange
+                ),
+                WhatsNewFeature(
+                    icon: "bell.badge.fill",
+                    title: "Quieter, smarter notifications",
+                    blurb: "Friends' extra workouts only ping you when they're long or fast. Head-to-Head updates and today's challenge always come through, and a morning note tells you what today's challenge is.",
+                    tint: .teal
+                ),
+                WhatsNewFeature(
+                    icon: "hand.raised.fill",
+                    title: "Flamey holds things better",
+                    blurb: "Pom-poms, the foam finger and everything else sit right in his hands, and they're bigger on your home screen.",
+                    tint: .yellow
+                ),
+                WhatsNewFeature(
+                    icon: "shoeprints.fill",
+                    title: "Steps count, everywhere",
+                    blurb: "A day with 10,000 steps shows as done across the app, alongside your mile.",
+                    tint: .green
+                ),
+                WhatsNewFeature(
+                    icon: "camera.fill",
+                    title: "A better photo prompt",
+                    blurb: "A rebuilt camera and photo prompt after your walk, plus invites that only count once a friend really walks.",
+                    tint: .pink
+                ),
+            ]
+        ),
+        WhatsNewRelease(
             id: 8,
             versionLabel: "Version 1.2.09",
             headline: "See each other's routes",

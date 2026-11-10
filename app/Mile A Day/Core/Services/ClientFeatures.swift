@@ -146,6 +146,14 @@ enum ClientFeatures {
     /// home page's done card, and offers the ask on the Today board.
     static let photoAskV1 = "photo_ask_v1"
 
+    /// Routes the morning `daily_challenge` push (today's challenge, or the
+    /// Head-to-Head rival) to the challenge screen.
+    static let dailyChallengePushV1 = "daily_challenge_push_v1"
+
+    /// Shows one-day events (the Champ 5K Day card and page) and routes the
+    /// `special_event` push to the page.
+    static let specialEventsV1 = "special_events_v1"
+
     static let supported: [String] = [
         friendRequestV2, collabTagV1, ghostFriendRaceV1, postWindowV1, buddyWalksV1,
         weeklyChallengeV1, communityGoalV1, referralsV1, buddyGroupPostV1, buddyJoinRequestV1, activityDigestV1,
@@ -154,5 +162,7 @@ enum ClientFeatures {
         liveAutoCardV1,
         storyFinishCardV1,
         photoAskV1,
+        dailyChallengePushV1,
+        specialEventsV1,
     ]
 }

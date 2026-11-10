@@ -852,6 +852,10 @@ struct Badge: Identifiable, Codable {
         if id.starts(with: "holiday_") {
             return .rare
         }
+        // A one-day event (Champ 5K Day) happens once, ever.
+        if id.starts(with: "event_") {
+            return .legendary
+        }
         return .common
     }
 }

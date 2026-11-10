@@ -21,6 +21,8 @@ enum NotificationDestination: Identifiable, Equatable {
     case friendChallenge(FriendChallengeRef)
     case communityGoal
     case referrals
+    /// A one-day event's page (Champ 5K Day); nil = whichever is showing.
+    case specialEvent(id: String?)
 
     var id: String {
         switch self {
@@ -28,6 +30,7 @@ enum NotificationDestination: Identifiable, Equatable {
         case .challenges: return "challenges"
         case .communityGoal: return "community-goal"
         case .referrals: return "referrals"
+        case .specialEvent(let id): return "special-event-\(id ?? "")"
         case .friendMedal(let ref): return "friend-medal-\(ref.userId)-\(ref.badgeId)"
         case .friendChallenge(let ref): return "friend-challenge-\(ref.userId)-\(ref.localDate ?? "")"
         }
@@ -47,6 +50,10 @@ enum NotificationDestination: Identifiable, Equatable {
             return .communityGoal
         case "referral_qualified":
             return .referrals
+        case "special_event":
+            return .specialEvent(id: data["event_id"])
+        case "daily_challenge":
+            return .challenges
         case "daily_reminder":
             // Only the reminder that NAMES today's challenge; a plain, duel or
             // win-back reminder keeps going to the Dashboard.
@@ -137,6 +144,8 @@ private struct NotificationDestinationScreen: View {
                     CommunityGoalView()
                 case .referrals:
                     ReferralsView()
+                case .specialEvent(let id):
+                    SpecialEventView(eventId: id)
                 case .friendMedal(let ref):
                     FriendMedalView(ref: ref)
                 case .friendChallenge(let ref):
