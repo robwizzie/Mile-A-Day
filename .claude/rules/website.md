@@ -23,12 +23,13 @@ Use `npm` for all operations.
 ## Tailwind CSS 4
 - No `tailwind.config.js` - Tailwind 4 uses CSS-based configuration.
 - Theme tokens and custom properties defined in `globals.css` via `@theme` directive.
-- Custom glass-morphism classes (`.glass-card`, `.glass-nav`, `.glass-button`) in globals.css.
 
 ## Styling Patterns
-- The home page IS the App Store listing: the hero and one `PanelBand` per screenshot (`components/feature-panels.tsx` `PANELS`), each in its screenshot's colour with the phone cut out of `marketing/app-store/<version>/` into `public/images/app-store/`. New screenshots = recut the phones + update `PANELS` copy/colours together.
+- Home order is the conversion path (comment in `app/page.tsx`): hero → `LiveStatsBand` → `HowItWorksSection` → `FeaturePanels` → `CompetitionsSection` → `HabitSection` → `WhatsNewSection` → `StorySection` → `SupportSection` → `DeskTeaserSection` → `CtaSection`. Those sections and their headings ("The miles are adding up.", "Dead simple. By design.", "66 days to build a habit.", "It started with a stupid bet.", "Need a hand?", "Your streak starts today.") are the owner's; restyle, never drop or rewrite them.
+- The theme borrows the App Store screenshots without copying them: hero + a curated few `PanelBand`s (`components/feature-panels.tsx` `PANELS`, phones cut from `marketing/app-store/<version>/` into `public/images/app-store/`); every other section uses `SectionHeader` (eyebrow, heading, line) on alternating dark (`#0e0809`/`#140b0e`) and cream (`#f6f1ec`) bands, with solid colour cards in the screenshot palette.
 - Fonts: Inter (body, `--font-body`) and Inter Tight 800 (headings, `.font-heading`, `--font-display`) via `next/font/google`. Headlines are sentence case ending in a period, never all caps; eyebrows are small tracked caps. The OG cards keep their own vendored fonts.
-- No glass cards, glow blobs, icon-chip grids, marquees or scroll-reveal motion; plain dark (`#0e0809`/`#140b0e`) and cream (`#f6f1ec`) bands between the colour panels; buttons are solid pills (`AppStoreButton`).
+- No glass cards, glow blobs, icon-chip grids, marquees or scroll-reveal motion; buttons are solid pills (`AppStoreButton`).
+- Search/AI: the `FAQ` in `support-section.tsx` also feeds the home page's FAQPage JSON-LD and `/llms.txt` (`app/llms.txt/route.ts`, built from `FAQ` + `CURRENT_RELEASE`); keep answers factual and change them in that one place.
 - Copy is plain and specific, written like a person: no em dashes, no "seamlessly"/"everything you need" filler.
 - Primary color: `#c72554` (burgundy red); the hero/CTA red is the screenshots' `#ec3047`→`#dc253b`.
 

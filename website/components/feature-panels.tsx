@@ -2,8 +2,9 @@ import Image from "next/image";
 import type { ReactNode } from "react";
 
 /**
- * The App Store screenshots, as the site. Each panel is one screenshot's
- * story in its own colour: a small eyebrow, a heavy two-line headline, one
+ * The headline features, told the way the App Store screenshots tell them
+ * (a curated few, not every screenshot). Each panel is one feature in its
+ * screenshot's colour: a small eyebrow, a heavy two-line headline, one
  * plain sentence, and the real phone (cut out of the App Store image, so the
  * site always shows exactly what the store shows) rising from the bottom.
  * Copy and colours mirror marketing/app-store/<version>/ — change them there
@@ -33,15 +34,6 @@ export const PANELS: Panel[] = [
     to: "#5646d3",
   },
   {
-    eyebrow: "Route flyover",
-    title: ["Relive every", "route."],
-    body: "Replay your walk or run from above, step by step, with everyone who came along.",
-    shot: "03-flyover",
-    alt: "A flyover replay of a walk over a satellite map",
-    from: "#3e82f4",
-    to: "#3171e2",
-  },
-  {
     eyebrow: "Friends",
     title: ["Keep each other", "going."],
     body: "See who's out now, nudge friends who haven't gone yet, and donate a mile to save a streak.",
@@ -51,6 +43,15 @@ export const PANELS: Panel[] = [
     to: "#0e9a9c",
   },
   {
+    eyebrow: "Route flyover",
+    title: ["Relive every", "route."],
+    body: "Replay your walk or run from above, step by step, with everyone who came along.",
+    shot: "03-flyover",
+    alt: "A flyover replay of a walk over a satellite map",
+    from: "#3e82f4",
+    to: "#3171e2",
+  },
+  {
     eyebrow: "Flamey's Closet",
     title: ["Dress up", "your Flamey."],
     body: "Name him, dress him up, and unlock new looks with every medal you earn.",
@@ -58,34 +59,6 @@ export const PANELS: Panel[] = [
     alt: "Flamey's Closet with outfits and flame colors",
     from: "#222a40",
     to: "#192033",
-  },
-  {
-    eyebrow: "Buddy walks",
-    title: ["Never walk", "alone."],
-    body: "Walk with friends from anywhere, and see each other's routes on one map when you both share.",
-    shot: "06-buddy",
-    alt: "A buddy walk post with four routes on one map",
-    from: "#ff7555",
-    to: "#f16446",
-  },
-  {
-    eyebrow: "Milestones",
-    title: ["Celebrate every", "milestone."],
-    body: "Day 100, 365, 500. Each one gets its moment, and a medal to keep.",
-    shot: "07-milestone",
-    alt: "The 500 day streak celebration",
-    from: "#f7aa2c",
-    to: "#e79718",
-  },
-  {
-    id: "competitions",
-    eyebrow: "Competitions",
-    title: ["Compete with", "your crew."],
-    body: "Team comps, head-to-head days, clashes and leaderboards, scored on the miles your phone or watch actually tracked.",
-    shot: "08-comp",
-    alt: "Final standings of a team competition",
-    from: "#9452ec",
-    to: "#8341db",
   },
   {
     eyebrow: "Streak tokens",

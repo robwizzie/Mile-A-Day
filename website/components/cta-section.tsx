@@ -2,11 +2,12 @@
 
 import { useState } from "react";
 import { AppStoreButton } from "./app-store-button";
+import { LiveCommunityCount } from "./live-community-count";
 
 const API_URL =
   process.env.NEXT_PUBLIC_API_URL || "https://mad.mindgoblin.tech";
 
-/** The last panel: the same red as the top, one ask, and the Android waitlist. */
+/** The last panel: the same red as the top, the live community, one ask, and the Android waitlist. */
 export function CtaSection() {
   const [email, setEmail] = useState("");
   const [status, setStatus] = useState<"idle" | "sending" | "done" | "error">(
@@ -33,7 +34,8 @@ export function CtaSection() {
 
   return (
     <section
-      className="relative overflow-hidden px-6 py-24 text-white"
+      id="download"
+      className="relative scroll-mt-20 overflow-hidden px-6 py-24 text-white"
       style={{
         background: "linear-gradient(180deg, #ec3047 0%, #dc253b 100%)",
       }}
@@ -47,16 +49,22 @@ export function CtaSection() {
         }}
       />
       <div className="relative mx-auto max-w-3xl text-center">
-        <h2 className="font-heading text-[clamp(44px,7vw,88px)] leading-[0.95]">
-          Your first mile
-          <br />
-          is today.
-        </h2>
-        <p className="mx-auto mt-5 max-w-md text-[18px] leading-relaxed text-white/90">
-          It's free, and it takes about fifteen minutes. Tomorrow you'll want to
-          do it again.
+        <p className="mb-6 text-[13px] font-semibold uppercase tracking-[0.18em] text-white/85">
+          Join the movement
         </p>
-        <div className="mt-8 flex justify-center">
+        <div className="mb-9 flex justify-center">
+          <LiveCommunityCount />
+        </div>
+        <h2 className="font-heading text-[clamp(48px,8vw,96px)] leading-[0.92]">
+          Your streak
+          <br />
+          starts today.
+        </h2>
+        <p className="mx-auto mt-6 max-w-lg text-[18px] leading-relaxed text-white/90">
+          One mile. Every day. That&apos;s all it takes to build a habit that
+          lasts a lifetime. Download Mile A Day free and never look back.
+        </p>
+        <div className="mt-9 flex justify-center">
           <AppStoreButton />
         </div>
 

@@ -1,11 +1,14 @@
 import type { Metadata } from "next";
 import { Navbar } from "@/components/navbar";
 import { HeroSection } from "@/components/hero-section";
+import { LiveStatsBand } from "@/components/live-stats-band";
+import { HowItWorksSection } from "@/components/how-it-works-section";
 import { FeaturePanels } from "@/components/feature-panels";
-import { NumbersSection } from "@/components/numbers-section";
+import { CompetitionsSection } from "@/components/competitions-section";
+import { HabitSection } from "@/components/habit-section";
 import { WhatsNewSection } from "@/components/whats-new-section";
 import { StorySection } from "@/components/story-section";
-import { SupportSection } from "@/components/support-section";
+import { FAQ, SupportSection } from "@/components/support-section";
 import { DeskTeaserSection } from "@/components/desk-teaser-section";
 import { CtaSection } from "@/components/cta-section";
 import { Footer } from "@/components/footer";
@@ -99,16 +102,29 @@ const structuredData = {
       publisher: { "@id": `${SITE_URL}/#organization` },
       offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
     },
+    {
+      // The same questions and answers the Help section shows, so search and
+      // AI answers can quote them directly.
+      "@type": "FAQPage",
+      "@id": `${SITE_URL}/#faq`,
+      mainEntity: FAQ.map((item) => ({
+        "@type": "Question",
+        name: item.q,
+        acceptedAnswer: { "@type": "Answer", text: item.a },
+      })),
+    },
   ],
 };
 
 // Escape "<" so no string in the data can close the script tag early.
 const structuredDataJson = JSON.stringify(structuredData).replace(/</g, "\\u003c");
 
-// The page is the App Store listing, told at web size: the header panel,
-// then one colour panel per screenshot (copy and phones from
-// marketing/app-store/<version>/), then plain proof (real numbers, what just
-// shipped, who made it), help, and one last ask.
+// Section order is the path to a download: the promise and the button
+// (hero) → proof it's real (live community numbers) → how little it takes
+// (three steps, second button) → what makes it fun (feature panels,
+// competition modes) → why one mile works (66 days) → it's actively made
+// (what's new) → who made it (story) → objections answered (help + FAQ)
+// → the desk companion → the last ask with the live community.
 export default function Home() {
   return (
     <main className="relative min-h-screen overflow-x-hidden bg-[#0e0809]">
@@ -118,8 +134,11 @@ export default function Home() {
       />
       <Navbar />
       <HeroSection />
+      <LiveStatsBand />
+      <HowItWorksSection />
       <FeaturePanels />
-      <NumbersSection />
+      <CompetitionsSection />
+      <HabitSection />
       <WhatsNewSection />
       <StorySection />
       <SupportSection />
