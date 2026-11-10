@@ -506,3 +506,11 @@ The workout detail flickered a few times a second right after a walk finished: t
 - Large text: the Friends header's "Add friends" label crushed the title (icon only at accessibility sizes, with an accessibility label), the weekly challenge card broke its title mid-word beside the days-left pill (the pill moves under the title at accessibility sizes, both headers), and `MADPillPicker` labels ran into the capsule's rounded end (8pt side inset).
 - The system review prompt could land over the Health permission sheet; `scheduleReviewEvaluation` now also waits for `healthManager.isAuthorized`.
 
+
+## Items worn on the hand (mitts)
+
+Arms draw OVER props (`FlameyDressedBody`), which is right for a handle he grips (flag, cannon) and wrong for anything worn ON the hand: the foam finger and pom-poms had his arm stub drawn across them, and boxing gloves couldn't follow his arm at all. A skin can record `mitt` layers: `mitt` (both hands, the RIGHT arm's frame, mirrored for the left) or `mitt@hand=left|right` (one hand, pre-mirrored so text reads right), each optionally per `reach`. `FlameArmLimb` draws the layer at the wrist after the arm, so the arm goes into it and it rides every pose and the idle sway. `FlameyArt.heldArmTargets` attaches it (`FlameArmHold.mitt`); `rules.mitt_follows_pose` keeps the arms in his pose (gloves) instead of reaching `arm_hold`.
+
+`held-body` stays in every such skin: older builds draw it, and so does the Closet's item tile, which has no arms (`armsCarryMitts: false`; the faint mannequin reaches the prop's recorded grip via `armHold(reach:carryMitts: false)` so a raised prop isn't floating). Converting an existing prop: `held-body` × the inverse of the arm frame at its `arm_hold` reproduces it exactly at the grip.
+
+The Closet mannequin used to keep its hands at its sides under every held prop, which is what made the foam finger look like it wasn't in his hand. The treats card replaced the whole hold with its right-hand target; it now starts from the look's hold.
