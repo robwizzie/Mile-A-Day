@@ -73,6 +73,87 @@ export type Release = {
 // user-facing: what the feature does for you, no internal names.
 export const RELEASES: Release[] = [
   {
+    version: "1.2.09",
+    date: "November 2026",
+    headline: "Champ 5K Day is Saturday",
+    summary:
+      "Walk or run a 5K on Saturday, Nov 14 to unlock Champ Shorts, Boxing Gloves and a Legendary medal. Plus Coast to Coast, our first community goal, quieter notifications that never lose the important ones, routes on buddy walks, and layouts made for iPhone Duo.",
+    features: [
+      {
+        icon: Medal,
+        color: "#FFCC5C",
+        title: "Champ 5K Day",
+        desc: "Walk or run a 5K on Saturday, Nov 14, in your own time zone. Every walk that day adds up, and finishing unlocks Champ Shorts, Boxing Gloves and a Legendary medal.",
+      },
+      {
+        icon: Map,
+        color: "#FF9F0A",
+        title: "Coast to Coast",
+        desc: "Our first community goal: every mile anyone walks moves all of us across the country, with Flamey gear to earn along the way.",
+      },
+      {
+        icon: Bell,
+        color: "#30B0C7",
+        title: "Quieter, smarter notifications",
+        desc: "Friends' extra workouts only ping you when they're long or fast. Head-to-Head updates and today's challenge always come through, and a morning note tells you what today's challenge is.",
+      },
+      {
+        icon: Map,
+        color: "#D94059",
+        title: "Share your route on buddy walks",
+        desc: "Turn it on for a walk and see each other's lines on one map. Only people on that walk who also share can see yours, and your start and finish stay hidden.",
+      },
+      {
+        icon: Route,
+        color: "#30B0C7",
+        title: "Routes that show up",
+        desc: "Your routes now reach your friends more reliably, and before you post a story you'll see exactly what they'll see.",
+      },
+      {
+        icon: Watch,
+        color: "#FF9F0A",
+        title: "Routes from your Watch",
+        desc: "Outdoor walks and runs recorded in the Watch app now save their route.",
+      },
+      {
+        icon: Smartphone,
+        color: "#ff4d7d",
+        title: "Made for iPhone Duo",
+        desc: "Two-page layouts for Home, Compete, Feed, Friends and Profile, and Flamey wakes up and tucks in with the fold.",
+      },
+      {
+        icon: Sticker,
+        color: "#BF5AF2",
+        title: "Reply with a sticker",
+        desc: "Answer any post with a Flamey sticker, and see the post's caption at the top of its comments.",
+      },
+      {
+        icon: Bluetooth,
+        color: "#5E5CE6",
+        title: "Your treadmill, in sync",
+        desc: "Start, pause and finish your workout from the treadmill, and it picks up the console's own time and distance.",
+      },
+      {
+        icon: Sparkles,
+        color: "#FFD659",
+        title: "Flamey holds things better",
+        desc: "Pom-poms, the foam finger and everything else sit right in his hands, and they're bigger on your home screen.",
+      },
+      {
+        icon: Footprints,
+        color: "#34C759",
+        title: "Steps count, everywhere",
+        desc: "A day with 10,000 steps shows as done across the app, alongside your mile.",
+      },
+      {
+        icon: Camera,
+        color: "#ff4d7d",
+        title: "A better photo prompt",
+        desc: "A rebuilt camera and photo prompt after your walk, plus invites that only count once a friend really walks.",
+      },
+    ],
+  },
+  {
     version: "1.2.08",
     date: "November 2026",
     headline: "Mile A Day+ is here, and founders get it free",

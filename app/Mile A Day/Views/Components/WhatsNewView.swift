@@ -26,9 +26,11 @@ enum WhatsNewCatalog {
     /// Newest first. Edit copy freely — keep it user-facing (no internal
     /// names, no "beta"), one short line per feature.
     static let releases: [WhatsNewRelease] = [
+        // id 9, not 8: TestFlight saw an earlier 1.2.09 draft as 8 (routes
+        // and iPhone Duo, folded in below), and a new id shows this one again.
         WhatsNewRelease(
             id: 9,
-            versionLabel: "Version 1.2.10",
+            versionLabel: "Version 1.2.09",
             headline: "Champ 5K Day is Saturday",
             features: [
                 WhatsNewFeature(
@@ -49,31 +51,6 @@ enum WhatsNewCatalog {
                     blurb: "Friends' extra workouts only ping you when they're long or fast. Head-to-Head updates and today's challenge always come through, and a morning note tells you what today's challenge is.",
                     tint: .teal
                 ),
-                WhatsNewFeature(
-                    icon: "hand.raised.fill",
-                    title: "Flamey holds things better",
-                    blurb: "Pom-poms, the foam finger and everything else sit right in his hands, and they're bigger on your home screen.",
-                    tint: .yellow
-                ),
-                WhatsNewFeature(
-                    icon: "shoeprints.fill",
-                    title: "Steps count, everywhere",
-                    blurb: "A day with 10,000 steps shows as done across the app, alongside your mile.",
-                    tint: .green
-                ),
-                WhatsNewFeature(
-                    icon: "camera.fill",
-                    title: "A better photo prompt",
-                    blurb: "A rebuilt camera and photo prompt after your walk, plus invites that only count once a friend really walks.",
-                    tint: .pink
-                ),
-            ]
-        ),
-        WhatsNewRelease(
-            id: 8,
-            versionLabel: "Version 1.2.09",
-            headline: "See each other's routes",
-            features: [
                 WhatsNewFeature(
                     icon: "map.fill",
                     title: "Share your route on buddy walks",
@@ -96,6 +73,36 @@ enum WhatsNewCatalog {
                     icon: "iphone",
                     title: "Made for iPhone Duo",
                     blurb: "Two-page layouts for Home, Compete, Feed, Friends and Profile, and Flamey wakes up and tucks in with the fold.",
+                    tint: .pink
+                ),
+                WhatsNewFeature(
+                    icon: "bubble.left.and.text.bubble.right.fill",
+                    title: "Reply with a sticker",
+                    blurb: "Answer any post with a Flamey sticker, and see the post's caption at the top of its comments.",
+                    tint: .purple
+                ),
+                WhatsNewFeature(
+                    icon: "figure.walk.treadmill",
+                    title: "Your treadmill, in sync",
+                    blurb: "Start, pause and finish your workout from the treadmill, and it picks up the console's own time and distance.",
+                    tint: .indigo
+                ),
+                WhatsNewFeature(
+                    icon: "hand.raised.fill",
+                    title: "Flamey holds things better",
+                    blurb: "Pom-poms, the foam finger and everything else sit right in his hands, and they're bigger on your home screen.",
+                    tint: .yellow
+                ),
+                WhatsNewFeature(
+                    icon: "shoeprints.fill",
+                    title: "Steps count, everywhere",
+                    blurb: "A day with 10,000 steps shows as done across the app, alongside your mile.",
+                    tint: .green
+                ),
+                WhatsNewFeature(
+                    icon: "camera.fill",
+                    title: "A better photo prompt",
+                    blurb: "A rebuilt camera and photo prompt after your walk, plus invites that only count once a friend really walks.",
                     tint: .pink
                 ),
             ]
