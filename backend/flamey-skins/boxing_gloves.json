@@ -32,6 +32,7 @@
       "0.8": {"left":[-0.3575,-0.14443],"left_hand":false,"right":[0.3575,-0.14443],"right_hand":false},
       "0.9": {"left":[-0.3575,-0.14443],"left_hand":false,"right":[0.3575,-0.14443],"right_hand":false}
     },
+    "mitt_follows_pose": true,
     "raises_when_lit": true
   },
   "art": {

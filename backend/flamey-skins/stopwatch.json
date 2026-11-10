@@ -28,9 +28,9 @@
       "wobble": 3
     },
     "arm_hold": {
-      "0.8": {"left":[-0.41,-0.33],"left_hand":true,"right":null,"right_hand":true},
-      "0.9": {"left":[-0.41,-0.33],"left_hand":true,"right":null,"right_hand":true},
-      "0.62": {"left":[-0.34,-0.39],"left_hand":true,"right":null,"right_hand":true}
+      "0.8": {"left":[-0.41,-0.298],"left_hand":true,"right":null,"right_hand":true},
+      "0.9": {"left":[-0.41,-0.298],"left_hand":true,"right":null,"right_hand":true},
+      "0.62": {"left":[-0.34,-0.365],"left_hand":true,"right":null,"right_hand":true}
     }
   },
   "art": {

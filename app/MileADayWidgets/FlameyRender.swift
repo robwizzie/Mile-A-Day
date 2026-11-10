@@ -573,12 +573,16 @@ struct FlameyDressedFigure: View {
     /// How his arms are held; nil = the mood's pose (`.rest` without one).
     var arms: FlameArmPose? = nil
     var mood: FlameMoodKind? = nil
+    /// Where his hands go, overriding the look's own held prop (nil = the
+    /// look's `armHold`) — the Closet's mannequin reaches for the item it
+    /// stands under.
+    var hold: FlameArmHold? = nil
 
     var body: some View {
         let asleep = mood?.eyesShut() ?? false
         let pose = arms ?? mood?.armPose(eyesShut: asleep) ?? .rest
         ZStack {
-            FlameyDressedBody(look: look, arms: pose,
+            FlameyDressedBody(look: look, arms: pose, hold: hold,
                               figure: FlameyDressedBody.figure(look: look, health: health, size: size, vigor: vigor,
                                                                scale: scale, asleep: asleep))
             if let mood {

@@ -201,7 +201,12 @@ struct TreatFlameBuddyView: View {
         let hand = CGPoint(x: figureSize / 2 + handTarget.x * u,
                            y: figureSize - liftPoints + handTarget.y * u)
         let grip = CGPoint(x: hand.x + 0.01 * u, y: hand.y - 0.075 * u)
-        return FlameyDressedBody(look: dressed, hold: FlameArmHold(right: handTarget), still: !animate, figure: figure) {
+        // The treat takes his right hand; whatever his look holds keeps the
+        // left (a prop's grip, gloves on both hands).
+        var hold = dressed.armHold(reach: 0.9) ?? FlameArmHold()
+        hold.right = handTarget
+        hold.rightHand = true
+        return FlameyDressedBody(look: dressed, hold: hold, still: !animate, figure: figure) {
             // On his skin, UNDER his outfit: a bow tie sits over a full tummy.
             skin.frame(width: containerSize.width, height: containerSize.height)
         } prop: {
