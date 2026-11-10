@@ -206,7 +206,17 @@ struct MedalView: View {
             .padding(rimWidth + size * 0.06)
     }
 
+    @ViewBuilder
     private var stampedIcon: some View {
+        if ChampMedalFace.wears(badge) {
+            ChampMedalFace(size: size, ink: palette.ink, shadow: palette.inkShadow)
+                .opacity(locked ? 0.55 : 1)
+        } else {
+            plainIcon
+        }
+    }
+
+    private var plainIcon: some View {
         Image(systemName: iconName(for: badge))
             .font(.system(size: size * 0.32, weight: .bold))
             .foregroundStyle(palette.ink)
@@ -256,6 +266,88 @@ struct MedalView: View {
     }
 }
 
+// MARK: - Champ 5K Day face
+
+/// The Champ 5K Day medal's own face: a boxing glove struck into the gold,
+/// "5K" under it, a ring of small stars inside the rim. Drawn in the medal's
+/// ink like every other stamped icon, so it belongs to the same set.
+struct ChampMedalFace: View {
+    let size: CGFloat
+    let ink: Color
+    let shadow: Color
+
+    static func wears(_ badge: Badge) -> Bool { badge.id.hasPrefix("event_champ_5k") }
+
+    var body: some View {
+        ZStack {
+            stars
+            ChampGloveShape()
+                .fill(ink)
+                .overlay(ChampGloveDetail().stroke(shadow.opacity(0.9), style: StrokeStyle(lineWidth: max(1, size * 0.012), lineCap: .round)))
+                .frame(width: size * 0.36, height: size * 0.36)
+                .offset(x: size * 0.01, y: -size * 0.07)
+            Text("5K")
+                .font(.system(size: size * 0.14, weight: .black, design: .rounded))
+                .foregroundStyle(ink)
+                .offset(y: size * 0.19)
+        }
+        .frame(width: size, height: size)
+        // The same hard 1-step drop as the other stamped icons.
+        .shadow(color: shadow, radius: 0, x: 0, y: max(1, size * 0.012))
+        .accessibilityHidden(true)
+    }
+
+    private var stars: some View {
+        ForEach(0..<10, id: \.self) { i in
+            let angle = Double(i) / 10 * 2 * .pi - .pi / 2
+            Image(systemName: "star.fill")
+                .font(.system(size: size * 0.045, weight: .bold))
+                .foregroundStyle(ink.opacity(0.85))
+                .offset(x: cos(angle) * size * 0.305, y: sin(angle) * size * 0.305)
+        }
+    }
+}
+
+/// A boxing glove, fist up, thumb on the left, cuff at the bottom (unit box).
+struct ChampGloveShape: Shape {
+    func path(in r: CGRect) -> Path {
+        func p(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: r.minX + x * r.width, y: r.minY + y * r.height) }
+        var path = Path()
+        // Mitt: a rounded fist.
+        path.move(to: p(0.24, 0.66))
+        path.addCurve(to: p(0.5, 0.04), control1: p(0.12, 0.44), control2: p(0.16, 0.06))
+        path.addCurve(to: p(0.86, 0.38), control1: p(0.78, 0.02), control2: p(0.9, 0.18))
+        path.addCurve(to: p(0.76, 0.68), control1: p(0.84, 0.52), control2: p(0.82, 0.62))
+        path.closeSubpath()
+        // Thumb along the left side.
+        path.move(to: p(0.27, 0.52))
+        path.addCurve(to: p(0.1, 0.4), control1: p(0.12, 0.54), control2: p(0.06, 0.48))
+        path.addCurve(to: p(0.3, 0.3), control1: p(0.12, 0.3), control2: p(0.22, 0.27))
+        path.closeSubpath()
+        // Cuff.
+        path.addRoundedRect(in: CGRect(origin: p(0.26, 0.7), size: CGSize(width: r.width * 0.5, height: r.height * 0.26)),
+                            cornerSize: CGSize(width: r.width * 0.06, height: r.width * 0.06))
+        return path
+    }
+}
+
+/// The glove's lines: where the thumb meets the fist, the knuckles, the cuff.
+struct ChampGloveDetail: Shape {
+    func path(in r: CGRect) -> Path {
+        func p(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: r.minX + x * r.width, y: r.minY + y * r.height) }
+        var path = Path()
+        path.move(to: p(0.3, 0.32))
+        path.addCurve(to: p(0.3, 0.6), control1: p(0.36, 0.42), control2: p(0.36, 0.52))
+        path.move(to: p(0.42, 0.2))
+        path.addQuadCurve(to: p(0.74, 0.24), control: p(0.6, 0.12))
+        path.move(to: p(0.26, 0.69))
+        path.addLine(to: p(0.76, 0.69))
+        path.move(to: p(0.51, 0.75))
+        path.addLine(to: p(0.51, 0.92))
+        return path
+    }
+}
+
 // MARK: - Neck ribbon
 
 /// Two straps converging into a metal loop on the medal's top edge, so the
@@ -299,10 +391,28 @@ struct MedalRibbon: View {
             path.closeSubpath()
         }
         return ZStack {
-            band.fill(LinearGradient(colors: left ? [palette.ribbonA, palette.ribbonB]
-                                                  : [palette.ribbonB, palette.ribbonA],
-                                     startPoint: .leading, endPoint: .trailing))
-            stripe.fill(palette.ribbonStripe.opacity(0.9))
+            if ChampMedalFace.wears(badge), !badge.isLocked {
+                // Stars and stripes: navy strap, red and white bands down it.
+                band.fill(Color(red: 0.10, green: 0.20, blue: 0.52))
+                ForEach(0..<3, id: \.self) { i in
+                    let at = strap * (0.18 + CGFloat(i) * 0.26)
+                    Path { path in
+                        let top: CGFloat = (left ? 0 : spread) + at
+                        let bottom = spread / 2 + at
+                        path.move(to: CGPoint(x: top, y: 0))
+                        path.addLine(to: CGPoint(x: top + strap * 0.13, y: 0))
+                        path.addLine(to: CGPoint(x: bottom + strap * 0.13, y: drop))
+                        path.addLine(to: CGPoint(x: bottom, y: drop))
+                        path.closeSubpath()
+                    }
+                    .fill(i == 1 ? Color.white.opacity(0.95) : Color(red: 0.88, green: 0.14, blue: 0.22))
+                }
+            } else {
+                band.fill(LinearGradient(colors: left ? [palette.ribbonA, palette.ribbonB]
+                                                      : [palette.ribbonB, palette.ribbonA],
+                                         startPoint: .leading, endPoint: .trailing))
+                stripe.fill(palette.ribbonStripe.opacity(0.9))
+            }
             // Shade toward the bottom, where the straps tuck behind the loop.
             band.fill(LinearGradient(colors: [.clear, .black.opacity(0.30)],
                                      startPoint: .top, endPoint: .bottom))
