@@ -151,7 +151,7 @@ export function PanelBand({
             {panel.eyebrow}
           </p>
           <Heading
-            className={`font-heading text-[clamp(40px,4.8vw,68px)] leading-[0.95] text-white ${hero ? "mad-rise" : ""}`}
+            className={`font-heading text-[40px] leading-[0.95] md:text-[clamp(34px,4.6vw,68px)] text-white ${hero ? "mad-rise" : ""}`}
             style={{ "--d": "90ms" } as CSSProperties}
             {...(hero ? {} : { "data-reveal": "" })}
           >

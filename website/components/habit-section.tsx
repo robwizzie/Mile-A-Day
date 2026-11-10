@@ -66,8 +66,9 @@ export function HabitSection() {
       id="habit"
       className="scroll-mt-20 overflow-hidden bg-[#f6f1ec] px-6 pt-24 text-[#1d1214]"
     >
-      <div className="mx-auto grid max-w-6xl gap-12 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)] lg:gap-16">
-        <div className="pb-6 lg:pb-24">
+      <div className="mx-auto max-w-6xl">
+        {/* Row 1: the number and the research, side by side */}
+        <div className="grid items-end gap-8 lg:grid-cols-[auto_minmax(0,1fr)] lg:gap-16">
           <div data-reveal="">
             <p className="mb-2 text-[13px] font-semibold uppercase tracking-[0.18em] text-[#c72554]">
               The science
@@ -89,7 +90,7 @@ export function HabitSection() {
           <div
             data-reveal=""
             style={{ "--d": "100ms" } as CSSProperties}
-            className="mt-8 max-w-2xl space-y-5 text-[17px] leading-[1.75] text-[#4a3a3d]"
+            className="max-w-2xl space-y-5 text-[17px] leading-[1.75] text-[#4a3a3d] lg:pb-3"
           >
             <p>
               Research from University College London found it takes an average
@@ -105,11 +106,14 @@ export function HabitSection() {
               until the habit takes hold.
             </p>
           </div>
+        </div>
 
+        {/* Row 2: the track beside the real milestone screen, which rises from the band's bottom */}
+        <div className="mt-12 grid gap-12 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)] lg:items-end lg:gap-16">
           {/* The track: one dot a day */}
           <ol
             data-reveal=""
-            className="habit-track mt-10 rounded-[28px] bg-white p-6 sm:p-8"
+            className="habit-track rounded-[28px] bg-white p-6 sm:p-8 lg:mb-24"
           >
             {phases.map((phase, p) => (
               <li
@@ -160,15 +164,15 @@ export function HabitSection() {
               </li>
             ))}
           </ol>
-        </div>
 
-        {/* The real 500-day celebration, climbing out of the bottom of the band */}
-        <div className="flex items-end justify-center">
+          {/* The real 500-day celebration, climbing out of the bottom of the band */}
+          <div className="flex items-end justify-center">
           <div data-reveal="phone">
             <Phone
               shot="07-milestone"
               alt="The 500 day streak celebration in Mile A Day"
             />
+          </div>
           </div>
         </div>
       </div>
