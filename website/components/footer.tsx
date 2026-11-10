@@ -18,7 +18,7 @@ export function Footer() {
               className="rounded-full"
               loading="lazy"
             />
-            <span className="font-heading text-[22px] tracking-[1px] text-[#f5f5f5]">MILE A DAY</span>
+            <span className="font-heading text-[21px] text-white">Mile A Day</span>
           </div>
 
           <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-3">
@@ -32,7 +32,7 @@ export function Footer() {
               What&apos;s New
             </Link>
             <a href="/#story" className="text-sm text-[#a0a0a0] transition-colors hover:text-[#f5f5f5]">
-              Our Story
+              Our story
             </a>
             <a href="/#support" className="text-sm text-[#a0a0a0] transition-colors hover:text-[#f5f5f5]">
               Help
@@ -89,7 +89,7 @@ export function Footer() {
 
         <div className="mt-10 flex flex-col items-center gap-3 rounded-2xl border border-white/[0.06] bg-white/[0.02] px-6 py-5 text-center sm:flex-row sm:justify-between sm:text-left">
           <p className="text-sm text-[#a0a0a0]">
-            <span className="font-semibold text-[#f5f5f5]">Need help?</span> Questions, bugs, or feedback — we read every
+            <span className="font-semibold text-[#f5f5f5]">Need help?</span> Questions, bugs or ideas. We read every
             email.
           </p>
           <a

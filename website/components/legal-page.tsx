@@ -16,7 +16,7 @@ export function LegalPage({ title, lastUpdated, children }: { title: string; las
 							className="rounded-full"
 							loading="lazy"
 						/>
-						<span className="font-heading text-[22px] tracking-[2px] text-[#f5f5f5]">MILE A DAY</span>
+						<span className="font-heading text-[21px] text-white">Mile A Day</span>
 					</Link>
 					<Link
 						href="/"

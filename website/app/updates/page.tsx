@@ -58,7 +58,7 @@ export default function UpdatesPage() {
             Release notes
           </span>
           <h1 className="font-heading text-[clamp(56px,10vw,120px)] leading-[0.9] tracking-[-2px] text-[#f5f5f5]">
-            WHAT&apos;S NEW
+            What&apos;s new
           </h1>
           <p className="mt-5 max-w-xl text-lg leading-relaxed text-[#a0a0a0]">
             Every Mile A Day update for iPhone and Apple Watch, newest first.

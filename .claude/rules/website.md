@@ -26,10 +26,11 @@ Use `npm` for all operations.
 - Custom glass-morphism classes (`.glass-card`, `.glass-nav`, `.glass-button`) in globals.css.
 
 ## Styling Patterns
-- Fonts: DM Sans (body) and Bebas Neue (headings) via `next/font/google`.
-- Primary color: `#c72554` (burgundy red).
-- Dark theme throughout (`bg-[#0a0a0a]`).
-- Scroll reveal animations via `ScrollReveal` component (Intersection Observer).
+- The home page IS the App Store listing: the hero and one `PanelBand` per screenshot (`components/feature-panels.tsx` `PANELS`), each in its screenshot's colour with the phone cut out of `marketing/app-store/<version>/` into `public/images/app-store/`. New screenshots = recut the phones + update `PANELS` copy/colours together.
+- Fonts: Inter (body, `--font-body`) and Inter Tight 800 (headings, `.font-heading`, `--font-display`) via `next/font/google`. Headlines are sentence case ending in a period, never all caps; eyebrows are small tracked caps. The OG cards keep their own vendored fonts.
+- No glass cards, glow blobs, icon-chip grids, marquees or scroll-reveal motion; plain dark (`#0e0809`/`#140b0e`) and cream (`#f6f1ec`) bands between the colour panels; buttons are solid pills (`AppStoreButton`).
+- Copy is plain and specific, written like a person: no em dashes, no "seamlessly"/"everything you need" filler.
+- Primary color: `#c72554` (burgundy red); the hero/CTA red is the screenshots' `#ec3047`→`#dc253b`.
 
 ## Admin dashboard (`app/admin/`)
 - Tabs render from the `TABS` array in `dashboard.tsx`; each tab is one file in `_components/`. Data goes through `getData("<path>")` → the same-origin proxy → backend `/admin/<path>`, so a new panel needs a backend route and nothing else.

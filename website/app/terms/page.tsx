@@ -26,7 +26,7 @@ export const metadata: Metadata = {
 
 export default function TermsPage() {
 	return (
-		<LegalPage title="TERMS OF USE" lastUpdated="November 6, 2026">
+		<LegalPage title="Terms of Use" lastUpdated="November 6, 2026">
 			<Section heading="Acceptance of Terms">
 				<p>
 					These Terms of Use (&ldquo;Terms&rdquo;) govern your use of the Mile A Day app and related services

@@ -54,7 +54,7 @@ export function DeskShowcase() {
             <span className="h-1.5 w-1.5 rounded-full bg-[#3ddc84]" /> Live right now
           </span>
           <h1 className="font-heading text-[clamp(44px,8vw,92px)] leading-[0.95] tracking-[-1px]">
-            YOUR STREAK,<br />ON YOUR <span className="text-[#c72554]">DESK</span>
+            Your streak,<br />on your <span className="text-[#c72554]">desk.</span>
           </h1>
           <p className="mx-auto mt-5 max-w-2xl text-base leading-relaxed text-[#a0a0a0] sm:text-lg">
             A little LED box that runs on real Mile A Day data. The one below is live: every number on it

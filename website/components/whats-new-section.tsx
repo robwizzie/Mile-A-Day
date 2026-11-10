@@ -28,26 +28,16 @@ export function WhatsNewSection() {
   }));
 
   return (
-    <section
-      id="whats-new"
-      className="section-lazy relative scroll-mt-20 px-6 py-24"
-    >
-      <div
-        className="pointer-events-none absolute inset-x-0 top-0 h-[520px]"
-        style={{
-          background:
-            "radial-gradient(ellipse 700px 380px at 50% 0%, rgba(255,138,61,0.07), transparent 70%)",
-        }}
-      />
+    <section id="whats-new" className="relative scroll-mt-20 bg-[#0e0809] px-6 py-24 text-white">
       <div className="relative mx-auto max-w-6xl">
-        <div className="mx-auto mb-14 max-w-2xl text-center">
-          <span className="reveal mb-4 inline-flex items-center gap-2 rounded-full border border-[#c72554]/30 bg-[#c72554]/10 px-3.5 py-1.5 text-xs font-semibold uppercase tracking-widest text-[#ff4d7d]">
+        <div className="mb-14 max-w-2xl">
+          <p className="mb-4 text-[13px] font-semibold uppercase tracking-[0.18em] text-white/60">
             {isCurrent ? "Just shipped" : "Shipped"} · {release.date}
-          </span>
-          <h2 className="reveal reveal-delay-1 font-heading text-[clamp(40px,6vw,72px)] leading-none tracking-[-1px] text-[#f5f5f5]">
-            NEW IN <span className="text-[#c72554]">{release.version}</span>
+          </p>
+          <h2 className="font-heading text-[clamp(40px,6vw,72px)] leading-[0.95]">
+            New in {release.version}
           </h2>
-          <label className="reveal reveal-delay-1 relative mt-5 inline-flex items-center">
+          <label className="relative mt-5 inline-flex items-center">
             <span className="sr-only">Show the release notes for</span>
             <select
               value={index}
@@ -62,7 +52,7 @@ export function WhatsNewSection() {
             </select>
             <ChevronDown className="pointer-events-none absolute right-3.5 h-4 w-4 text-[#a0a0a0]" />
           </label>
-          <p className="reveal reveal-delay-2 mt-4 text-base leading-relaxed text-[#a0a0a0]">
+          <p className="mt-4 text-[17px] leading-relaxed text-white/70">
             {release.summary}
           </p>
         </div>
@@ -73,58 +63,43 @@ export function WhatsNewSection() {
           </div>
         )}
 
-        <div className="reveal reveal-delay-2 glass-card rounded-2xl p-6 sm:p-8">
-          <h3 className="mb-6 text-xs font-semibold uppercase tracking-widest text-[#707070]">
+        <div>
+          <h3 className="mb-6 text-[13px] font-semibold uppercase tracking-[0.18em] text-white/50">
             {shots.length > 0 ? `Also in ${release.version}` : `Everything in ${release.version}`}
           </h3>
-          <div className="grid gap-x-8 gap-y-6 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid gap-x-10 gap-y-8 border-t border-white/10 pt-8 sm:grid-cols-2 lg:grid-cols-3">
             {rest.map((item) => (
-              <div key={item.title} className="flex items-start gap-3.5">
-                <div
-                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl"
-                  style={{ background: `${item.color}1f` }}
-                >
-                  <item.icon
-                    className="h-5 w-5"
-                    style={{ color: item.color }}
-                  />
-                </div>
-                <div className="min-w-0">
-                  <p className="text-[15px] font-semibold text-[#f5f5f5]">
-                    {item.title}
-                  </p>
-                  <p className="mt-0.5 text-sm leading-relaxed text-[#a0a0a0]">
-                    {item.desc}
-                  </p>
-                </div>
+              <div key={item.title} className="min-w-0">
+                <p className="text-[17px] font-semibold">{item.title}</p>
+                <p className="mt-1 text-[15px] leading-relaxed text-white/65">{item.desc}</p>
               </div>
             ))}
           </div>
         </div>
 
         {previous && (
-        <div className="reveal reveal-delay-3 mt-6 flex flex-col items-center justify-between gap-4 rounded-2xl border border-white/[0.06] px-6 py-5 sm:flex-row">
-          <p className="text-center text-sm text-[#a0a0a0] sm:text-left">
-            <span className="font-semibold text-[#f5f5f5]">
+        <div className="mt-12 flex flex-col justify-between gap-4 border-t border-white/10 pt-6 sm:flex-row sm:items-center">
+          <p className="text-[15px] text-white/60">
+            <span className="font-semibold text-white">
               Previously, in {previous.version}:
             </span>{" "}
             {previous.features
               .slice(0, 5)
               .map((f) => f.title)
-              .join(" · ")}{" "}
+              .join(", ")}{" "}
             and more.
           </p>
           <div className="flex shrink-0 items-center gap-5">
             <button
               type="button"
               onClick={() => setIndex(index + 1)}
-              className="text-sm font-semibold text-[#a0a0a0] transition-colors hover:text-[#f5f5f5]"
+              className="text-[15px] font-semibold text-white/70 transition-colors hover:text-white"
             >
               See {previous.version}
             </button>
             <Link
               href="/updates"
-              className="inline-flex items-center gap-1.5 text-sm font-semibold text-[#ff4d7d] transition-colors hover:text-[#ff7a9c]"
+              className="inline-flex items-center gap-1.5 text-[15px] font-semibold text-white underline decoration-white/30 underline-offset-4 hover:decoration-white"
             >
               Every update <ArrowRight className="h-4 w-4" />
             </Link>

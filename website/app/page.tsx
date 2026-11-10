@@ -1,22 +1,14 @@
 import type { Metadata } from "next";
 import { Navbar } from "@/components/navbar";
 import { HeroSection } from "@/components/hero-section";
-import { MarqueeSection } from "@/components/marquee-section";
-import { LiveStatsBand } from "@/components/live-stats-band";
-import { DeskTeaserSection } from "@/components/desk-teaser-section";
-import { FeedSection } from "@/components/feed-section";
+import { FeaturePanels } from "@/components/feature-panels";
+import { NumbersSection } from "@/components/numbers-section";
 import { WhatsNewSection } from "@/components/whats-new-section";
-import { FeaturesSection } from "@/components/features-section";
-import { BadgeShowcaseSection } from "@/components/badge-showcase-section";
-import { HabitSection } from "@/components/habit-section";
-import { CompetitionsSection } from "@/components/competitions-section";
-import { SocialSection } from "@/components/social-section";
-import { HowItWorksSection } from "@/components/how-it-works-section";
 import { StorySection } from "@/components/story-section";
 import { SupportSection } from "@/components/support-section";
+import { DeskTeaserSection } from "@/components/desk-teaser-section";
 import { CtaSection } from "@/components/cta-section";
 import { Footer } from "@/components/footer";
-import { ScrollReveal } from "@/components/scroll-reveal";
 import { CURRENT_RELEASE } from "@/lib/releases";
 import { APP_STORE_URL, SITE_URL, SUPPORT_EMAIL } from "@/lib/site";
 import { ogVideos } from "./_og/video/meta";
@@ -113,32 +105,22 @@ const structuredData = {
 // Escape "<" so no string in the data can close the script tag early.
 const structuredDataJson = JSON.stringify(structuredData).replace(/</g, "\\u003c");
 
-// Section order tells the story top to bottom: hook (hero) → live proof the
-// community is real (stats band) → what the app does (features) → what just
-// shipped (current release, full history at /updates) → the social
-// experience (feed, then friends/nudges) → the competitive layer
-// (competitions, medals) → why one mile works (habit) → how to start → who
-// built it → help & support → download.
+// The page is the App Store listing, told at web size: the header panel,
+// then one colour panel per screenshot (copy and phones from
+// marketing/app-store/<version>/), then plain proof (real numbers, what just
+// shipped, who made it), help, and one last ask.
 export default function Home() {
   return (
-    <main className="relative min-h-screen overflow-x-hidden bg-[#0a0a0a]">
+    <main className="relative min-h-screen overflow-x-hidden bg-[#0e0809]">
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: structuredDataJson }}
       />
-      <ScrollReveal />
       <Navbar />
       <HeroSection />
-      <MarqueeSection />
-      <LiveStatsBand />
-      <FeaturesSection />
+      <FeaturePanels />
+      <NumbersSection />
       <WhatsNewSection />
-      <FeedSection />
-      <SocialSection />
-      <CompetitionsSection />
-      <BadgeShowcaseSection />
-      <HabitSection />
-      <HowItWorksSection />
       <StorySection />
       <SupportSection />
       <DeskTeaserSection />

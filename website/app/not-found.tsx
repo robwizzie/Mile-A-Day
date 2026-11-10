@@ -10,7 +10,7 @@ export default function NotFound() {
       <Image src="/images/mad-circle-icon.png" alt="Mile A Day" width={72} height={72} className="mb-6 rounded-full" />
       <p className="text-sm font-semibold uppercase tracking-widest text-[#c72554]">404</p>
       <h1 className="font-heading mt-2 text-[clamp(44px,8vw,80px)] leading-none text-[#f5f5f5]">
-        WRONG TURN
+        Wrong turn.
       </h1>
       <p className="mt-4 max-w-sm text-base leading-relaxed text-[#a0a0a0]">
         This page doesn&apos;t exist, or the profile or post it pointed to is gone.

@@ -104,9 +104,7 @@ export default async function PostPage({
               height={44}
               className="rounded-full"
             />
-            <span className="font-heading text-[22px] tracking-[2px] text-[#f5f5f5]">
-              MILE A DAY
-            </span>
+            <span className="font-heading text-[21px] text-white">Mile A Day</span>
           </Link>
           <Link
             href="/"

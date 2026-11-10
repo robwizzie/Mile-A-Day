@@ -80,7 +80,7 @@ export async function generateMetadata({
 
 // The app's profile is drawn in SF Rounded; ui-rounded IS that on Apple
 // devices, DM Sans elsewhere.
-const ROUNDED = "[font-family:ui-rounded,var(--font-dm-sans),system-ui,sans-serif]";
+const ROUNDED = "[font-family:ui-rounded,var(--font-body),system-ui,sans-serif]";
 // MADTheme.Colors.madRed — the app's red, not the site's #c72554.
 const MAD_RED = "#D94059";
 
