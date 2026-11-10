@@ -49,13 +49,11 @@ function useCountUp(target: number | null, decimals = 0) {
 }
 
 function StatCard({
-  color,
   value,
   suffix,
   label,
   sublabel,
 }: {
-  color: string;
   value: string;
   suffix?: string;
   label: string;
@@ -63,7 +61,7 @@ function StatCard({
 }) {
   return (
     <div className="rounded-3xl bg-white/[0.04] px-6 py-7">
-      <div className="mb-5 h-1 w-10 rounded-full" style={{ background: color }} />
+      <div className="mb-5 h-1 w-10 rounded-full bg-[#ec3047]" />
       <div className="font-heading text-[clamp(34px,4.2vw,50px)] leading-none text-white tabular-nums">
         {value}
         {suffix && (
@@ -133,14 +131,14 @@ export function LiveStatsBand() {
         />
 
         <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
-          <StatCard color="#ec3047" value={Math.round(totalMiles).toLocaleString()} suffix="mi" label="Total miles logged" sublabel="every single one earned" />
-          <StatCard color="#2bc189" value={milesToday.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })} suffix="mi" label="Miles today" sublabel="and the day isn't over" />
-          <StatCard color="#3e82f4" value={Math.round(totalUsers).toLocaleString()} label="Members strong" sublabel="the whole community" />
-          <StatCard color="#16aeb1" value={Math.round(activeWeek).toLocaleString()} label="Out moving this week" sublabel="logging miles right now" />
-          <StatCard color="#6656ea" value={Math.round(photosShared).toLocaleString()} label="Photos shared" sublabel="milestones worth capturing" />
-          <StatCard color="#f7aa2c" value={Math.round(longestStreak).toLocaleString()} suffix="days" label="Longest active streak" sublabel="unbroken and still going" />
-          <StatCard color="#ff7555" value={Math.round(hypes).toLocaleString()} label="Hypes sent" sublabel="double-taps of pure support" />
-          <StatCard color="#9452ec" value={Math.round(nudges).toLocaleString()} label="Nudges delivered" sublabel="friendly kicks off the couch" />
+          <StatCard value={Math.round(totalMiles).toLocaleString()} suffix="mi" label="Total miles logged" sublabel="every single one earned" />
+          <StatCard value={milesToday.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })} suffix="mi" label="Miles today" sublabel="and the day isn't over" />
+          <StatCard value={Math.round(totalUsers).toLocaleString()} label="Members strong" sublabel="the whole community" />
+          <StatCard value={Math.round(activeWeek).toLocaleString()} label="Out moving this week" sublabel="in the last 7 days" />
+          <StatCard value={Math.round(photosShared).toLocaleString()} label="Photos shared" sublabel="milestones worth capturing" />
+          <StatCard value={Math.round(longestStreak).toLocaleString()} suffix="days" label="Longest active streak" sublabel="unbroken and still going" />
+          <StatCard value={Math.round(hypes).toLocaleString()} label="Hypes sent" sublabel="double-taps of pure support" />
+          <StatCard value={Math.round(nudges).toLocaleString()} label="Nudges delivered" sublabel="friendly kicks off the couch" />
         </div>
       </div>
     </section>

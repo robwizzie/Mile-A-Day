@@ -6,7 +6,7 @@ import { SUPPORT_EMAIL, SUPPORT_MAILTO } from "@/lib/site"
 
 export function Footer() {
   return (
-    <footer className="border-t border-[#333333]/40 px-6 py-14">
+    <footer className="border-t border-white/10 bg-[#0e0809] px-6 py-14">
       <div className="mx-auto max-w-6xl">
         <div className="flex flex-col items-center gap-8 md:flex-row md:justify-between">
           <div className="flex items-center gap-3">
@@ -29,7 +29,7 @@ export function Footer() {
               Competitions
             </a>
             <Link href="/updates" className="text-sm text-[#a0a0a0] transition-colors hover:text-[#f5f5f5]">
-              What&apos;s New
+              What&apos;s new
             </Link>
             <a href="/#story" className="text-sm text-[#a0a0a0] transition-colors hover:text-[#f5f5f5]">
               Our story

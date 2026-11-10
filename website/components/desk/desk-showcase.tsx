@@ -46,15 +46,14 @@ export function DeskShowcase() {
   };
 
   return (
-    <main className="relative min-h-screen overflow-x-hidden bg-[#0a0a0a] text-[#f5f5f5]">
-      <section className="relative px-4 pb-10 pt-28 sm:px-6"
-               style={{ background: "radial-gradient(ellipse 900px 520px at 50% 40%, rgba(199,37,84,0.14) 0%, transparent 70%)" }}>
+    <main className="relative min-h-screen overflow-x-hidden bg-[#0e0809] text-[#f5f5f5]">
+      <section className="relative px-4 pb-10 pt-28 sm:px-6">
         <div className="mx-auto max-w-5xl text-center">
-          <span className="mb-4 inline-flex items-center gap-2 rounded-full bg-white/[0.06] px-3 py-1 text-xs font-semibold uppercase tracking-widest text-[#c72554]">
+          <span className="mb-4 inline-flex items-center gap-2 rounded-full bg-white/[0.06] px-3 py-1 text-[13px] font-semibold uppercase tracking-[0.18em] text-[#ff5a6e]">
             <span className="h-1.5 w-1.5 rounded-full bg-[#3ddc84]" /> Live right now
           </span>
           <h1 className="font-heading text-[clamp(44px,8vw,92px)] leading-[0.95] tracking-[-1px]">
-            Your streak,<br />on your <span className="text-[#c72554]">desk.</span>
+            Your streak,<br />on your desk.
           </h1>
           <p className="mx-auto mt-5 max-w-2xl text-base leading-relaxed text-[#a0a0a0] sm:text-lg">
             A little LED box that runs on real Mile A Day data. The one below is live: every number on it
@@ -92,7 +91,7 @@ export function DeskShowcase() {
           </div>
           <p className="text-sm text-white/50">{STYLES.find((s) => s.id === style)?.blurb}</p>
           <a href="#want-one"
-             className="mt-3 rounded-2xl bg-[#c72554] px-6 py-3 text-sm font-extrabold transition-transform hover:-translate-y-0.5">
+             className="mt-3 rounded-full bg-[#ec3047] px-6 py-3 text-sm font-extrabold transition-transform hover:-translate-y-0.5">
             I want one ↓
           </a>
         </div>
@@ -101,7 +100,7 @@ export function DeskShowcase() {
       <section className="px-6 py-14">
         <div className="mx-auto max-w-5xl">
           <h2 className="text-center font-heading text-[clamp(32px,5vw,56px)] leading-none">
-            WITH YOUR OWN, IT&apos;S <span className="text-[#c72554]">ALL YOU</span>
+            With your own, it&apos;s all you.
           </h2>
           <p className="mx-auto mt-3 max-w-xl text-center text-[#a0a0a0]">
             Connected to your account, the box shows your day and your friends, not just the community.
@@ -160,19 +159,18 @@ function InterestForm() {
   };
 
   return (
-    <section id="want-one" className="px-4 py-16 sm:px-6"
-             style={{ background: "radial-gradient(ellipse 600px 400px at 50% 100%, rgba(199,37,84,0.10) 0%, transparent 70%)" }}>
+    <section id="want-one" className="px-4 py-16 sm:px-6">
       <div className="mx-auto max-w-xl rounded-3xl border border-white/[0.08] bg-[#121214] p-6 sm:p-8">
         {status === "done" ? (
           <div className="py-6 text-center">
             <div className="desk-pop mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-[#c72554] text-2xl font-black">✓</div>
-            <h2 className="font-heading text-4xl">YOU&apos;RE ON THE LIST</h2>
+            <h2 className="font-heading text-4xl">You&apos;re on the list.</h2>
             <p className="mt-2 text-[#a0a0a0]">Thanks{name.trim() ? `, ${name.trim().split(" ")[0]}` : ""}! We&apos;ll email you before anyone else when boxes are ready.</p>
           </div>
         ) : (
           <form onSubmit={submit} className="flex flex-col gap-4">
             <div className="text-center">
-              <h2 className="font-heading text-[clamp(34px,5vw,48px)] leading-none">WANT ONE?</h2>
+              <h2 className="font-heading text-[clamp(34px,5vw,48px)] leading-none">Want one?</h2>
               <p className="mt-2 text-sm text-[#a0a0a0]">
                 We&apos;re thinking about making a small batch. Tell us you&apos;d buy one and you&apos;ll hear first.
               </p>
@@ -204,7 +202,7 @@ function InterestForm() {
             <input tabIndex={-1} autoComplete="off" aria-hidden value={trap} onChange={(e) => setTrap(e.target.value)}
                    name="website" style={{ position: "absolute", left: "-10000px", width: 1, height: 1, opacity: 0 }} />
             <button type="submit" disabled={status === "sending"}
-                    className="mt-1 rounded-2xl bg-[#c72554] py-3.5 text-base font-extrabold transition-transform hover:-translate-y-0.5 disabled:opacity-60">
+                    className="mt-1 rounded-full bg-[#ec3047] py-3.5 text-base font-extrabold transition-transform hover:-translate-y-0.5 disabled:opacity-60">
               {status === "sending" ? "Saving…" : "I'd buy one"}
             </button>
             {status === "error" && <p className="text-center text-sm text-[#ff6b8b]">{error}</p>}

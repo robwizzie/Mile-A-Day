@@ -93,7 +93,7 @@ export default async function PostPage({
   const streak = publicStreak(post);
 
   return (
-    <main className="relative min-h-screen overflow-x-hidden bg-[#0a0a0a]">
+    <main className="relative min-h-screen overflow-x-hidden bg-[#0e0809]">
       <nav className="border-b border-[#333333]/40 py-5">
         <div className="mx-auto flex max-w-3xl items-center justify-between px-6">
           <Link href="/" className="flex items-center gap-3">
@@ -152,13 +152,13 @@ export default async function PostPage({
           <div className="mt-9 space-y-3">
             <a
               href={`mileaday://p/${encodeURIComponent(post.post_id)}`}
-              className="glass-button flex w-full items-center justify-center gap-2 rounded-2xl bg-[#c72554] px-6 py-4 text-[16px] font-semibold text-white transition-transform hover:scale-[1.02]"
+              className="glass-button flex w-full items-center justify-center gap-2 rounded-full px-6 py-4 text-[16px] font-semibold text-white"
             >
               Open in Mile A Day
             </a>
             <a
               href={APP_STORE_URL}
-              className="glass-button flex w-full items-center justify-center gap-2 rounded-2xl border border-[#c72554]/50 px-6 py-4 text-[16px] font-semibold text-[#f5f5f5] transition-transform hover:scale-[1.02]"
+              className="flex w-full items-center justify-center gap-2 rounded-full bg-white px-6 py-4 text-[16px] font-semibold text-[#16090c] transition-colors hover:bg-white/90"
             >
               <Apple className="h-5 w-5" aria-hidden />
               Get the app on the App Store

@@ -43,18 +43,14 @@ const APPLE_LOGO =
 
 export default function UpdatesPage() {
   return (
-    <main className="relative min-h-screen overflow-x-hidden bg-[#0a0a0a]">
+    <main className="relative min-h-screen overflow-x-hidden bg-[#0e0809]">
       <Navbar />
 
       <header
         className="relative px-6 pb-14 pt-36"
-        style={{
-          background:
-            "radial-gradient(ellipse 700px 420px at 50% 0%, rgba(199,37,84,0.10), transparent 70%)",
-        }}
       >
         <div className="mx-auto max-w-6xl">
-          <span className="mb-4 inline-block text-sm font-semibold uppercase tracking-widest text-[#c72554]">
+          <span className="mb-4 inline-block text-[13px] font-semibold uppercase tracking-[0.18em] text-[#ff5a6e]">
             Release notes
           </span>
           <h1 className="font-heading text-[clamp(56px,10vw,120px)] leading-[0.9] tracking-[-2px] text-[#f5f5f5]">
@@ -82,7 +78,7 @@ export default function UpdatesPage() {
               href={APP_STORE_URL}
               target="_blank"
               rel="noopener noreferrer"
-              className="glass-button inline-flex shrink-0 items-center justify-center gap-2.5 rounded-xl px-6 py-3 text-sm font-semibold text-white"
+              className="glass-button inline-flex shrink-0 items-center justify-center gap-2.5 rounded-full px-6 py-3 text-sm font-semibold text-white"
             >
               <svg
                 className="h-4 w-4"

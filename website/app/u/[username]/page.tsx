@@ -136,7 +136,7 @@ export default async function ProfilePage({
         : "text-[24px] sm:text-[28px]";
 
   return (
-    <main className="relative min-h-screen overflow-x-hidden bg-[#0a0a0a]">
+    <main className="relative min-h-screen overflow-x-hidden bg-[#0e0809]">
       {/* ProfileHero: full-bleed banner (photo, else the preset gradient),
           scrims top and bottom, the wordmark bar riding on it, and the
           avatar in its goal ring hanging off the bottom edge. */}
@@ -259,13 +259,13 @@ export default async function ProfilePage({
         <div className="mt-9 space-y-3 font-sans">
           <a
             href={`mileaday://u/${encodeURIComponent(profile.username ?? "")}`}
-            className="glass-button flex w-full items-center justify-center gap-2 rounded-2xl bg-[#c72554] px-6 py-4 text-[16px] font-semibold text-white transition-transform hover:scale-[1.02]"
+            className="glass-button flex w-full items-center justify-center gap-2 rounded-full px-6 py-4 text-[16px] font-semibold text-white"
           >
             Open in Mile A Day
           </a>
           <a
             href={APP_STORE_URL}
-            className="glass-button flex w-full items-center justify-center gap-2 rounded-2xl border border-[#c72554]/50 px-6 py-4 text-[16px] font-semibold text-[#f5f5f5] transition-transform hover:scale-[1.02]"
+            className="flex w-full items-center justify-center gap-2 rounded-full bg-white px-6 py-4 text-[16px] font-semibold text-[#16090c] transition-colors hover:bg-white/90"
           >
             <Apple className="h-5 w-5" aria-hidden />
             Get the app on the App Store

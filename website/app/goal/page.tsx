@@ -62,7 +62,7 @@ export default async function GoalPage({
   const referrer = referrerFrom(params.ref);
 
   return (
-    <div className="min-h-screen bg-[#0d0a0b] text-white">
+    <div className="min-h-screen bg-[#0e0809] text-white">
       <main className="mx-auto flex max-w-2xl flex-col gap-6 px-5 py-14">
         <div className="flex items-center gap-3">
           <Image src="/images/mad-circle-icon.png" alt="" width={40} height={40} className="rounded-xl" />
@@ -90,7 +90,7 @@ export default async function GoalPage({
                 role="img"
                 aria-label={`${goal.percent}% of the way`}
               >
-                <div className="h-full rounded-full bg-[#d94059]" style={{ width: `${goal.percent}%` }} />
+                <div className="h-full rounded-full bg-[#ec3047]" style={{ width: `${goal.percent}%` }} />
               </div>
               {walkingToday(goal) && (
                 <p className="flex items-center gap-2 text-sm font-semibold text-white/75">
@@ -135,7 +135,7 @@ export default async function GoalPage({
         <div className="flex flex-col gap-2">
           <a
             href={APP_STORE_URL}
-            className="rounded-full bg-[#d94059] px-6 py-4 text-center text-lg font-bold text-white transition-colors hover:bg-[#c72554]"
+            className="rounded-full bg-[#ec3047] px-6 py-4 text-center text-lg font-bold text-white transition-colors hover:bg-[#d6243a]"
           >
             Join on the App Store
           </a>

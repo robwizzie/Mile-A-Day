@@ -87,23 +87,14 @@
 
 /* Liquid Glass Effects */
 .glass-card {
-  background: linear-gradient(135deg, rgba(26, 26, 26, 0.7), rgba(37, 37, 37, 0.4));
-  backdrop-filter: blur(40px) saturate(1.8);
-  -webkit-backdrop-filter: blur(40px) saturate(1.8);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow:
-    inset 0 1px 0 0 rgba(255, 255, 255, 0.05),
-    0 20px 60px -10px rgba(0, 0, 0, 0.5);
+  /* Flat, like the app's DashboardCardSurface: no blur, gradient or shadow. */
+  background: rgba(255, 255, 255, 0.045);
+  border: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 .glass-card-highlight {
-  background: linear-gradient(135deg, rgba(199, 37, 84, 0.15), rgba(139, 21, 56, 0.08));
-  backdrop-filter: blur(40px) saturate(1.8);
-  -webkit-backdrop-filter: blur(40px) saturate(1.8);
-  border: 1px solid rgba(199, 37, 84, 0.25);
-  box-shadow:
-    inset 0 1px 0 0 rgba(255, 255, 255, 0.05),
-    0 20px 60px -10px rgba(199, 37, 84, 0.2);
+  background: rgba(236, 48, 71, 0.12);
+  border: 1px solid rgba(236, 48, 71, 0.25);
 }
 
 .glass-nav {
@@ -114,18 +105,13 @@
 }
 
 .glass-button {
-  background: linear-gradient(135deg, #c72554, #8b1538);
-  box-shadow:
-    0 0 30px rgba(199, 37, 84, 0.4),
-    inset 0 1px 0 0 rgba(255, 255, 255, 0.15);
-  transition: all 0.3s ease;
+  /* A solid pill colour, the site's one red. */
+  background: #ec3047;
+  transition: background-color 0.2s ease;
 }
 
 .glass-button:hover {
-  box-shadow:
-    0 0 50px rgba(199, 37, 84, 0.6),
-    inset 0 1px 0 0 rgba(255, 255, 255, 0.2);
-  transform: translateY(-2px);
+  background: #d6243a;
 }
 
 .phone-mockup {
@@ -172,25 +158,10 @@
 
 /* Mobile Safari performance: eliminate GPU-heavy effects */
 @media (max-width: 768px) {
-  .glass-card {
-    backdrop-filter: none;
-    -webkit-backdrop-filter: none;
-    background: rgba(26, 26, 26, 0.85);
-    box-shadow: 0 4px 20px -4px rgba(0, 0, 0, 0.4);
-  }
-  .glass-card-highlight {
-    backdrop-filter: none;
-    -webkit-backdrop-filter: none;
-    background: rgba(199, 37, 84, 0.1);
-    box-shadow: none;
-  }
   .glass-nav {
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
     background: rgba(10, 10, 10, 0.92);
-  }
-  .glass-button {
-    box-shadow: none;
   }
   .phone-mockup {
     box-shadow:
@@ -411,24 +382,10 @@ html {
 
 /* Hero gradient — static base + opacity-only animated glow (GPU composited) */
 .hero-gradient {
-  background:
-    radial-gradient(ellipse 600px 500px at 15% 10%, rgba(199,37,84,0.13) 0%, transparent 70%),
-    radial-gradient(ellipse 500px 600px at 85% 85%, rgba(139,21,56,0.10) 0%, transparent 70%),
-    radial-gradient(ellipse 400px 300px at 50% 40%, rgba(42,10,26,0.08) 0%, transparent 60%),
-    #0a0a0a;
+  background: #0e0809;
 }
 
 /* Animated glow — only animates opacity (no layout/paint, pure compositor) */
-.hero-gradient::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: radial-gradient(ellipse 500px 400px at 30% 20%, rgba(199,37,84,0.10) 0%, transparent 70%);
-  animation: hero-glow-pulse 6s ease-in-out infinite alternate;
-  will-change: opacity;
-  pointer-events: none;
-  z-index: 0;
-}
 
 @keyframes hero-glow-pulse {
   0%   { opacity: 0.4; }

@@ -8,7 +8,7 @@ export default function NotFound() {
   return (
     <main className="hero-gradient flex min-h-screen flex-col items-center justify-center px-6 text-center">
       <Image src="/images/mad-circle-icon.png" alt="Mile A Day" width={72} height={72} className="mb-6 rounded-full" />
-      <p className="text-sm font-semibold uppercase tracking-widest text-[#c72554]">404</p>
+      <p className="text-[13px] font-semibold uppercase tracking-[0.18em] text-[#ff5a6e]">404</p>
       <h1 className="font-heading mt-2 text-[clamp(44px,8vw,80px)] leading-none text-[#f5f5f5]">
         Wrong turn.
       </h1>
@@ -25,7 +25,7 @@ export default function NotFound() {
         </Link>
         <a
           href={APP_STORE_URL}
-          className="rounded-full bg-[#c72554] px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-[#a81f47]"
+          className="rounded-full bg-[#ec3047] px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-[#d6243a]"
         >
           Get the app
         </a>

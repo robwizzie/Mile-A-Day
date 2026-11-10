@@ -4,7 +4,7 @@ import { Footer } from '@/components/footer';
 
 export function LegalPage({ title, lastUpdated, children }: { title: string; lastUpdated: string; children: React.ReactNode }) {
 	return (
-		<main className="relative min-h-screen overflow-x-hidden bg-[#0a0a0a]">
+		<main className="relative min-h-screen overflow-x-hidden bg-[#0e0809]">
 			<nav className="border-b border-[#333333]/40 py-5">
 				<div className="mx-auto flex max-w-3xl items-center justify-between px-6">
 					<Link href="/" className="flex items-center gap-3">

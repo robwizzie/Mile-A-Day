@@ -1,3 +1,5 @@
+import { Phone } from "./feature-panels";
+
 const phases = [
   {
     days: "1–21",
@@ -16,22 +18,16 @@ const phases = [
   },
 ];
 
-const records = [
-  { label: "Fastest mile", value: "5:12", color: "#2bc189" },
-  { label: "Longest streak", value: "511 days", color: "#f7aa2c" },
-  { label: "Most in one day", value: "26.2 mi", color: "#9452ec" },
-];
-
-/** Why one mile works: the 66-day habit research, on the warm light band. */
+/** Why one mile works: the 66-day habit research, beside the app's real milestone screen. */
 export function HabitSection() {
   return (
     <section
       id="habit"
-      className="scroll-mt-20 bg-[#f6f1ec] px-6 py-24 text-[#1d1214]"
+      className="scroll-mt-20 bg-[#f6f1ec] px-6 pt-24 text-[#1d1214]"
     >
       <div className="mx-auto max-w-6xl">
-        <div className="grid items-end gap-10 lg:grid-cols-[auto_minmax(0,1fr)] lg:gap-16">
-          <div>
+        <div className="grid gap-12 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)] lg:gap-16">
+          <div className="pb-4 lg:pb-24">
             <p className="mb-2 text-[13px] font-semibold uppercase tracking-[0.18em] text-[#c72554]">
               The science
             </p>
@@ -43,57 +39,52 @@ export function HabitSection() {
                 days to build a habit.
               </span>
             </h2>
-          </div>
-          <div className="max-w-2xl space-y-5 text-[17px] leading-[1.75] text-[#4a3a3d] lg:pb-2">
-            <p>
-              Research from University College London found it takes an average
-              of 66 days for a new behavior to become automatic. That&apos;s
-              just over two months of showing up before your daily mile stops
-              feeling like effort and starts feeling like second nature.
-            </p>
-            <p>
-              The best part? Once it clicks, you don&apos;t have to think about
-              it anymore. Your mile becomes as automatic as brushing your teeth.
-              You just do it. And Mile A Day is designed to get you there: the
-              streak, the accountability and the competition all keep you going
-              until the habit takes hold.
-            </p>
-          </div>
-        </div>
-
-        <ol className="mt-14 grid gap-4 md:grid-cols-3">
-          {phases.map((phase) => (
-            <li key={phase.title} className="rounded-3xl bg-white px-7 py-8">
-              <div className="font-heading text-[40px] leading-none text-[#ec3047]">
-                {phase.days}
-              </div>
-              <h3 className="mt-4 font-heading text-[24px]">{phase.title}</h3>
-              <p className="mt-2 text-[15px] leading-relaxed text-[#4a3a3d]">
-                {phase.body}
+            <div className="mt-8 max-w-2xl space-y-5 text-[17px] leading-[1.75] text-[#4a3a3d]">
+              <p>
+                Research from University College London found it takes an
+                average of 66 days for a new behavior to become automatic.
+                That&apos;s just over two months of showing up before your daily
+                mile stops feeling like effort and starts feeling like second
+                nature.
               </p>
-            </li>
-          ))}
-        </ol>
+              <p>
+                The best part? Once it clicks, you don&apos;t have to think
+                about it anymore. Your mile becomes as automatic as brushing
+                your teeth. You just do it. And Mile A Day is designed to get
+                you there: the streak, the accountability and the competition
+                all keep you going until the habit takes hold. Every milestone
+                on the way gets its moment, and a medal to keep.
+              </p>
+            </div>
 
-        <div className="mt-14">
-          <h3 className="font-heading text-[26px]">
-            Track your personal bests.
-          </h3>
-          <div className="mt-5 grid gap-4 sm:grid-cols-3">
-            {records.map((record) => (
-              <div
-                key={record.label}
-                className="rounded-3xl px-6 py-6 text-white"
-                style={{ background: record.color }}
-              >
-                <div className="text-[13px] font-semibold uppercase tracking-[0.14em] text-white/85">
-                  {record.label}
-                </div>
-                <div className="mt-2 font-heading text-[40px] leading-none">
-                  {record.value}
-                </div>
-              </div>
-            ))}
+            <ol className="mt-10 space-y-3">
+              {phases.map((phase) => (
+                <li
+                  key={phase.title}
+                  className="grid grid-cols-[88px_minmax(0,1fr)] gap-4 rounded-3xl bg-white px-6 py-5"
+                >
+                  <div className="font-heading text-[28px] leading-none text-[#ec3047]">
+                    {phase.days}
+                  </div>
+                  <div>
+                    <h3 className="font-heading text-[20px] leading-none">
+                      {phase.title}
+                    </h3>
+                    <p className="mt-2 text-[15px] leading-relaxed text-[#4a3a3d]">
+                      {phase.body}
+                    </p>
+                  </div>
+                </li>
+              ))}
+            </ol>
+          </div>
+
+          {/* The real 500-day celebration, rising from the bottom like the panels */}
+          <div className="flex items-end justify-center">
+            <Phone
+              shot="07-milestone"
+              alt="The 500 day streak celebration in Mile A Day"
+            />
           </div>
         </div>
       </div>
