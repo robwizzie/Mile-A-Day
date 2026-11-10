@@ -100,6 +100,15 @@ struct FlameyItemArt: View {
         }
     }
 
+    /// Where the mannequin's hands go under a held prop: the prop's own
+    /// grip at this tile's reach (the default 0.9 of `FlameyOutfitLayer`).
+    /// The tile draws the prop as one picture (`held-body`), so the hands
+    /// go where that picture holds it, mitts or not.
+    private func mannequinHold(_ look: FlameyLook) -> FlameArmHold? {
+        guard item.slot == .held else { return nil }
+        return look.armHold(reach: 0.9, carryMitts: false)
+    }
+
     @ViewBuilder
     private func content(box: CGFloat) -> some View {
         switch item.slot {
@@ -118,13 +127,15 @@ struct FlameyItemArt: View {
             let size = box * k
             let one = look([color, item])
             ZStack {
-                FlameyOutfitLayer(look: one, size: size, side: .behind, still: true)
+                FlameyOutfitLayer(look: one, size: size, side: .behind, still: true, armsCarryMitts: false)
                 if usesMannequin && mannequin {
-                    FlameyDressedFigure(look: .plain, health: .healthy, size: size, scale: 1)
+                    // A held prop is held: the mannequin's hand reaches it
+                    // (gloves are drawn on his resting hands here).
+                    FlameyDressedFigure(look: .plain, health: .healthy, size: size, scale: 1, hold: mannequinHold(one))
                         .saturation(0)
-                        .opacity(0.16)
+                        .opacity(item.slot == .held ? 0.3 : 0.16)
                 }
-                FlameyOutfitLayer(look: one, size: size, side: .front, still: true)
+                FlameyOutfitLayer(look: one, size: size, side: .front, still: true, armsCarryMitts: false)
             }
             .frame(width: size, height: size)
             .offset(x: -cx * size, y: -cy * size)

@@ -161,6 +161,27 @@ export async function resolveAudience(
 	return resolveFromRows(rows, direction, eventType, activity);
 }
 
+/**
+ * Whether the user chose an audience for this event themselves (an exact
+ * event+activity row or an event-level row). The global `*` row doesn't
+ * count: it's the hero default, not a choice about this event.
+ */
+export async function hasExplicitEventAudience(
+	userId: string,
+	direction: AudienceDirection,
+	eventType: AudienceEventType,
+	activity: AudienceActivity
+): Promise<boolean> {
+	const rows = await db.query(
+		`SELECT 1 FROM notification_audience_settings
+		 WHERE user_id = $1 AND direction = $2 AND event_type = $3
+		   AND activity_type = ANY($4::text[])
+		 LIMIT 1`,
+		[userId, direction, eventType, [activity, '']]
+	);
+	return rows.length > 0;
+}
+
 // ─── filterByIncomingAudience ─────────────────────────────────────────
 
 export async function filterByIncomingAudience(

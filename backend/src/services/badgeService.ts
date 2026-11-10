@@ -20,6 +20,7 @@ import type {
   BadgeCategory,
 } from "../types/badge.js";
 import { evaluateChallengesForBatch } from "./dailyChallengeService.js";
+import { eventHitsAllHistory, eventHitsForWorkouts } from "./specialEventService.js";
 import { evaluateWeeklyChallengeForUser } from "./weeklyChallengeService.js";
 
 const db = PostgresService.getInstance();
@@ -461,6 +462,16 @@ export async function evaluateForUser(
       workoutId: hit.workoutId,
       earnedAt: hit.earnedAt,
     });
+  }
+
+  // Special events (Champ 5K Day) are a fact about ONE DAY too: the event's
+  // distance covered on its local date, judged and dated like a holiday.
+  const eventHits = opts.allHolidays
+    ? await eventHitsAllHistory(userId)
+    : await eventHitsForWorkouts(userId, newWorkoutIds);
+  for (const hit of eventHits) {
+    if (earned.has(hit.badgeId) || !catalogIds.has(hit.badgeId)) continue;
+    toInsert.push({ badgeId: hit.badgeId, aggregateOnly: false, workoutId: hit.workoutId, earnedAt: hit.earnedAt });
   }
 
   if (toInsert.length === 0) {
@@ -1452,6 +1463,19 @@ const EXTRA_BADGES: Array<{
     rarity: "legendary",
     requirement: 12,
     sortOrder: 975,
+  },
+  // Special events. Granted by the event's own award (a null requirement
+  // earns nothing here); "competition" so a later deletion can't revoke it.
+  // Unlocks the Champ Shorts + Boxing Gloves skins.
+  {
+    badgeId: "event_champ_5k_2026",
+    category: "competition",
+    name: "Champ 5K Day",
+    description: "Walked or ran a 5K on Champ 5K Day, Nov 14, 2026.",
+    icon: "figure.boxing",
+    rarity: "legendary",
+    requirement: null,
+    sortOrder: 960,
   },
   // Holiday medals — one per HOLIDAYS entry, evergreen (earned once, ever).
   // No numeric requirement: the rule is "goal met on that local day".

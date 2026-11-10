@@ -5,6 +5,7 @@ import { challengeForNotification } from "./dailyChallengeService.js";
 import { standing } from "./h2hMatchupService.js";
 import { stepGoalMetSql } from "./streakFeatureCore.js";
 import { userOffsetMinutesOrNullSql } from "./dailyResetTime.js";
+import { shouldSendNotification } from "./notificationSettingsService.js";
 
 const db = PostgresService.getInstance();
 
@@ -442,4 +443,75 @@ export async function sendPendingDailyReminders(): Promise<void> {
       }
     }),
   );
+}
+
+// ─── Morning challenge ──────────────────────────────────────────────
+
+/** Local hour the morning "today's challenge" push goes out. */
+export const MORNING_CHALLENGE_HOUR = 9;
+
+/**
+ * Says what today's challenge IS, every morning, whether or not the mile is
+ * done — the reminder above only names it in the evening and only to people
+ * who haven't walked yet, so most days nobody learned the challenge from a
+ * notification at all (worst on a Head-to-Head day, the one challenge you
+ * play against someone).
+ *
+ * Its own type, `daily_challenge`, rung only on devices that declare
+ * `daily_challenge_push_v1` (they route it to the challenge screen); older
+ * builds get nothing new. Cap-exempt (once a day, claimed per user+day in
+ * milestone_notifications) and muted by the challenges switch.
+ */
+export async function sendMorningChallengePushes(): Promise<void> {
+  const due = await db.query<{ user_id: string; local_date: string }>(
+    `WITH user_tz AS (
+       SELECT u.user_id, ${userOffsetMinutesOrNullSql("u.user_id")} AS tz_offset FROM users u
+     )
+     SELECT t.user_id, (NOW() + (t.tz_offset || ' minutes')::interval)::date::text AS local_date
+       FROM user_tz t
+      WHERE t.tz_offset IS NOT NULL
+        AND EXTRACT(HOUR FROM (NOW() + (t.tz_offset || ' minutes')::interval)) = $1
+        AND EXISTS (
+          SELECT 1 FROM device_tokens dt
+           WHERE dt.user_id = t.user_id
+             AND 'daily_challenge_push_v1' = ANY(COALESCE(dt.client_features, '{}'::text[]))
+        )`,
+    [MORNING_CHALLENGE_HOUR],
+  );
+  if (due.length === 0) return;
+  const duels = await matchupsFor(due.map((d) => ({ ...d, goal_miles: 1, tz_offset: 0 })));
+
+  for (const { user_id, local_date } of due) {
+    try {
+      if (!(await shouldSendNotification(user_id, null, "weekly_challenge"))) continue;
+      const challenge = await challengeForNotification(user_id, local_date);
+      if (!challenge) continue;
+      const claimed = await db.query(
+        `INSERT INTO milestone_notifications (milestone_key, user_id) VALUES ($1, $2)
+         ON CONFLICT (milestone_key) DO NOTHING RETURNING id`,
+        [`daily_challenge:${user_id}:${local_date}`, user_id],
+      );
+      if (claimed.length === 0) continue;
+      const duel = duels.get(user_id);
+      const copy = duel
+        ? {
+            title: `Head-to-Head today vs ${duel.rival_username ? `@${duel.rival_username}` : "a friend"} 🥊`,
+            body: "Most miles by midnight wins. Every walk and run counts.",
+          }
+        : challenge.key === "head_to_head"
+          ? { title: "Head-to-Head day 🥊", body: "You're matched with a friend today. Most miles by midnight wins." }
+          : { title: `Today's challenge: ${challenge.title}`, body: challenge.description };
+      await sendPush(
+        user_id,
+        {
+          ...copy,
+          type: "daily_challenge",
+          data: { kind: "challenge", challenge_key: challenge.key, local_date },
+        },
+        { deviceFeature: { feature: "daily_challenge_push_v1", supported: true } },
+      );
+    } catch (err: any) {
+      console.error(`[MorningChallenge] Failed for user ${user_id}: ${err?.message ?? err}`);
+    }
+  }
 }

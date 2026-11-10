@@ -109,6 +109,11 @@ struct CompeteHomeView: View {
                         .listRowInsets(EdgeInsets(top: 10, leading: 14, bottom: 4, trailing: 14))
                 }
 
+                SpecialEventCard()
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+                    .listRowInsets(EdgeInsets(top: 6, leading: 14, bottom: 4, trailing: 14))
+
                 CommunityGoalCard()
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)

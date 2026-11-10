@@ -4095,6 +4095,29 @@ export const communityGoalPushLog = pgTable(
   ],
 ).enableRLS();
 
+// Special-event pushes (Champ 5K Day): one row per event, person and kind,
+// claimed before sending so a re-run never pushes twice. Events are code
+// constants (specialEventService.ts), so event_id has no foreign key.
+export const specialEventPushLog = pgTable(
+  "special_event_push_log",
+  {
+    eventId: text("event_id").notNull(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.userId, { onDelete: "cascade" }),
+    kind: text("kind").notNull(),
+    sentAt: timestamp("sent_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.eventId, table.userId, table.kind],
+      name: "special_event_push_log_pkey",
+    }),
+  ],
+).enableRLS();
+
 // Who referred whom. One referrer per person, chosen from real accounts. A
 // referral counts only once `status` is 'qualified' (docs/specs/referrals.md).
 export const referrals = pgTable(

@@ -266,8 +266,27 @@ enum FlameyArt {
     /// the viewer's left, his holding side), for `FlameBuddyArms(hold:)` —
     /// the skin's `rules.arm_hold`, recorded per reach; tight and wide
     /// surfaces differ, nothing else does.
-    static func heldArmTargets(_ item: FlameyItem?, reach: CGFloat) -> FlameArmHold? {
-        guard let item, let holds = item.skin?.rules["arm_hold"] as? [String: Any] else { return nil }
+    /// `carryMitts: false` is the hold as builds before mitts drew it (the
+    /// prop's `held-body` at its grip) — the Closet tile, which has no arms.
+    static func heldArmTargets(_ item: FlameyItem?, reach: CGFloat, carryMitts: Bool = true) -> FlameArmHold? {
+        guard let item else { return nil }
+        let mitts = carryMitts && wornOnHands(item)
+        // Gloves: the arms keep whatever pose he's in and carry the mitts.
+        if mitts, item.skin?.ruleBool("mitt_follows_pose") == true {
+            return FlameArmHold(mitt: item, mittReach: reach)
+        }
+        guard var hold = recordedArmTargets(item, reach: reach) else {
+            return mitts ? FlameArmHold(mitt: item, mittReach: reach) : nil
+        }
+        if mitts {
+            hold.mitt = item
+            hold.mittReach = reach
+        }
+        return hold
+    }
+
+    private static func recordedArmTargets(_ item: FlameyItem, reach: CGFloat) -> FlameArmHold? {
+        guard let holds = item.skin?.rules["arm_hold"] as? [String: Any] else { return nil }
         let want = isTight(reach) ? reach : max(reach, tightReach)
         let key = holds.keys.min { a, b in
             func score(_ k: String) -> Double {
@@ -286,6 +305,18 @@ enum FlameyArt {
         hold.leftHand = h["left_hand"] as? Bool ?? true
         hold.rightHand = h["right_hand"] as? Bool ?? true
         return hold
+    }
+
+    /// A held item worn ON his hands: its skin records a `mitt` layer, which
+    /// the arms draw at each wrist (`FlameArmLimb`); its `held-body` is the
+    /// same pair at rest, for the Closet tile and older builds.
+    static func wornOnHands(_ item: FlameyItem) -> Bool { item.skin?.layerKey("mitt") != nil }
+
+    /// A look that throws its fists up now and then once he is done for the
+    /// day (`rules.raises_when_lit`) — the boxing gloves' champ salute.
+    static func raisesWhenLit(_ look: FlameyLook?) -> Bool {
+        guard let look, look.showsArms else { return false }
+        return look.items.contains { $0.skin?.ruleBool("raises_when_lit") == true }
     }
 
     /// How a held prop moves when live (transform-only, `repeatForever`):
@@ -363,7 +394,9 @@ extension FlameyLook {
     var standLift: CGFloat { FlameyArt.legLength }
 
     /// His arms' hold for what's in his hand on a surface of this reach.
-    func armHold(reach: CGFloat) -> FlameArmHold? { FlameyArt.heldArmTargets(self[.held], reach: reach) }
+    func armHold(reach: CGFloat, carryMitts: Bool = true) -> FlameArmHold? {
+        FlameyArt.heldArmTargets(self[.held], reach: reach, carryMitts: carryMitts)
+    }
 
     /// Arms hide under a costume that covers him whole (`rules.shows_arms`).
     var showsArms: Bool { !items.contains { $0.skin?.ruleBool("shows_arms") == false } }

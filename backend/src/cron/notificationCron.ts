@@ -11,7 +11,7 @@ import {
   notifyIntervalResults,
   checkClashTies,
 } from "../services/notificationService.js";
-import { sendPendingDailyReminders } from "../services/dailyReminderService.js";
+import { sendMorningChallengePushes, sendPendingDailyReminders } from "../services/dailyReminderService.js";
 import { reconcileStaleStreaks } from "../services/leaderboardService.js";
 import {
   decayExpiredStreaks,
@@ -75,6 +75,7 @@ export function startNotificationCron(): void {
     // not at one 9 AM New York flush for everyone.
     await runJob("notifications.morning_briefing", flushBatchedNotifications);
     await runJob("notifications.daily_reminders", sendPendingDailyReminders);
+    await runJob("notifications.morning_challenge", sendMorningChallengePushes);
     // Expire stale pending-friend-notification rows (ask-mode). Lazy expiry on
     // read already guarantees correctness; this is hygiene to keep the table tidy.
     await runJob(

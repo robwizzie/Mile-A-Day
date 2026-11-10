@@ -235,6 +235,7 @@ struct FlameBuddyView: View {
         .rotationEffect(.degrees(wiggle), anchor: .bottom)
         .scaleEffect(x: 1, y: pokeSquash, anchor: .bottom)
         .offset(x: paceOffset, y: hopOffset + bobOffset + startleOffset)
+        .task(id: salutes) { await saluteLoop() }
         .onAppear {
             // Off the appear commit, on purpose: a `repeatForever` animation
             // started INSIDE onAppear is attached to the view's initial
@@ -320,6 +321,64 @@ struct FlameBuddyView: View {
                 withAnimation(.spring(response: 0.45, dampingFraction: 0.75)) { armReaction = nil }
                 feeding = nil
             }
+        }
+    }
+
+    // MARK: - The champ's salute
+
+    /// Done for the day in a look that salutes (`rules.raises_when_lit`, the
+    /// boxing gloves): now and then he throws both fists over his head.
+    private var salutes: Bool {
+        guard !effectiveStill, FlameyArt.raisesWhenLit(look), let kind = mood?.kind else { return false }
+        return kind == .done || kind == .party
+    }
+
+    /// Every 9–18 s while `salutes` holds (first one soon after he's lit);
+    /// cancelled by `.task(id:)` when it stops holding.
+    private func saluteLoop() async {
+        guard salutes else { return }
+        try? await Task.sleep(for: .seconds(Double.random(in: 2.5...5)))
+        while !Task.isCancelled {
+            // Never over a reaction already playing (a high five, a treat).
+            if armReaction == nil { await champSalute() }
+            try? await Task.sleep(for: .seconds(Double.random(in: 9...18)))
+        }
+        if armReaction == .champ || armReaction == .champPump {
+            withAnimation(.spring(response: 0.4, dampingFraction: 0.75)) { armReaction = nil }
+        }
+    }
+
+    /// Wind-up crouch, fists up on a bouncy spring with a hop, two pumps,
+    /// then the arms drop home. Transform-only (pose angles + container).
+    private func champSalute() async {
+        func beat(_ ms: Int) async -> Bool {
+            try? await Task.sleep(for: .milliseconds(ms))
+            return !Task.isCancelled
+        }
+        withAnimation(.easeOut(duration: 0.12)) { pokeSquash = 0.9 }
+        guard await beat(120) else { return settleSalute() }
+        withAnimation(.spring(response: 0.32, dampingFraction: 0.48)) {
+            armReaction = .champ
+            pokeSquash = 1.06
+            startleOffset = -size * 0.07
+        }
+        guard await beat(230) else { return settleSalute() }
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) { pokeSquash = 1; startleOffset = 0 }
+        for _ in 0..<2 {
+            guard await beat(200) else { return settleSalute() }
+            withAnimation(.easeInOut(duration: 0.16)) { armReaction = .champPump }
+            guard await beat(180) else { return settleSalute() }
+            withAnimation(.spring(response: 0.24, dampingFraction: 0.5)) { armReaction = .champ }
+        }
+        guard await beat(650) else { return settleSalute() }
+        settleSalute()
+    }
+
+    private func settleSalute() {
+        withAnimation(.spring(response: 0.5, dampingFraction: 0.72)) {
+            if armReaction == .champ || armReaction == .champPump { armReaction = nil }
+            pokeSquash = 1
+            startleOffset = 0
         }
     }
 
