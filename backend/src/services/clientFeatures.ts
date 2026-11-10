@@ -217,6 +217,20 @@ export const CLIENT_FEATURES = {
    * build that has it (`photo_ask_supported` on /friends/activity/today).
    */
   photoAskV1: "photo_ask_v1",
+
+  /**
+   * The build routes the morning `daily_challenge` push to the challenge
+   * screen. A brand-new type: only these devices are rung (sendPush
+   * `deviceFeature`), so older builds get nothing new.
+   */
+  dailyChallengePushV1: "daily_challenge_push_v1",
+
+  /**
+   * The build shows special events (Champ 5K Day: the event card, its sheet)
+   * and routes the `special_event` push to it. The push itself goes to every
+   * build — an announcement that just opens the app is still the news.
+   */
+  specialEventsV1: "special_events_v1",
 } as const;
 
 export type ClientFeature =

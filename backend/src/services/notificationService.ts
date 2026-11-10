@@ -27,6 +27,7 @@ import {
 } from "./workoutService.js";
 import {
   resolveAudience,
+  hasExplicitEventAudience,
   filterByIncomingAudience,
   restrictToCloseFriends,
   queuePendingFriendNotification,
@@ -487,6 +488,19 @@ export async function notifyFriendsOfWorkout(
  * ('extra_workout' post-goal, 'workout' pre-goal). Dedup'd per workout via
  * milestone_notifications key `${eventType}:${workoutId}`.
  */
+/** Miles that make an extra workout worth telling friends about by default. */
+export const NOTABLE_WORKOUT_MILES = 3;
+/** ...or this pace (min/mi) or faster, over at least NOTABLE_FAST_MIN_MILES. */
+export const NOTABLE_PACE_MIN_PER_MILE = 8;
+export const NOTABLE_FAST_MIN_MILES = 1;
+
+/** Long or fast: the extra workouts friends hear about by default. */
+export function isNotableWorkout(distanceMiles: number, durationSeconds: number): boolean {
+  if (distanceMiles >= NOTABLE_WORKOUT_MILES) return true;
+  if (distanceMiles < NOTABLE_FAST_MIN_MILES || !(durationSeconds > 0)) return false;
+  return durationSeconds / 60 / distanceMiles <= NOTABLE_PACE_MIN_PER_MILE;
+}
+
 async function notifyFriendsOfWorkoutEvent(
   userId: string,
   workoutId: string,
@@ -561,6 +575,18 @@ async function notifyFriendsOfWorkoutEvent(
       activity,
     );
     if (outgoing === "none") return;
+
+    // An extra workout (after the mile) reaches friends by default only when
+    // it's notable — long or fast. Their mile already told friends they hit
+    // their goal; a short second walk is noise. Choosing an audience for
+    // extra workouts in Friend Activity sends every one, as before.
+    if (
+      eventType === "extra_workout" &&
+      !isNotableWorkout(distance, duration) &&
+      !(await hasExplicitEventAudience(userId, "outgoing", eventType, activity))
+    ) {
+      return;
+    }
 
     const [user] = await db.query(
       "SELECT username FROM users WHERE user_id = $1",

@@ -178,6 +178,13 @@ for (const type of [
   // Your own week, once a week, claimed per user+week — bounded by
   // construction, and a capped one would land in the NEXT week's digest.
   "weekly_recap",
+  // What today's challenge is, once a morning — folded into a digest it is
+  // news about a day already under way.
+  "daily_challenge",
+  // A duel or competition you're IN changing hands, debounced per standing.
+  "lead_change",
+  // A one-day event's pushes, each claimed once per person.
+  "special_event",
 ]) {
   assert.equal(
     isCapExempt(type),
@@ -203,7 +210,6 @@ for (const type of [
   "friend_badge_earned",
   "friend_personal_best",
   "friend_challenge_completed",
-  "lead_change",
   "competition_milestone",
   "friend_request_reminder",
 ]) {

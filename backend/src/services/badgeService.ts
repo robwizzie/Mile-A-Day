@@ -20,6 +20,7 @@ import type {
   BadgeCategory,
 } from "../types/badge.js";
 import { evaluateChallengesForBatch } from "./dailyChallengeService.js";
+import { eventHitsAllHistory, eventHitsForWorkouts } from "./specialEventService.js";
 import { evaluateWeeklyChallengeForUser } from "./weeklyChallengeService.js";
 
 const db = PostgresService.getInstance();
@@ -461,6 +462,16 @@ export async function evaluateForUser(
       workoutId: hit.workoutId,
       earnedAt: hit.earnedAt,
     });
+  }
+
+  // Special events (Champ 5K Day) are a fact about ONE DAY too: the event's
+  // distance covered on its local date, judged and dated like a holiday.
+  const eventHits = opts.allHolidays
+    ? await eventHitsAllHistory(userId)
+    : await eventHitsForWorkouts(userId, newWorkoutIds);
+  for (const hit of eventHits) {
+    if (earned.has(hit.badgeId) || !catalogIds.has(hit.badgeId)) continue;
+    toInsert.push({ badgeId: hit.badgeId, aggregateOnly: false, workoutId: hit.workoutId, earnedAt: hit.earnedAt });
   }
 
   if (toInsert.length === 0) {

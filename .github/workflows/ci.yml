@@ -140,6 +140,11 @@ jobs:
       # and rewards that go out once and stay.
       - name: Community goal check
         run: node scripts/community-goal-check.mjs
+      # Special events (Champ 5K Day): the day's walks add up to the medal,
+      # nothing else earns it, it is never revoked, the view is self-only, and
+      # extra workouts reach friends by default only when long or fast.
+      - name: Special event check
+        run: node scripts/special-event-check.mjs
       # Referrals: real accounts only, a verified walker before anything counts,
       # rewards once each, and offer codes that only ever reach one person.
       - name: Referral check

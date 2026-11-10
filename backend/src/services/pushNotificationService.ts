@@ -266,6 +266,12 @@ export type NotificationType =
   | "community_goal_result"
   | "referral_qualified"
   | "weekly_challenge_complete"
+  // One-day events (Champ 5K Day): announce / day-of / evening, claimed per
+  // event+person+kind in special_event_push_log.
+  | "special_event"
+  // The morning "today's challenge" push, once a day, only to devices that
+  // declare daily_challenge_push_v1 (dailyReminderService).
+  | "daily_challenge"
   // The catch-up: what was queued past quiet hours or the daily cap, named
   // rather than counted, and pointed at the ONE screen that can show it (the
   // notification inbox). Gated per device on `activityDigestV1` — this used
@@ -544,6 +550,16 @@ const CAP_EXEMPT_TYPES: NotificationType[] = [
   // yours. A capped one would be parked for the next morning's digest — i.e.
   // delivered in a week it isn't about.
   "weekly_recap",
+  // What today's challenge is, once each morning (claimed per user+day). Folded
+  // into a digest it says nothing: the whole point is knowing before you go out.
+  "daily_challenge",
+  // A Head-to-Head or competition you are IN changing hands. Debounced per
+  // standing (lead_notified_state), so it is bounded by the game itself; a
+  // capped one surfaced next morning as a line in a digest, about a duel that
+  // was already over.
+  "lead_change",
+  // A one-day event's three pushes, each claimed once per person.
+  "special_event",
 ];
 
 /** Single source of truth for "the daily cap does not apply to this type". */
