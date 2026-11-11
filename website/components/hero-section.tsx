@@ -1,103 +1,37 @@
-import Image from "next/image"
-import { ArrowRight } from "lucide-react"
-import { LiveUserCount } from "./live-user-count"
-import { CURRENT_RELEASE } from "@/lib/releases"
+import { CURRENT_RELEASE } from "@/lib/releases";
+import { AppStoreButton } from "./app-store-button";
+import { PanelBand } from "./feature-panels";
+import { LiveUserCount } from "./live-user-count";
 
+/** The App Store header, as the top of the site. */
 export function HeroSection() {
   return (
-    <section
-      className="hero-gradient relative min-h-screen overflow-hidden px-6 pt-32 pb-20"
+    <PanelBand
+      heading="h1"
+      hero
+      priority
+      panel={{
+        eyebrow: "Daily streaks",
+        title: ["Walk or run a mile.", "Every day."],
+        body: "Build a streak that keeps you moving. Free on iPhone and Apple Watch.",
+        shot: "01-streak",
+        alt: "The Mile A Day home screen: a 541 day streak and Flamey",
+        from: "#ec3047",
+        to: "#dc253b",
+      }}
     >
-
-      <div className="relative mx-auto flex max-w-6xl flex-col items-center gap-16 lg:flex-row lg:items-center lg:gap-20">
-        {/* Left: copy */}
-        <div className="flex flex-1 flex-col items-center text-center lg:items-start lg:text-left">
-          <a
-            href="#whats-new"
-            className="animate-fade-in-up glass-card-highlight group mb-6 inline-flex items-center gap-2 rounded-full px-4 py-2"
-          >
-            <span className="relative flex h-2 w-2">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#c72554] opacity-75" />
-              <span className="relative inline-flex h-2 w-2 rounded-full bg-[#c72554]" />
-            </span>
-            <span className="text-xs font-medium tracking-wide text-[#c72554]">
-              iOS &amp; Apple Watch
-            </span>
-            <span className="h-3 w-px bg-[#c72554]/30" />
-            <span className="text-xs font-semibold tracking-wide text-[#f5f5f5]">
-              New in {CURRENT_RELEASE.version}
-            </span>
-            <ArrowRight className="h-3.5 w-3.5 text-[#f5f5f5]/70 transition-transform group-hover:translate-x-0.5" />
-          </a>
-
-          <h1 className="animate-fade-in-up animate-delay-100 font-heading text-[clamp(60px,11vw,150px)] leading-[0.9] tracking-[-2px]">
-            <span className="text-[#f5f5f5]">ONE MILE.</span>
-            <br />
-            <span className="bg-gradient-to-r from-[#c72554] to-[#ff4d7d] bg-clip-text text-transparent">
-              EVERY DAY.
-            </span>
-          </h1>
-
-          <p className="animate-fade-in-up animate-delay-200 mt-6 max-w-lg text-lg leading-relaxed text-[#a0a0a0]">
-            The simplest daily habit you'll actually keep. No complicated programs. No expensive gear. Just lace up, tap Start Mile, and go. Walk it or run it — just get it done.
-          </p>
-
-          <div className="animate-fade-in-up animate-delay-300 mt-8 flex flex-col items-center gap-4 sm:flex-row">
-            <a
-              href="https://apps.apple.com/us/app/mile-a-day/id6746970905"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="glass-button inline-flex items-center gap-3 rounded-2xl px-9 py-4 text-base font-semibold text-[#ffffff]"
-            >
-              <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z" />
-              </svg>
-              Download for iPhone
-            </a>
-            <a
-              href="#story"
-              className="glass-card inline-flex items-center gap-2 rounded-2xl px-9 py-4 text-base font-semibold text-[#f5f5f5] transition-all hover:border-[#c72554]/20"
-            >
-              Our Story
-            </a>
-          </div>
-
-          {/* Social proof stats */}
-          <div className="animate-fade-in-up animate-delay-400 mt-10 flex flex-wrap justify-center gap-x-8 gap-y-5 sm:gap-x-12 lg:justify-start">
-            <LiveUserCount />
-            <div className="text-center lg:text-left">
-              <div className="font-heading text-[28px] text-[#f5f5f5]">365+</div>
-              <div className="text-xs text-[#a0a0a0]">Day Streaks</div>
-            </div>
-            <div className="text-center lg:text-left">
-              <div className="font-heading text-[28px] text-[#c72554]">$0</div>
-              <div className="text-xs text-[#a0a0a0]">Always Free</div>
-            </div>
-            <div className="text-center lg:text-left">
-              <div className="font-heading text-[28px] text-[#f5f5f5]">1 MILE</div>
-              <div className="text-xs text-[#a0a0a0]">That&apos;s It</div>
-            </div>
-          </div>
-        </div>
-
-        {/* Right: phone mockup */}
-        <div className="animate-fade-in-up animate-delay-200 relative flex flex-1 items-center justify-center">
-          <div className="animate-float iphone-frame relative" style={{ width: 280 }}>
-            <Image
-              src="/images/hero/dashboard-2026-10.webp"
-              alt="Mile A Day app dashboard showing a 511 day streak"
-              width={776}
-              height={1680}
-              sizes="280px"
-              unoptimized
-              className="block h-auto w-full"
-              priority
-            />
-          </div>
-          {/* Glow behind phone */}
-          <div className="absolute -z-10 h-[400px] w-[400px] rounded-full" style={{ background: "radial-gradient(circle, rgba(199,37,84,0.08) 0%, transparent 70%)" }} />
-        </div>
+      <div className="mt-8 flex flex-wrap items-center gap-x-6 gap-y-4">
+        <AppStoreButton />
+        <a
+          href="/updates"
+          className="text-[15px] font-semibold text-white/90 underline decoration-white/40 underline-offset-4 hover:decoration-white"
+        >
+          New in {CURRENT_RELEASE.version}
+        </a>
       </div>
-    </section>
-  )
+      <div className="mt-10">
+        <LiveUserCount />
+      </div>
+    </PanelBand>
+  );
 }

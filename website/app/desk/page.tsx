@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import { DeskShowcase } from "@/components/desk/desk-showcase";
+import { Navbar } from "@/components/navbar";
+import { Footer } from "@/components/footer";
 import { ogVideos } from "../_og/video/meta";
 
 export const metadata: Metadata = {
@@ -20,14 +22,9 @@ export const metadata: Metadata = {
 export default function DeskPage() {
   return (
     <>
-      <header className="absolute left-0 right-0 top-0 z-10 px-6 py-5">
-        <a href="/" className="mx-auto flex max-w-5xl items-center gap-3 text-sm font-bold text-white/80">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/images/mad-circle-icon.png" alt="" width={36} height={36} className="rounded-full" />
-          Mile A Day
-        </a>
-      </header>
+      <Navbar />
       <DeskShowcase />
+      <Footer />
     </>
   );
 }

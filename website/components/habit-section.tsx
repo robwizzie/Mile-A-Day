@@ -1,106 +1,181 @@
-import { Rabbit, Flame, CalendarDays } from "lucide-react"
+"use client";
 
+import { useEffect, useState, type CSSProperties } from "react";
+import { Phone } from "./feature-panels";
+import { useInView } from "./reveal";
+
+/**
+ * The three stretches of the 66 days, each a run of dots on one track that
+ * lights up in order (and deepens in colour as the habit sets) once it's on
+ * screen. Day 67+ trails off: it doesn't end.
+ */
+const phases = [
+  {
+    days: "Days 1–21",
+    title: "The grind",
+    body: "It's hard. You'll want to skip. But your streak is on the line, and that little number keeps you lacing up when the couch is calling.",
+    dots: 21,
+    color: "#f59aa5",
+  },
+  {
+    days: "Days 22–66",
+    title: "The shift",
+    body: "It gets easier. You start looking forward to it. Your body expects it. Missing a day feels wrong, not tempting.",
+    dots: 45,
+    color: "#ec3047",
+  },
+  {
+    days: "Day 67+",
+    title: "Automatic",
+    body: "It's just what you do now. You don't negotiate with yourself. You lace up and go. Congratulations, you're a walker. Or a runner. Either counts.",
+    dots: 14,
+    color: "#a3132b",
+    trailing: true,
+  },
+];
+
+const DOT_STEP_MS = 22;
+
+/** 0 → 66, eased, once the number is on screen. */
+function useCountTo(target: number, start: boolean) {
+  const [value, setValue] = useState(start ? 0 : target);
+  useEffect(() => {
+    if (!start) return;
+    let frame = 0;
+    const t0 = performance.now();
+    const tick = (now: number) => {
+      const t = Math.min((now - t0) / 1400, 1);
+      setValue(Math.round(target * (1 - Math.pow(1 - t, 3))));
+      if (t < 1) frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [start, target]);
+  return value;
+}
+
+/** Why one mile works: the 66-day habit research, beside the app's real milestone screen. */
 export function HabitSection() {
+  const [numberRef, inView] = useInView<HTMLSpanElement>(0.6);
+  const count = useCountTo(66, inView);
+
+  let dayIndex = 0;
+
   return (
     <section
       id="habit"
-      className="section-lazy relative px-6 py-24"
-      style={{ background: "radial-gradient(ellipse 500px 500px at 50% 100%, rgba(199,37,84,0.04) 0%, transparent 70%)" }}
+      className="scroll-mt-20 overflow-hidden bg-[#f6f1ec] px-6 pt-24 text-[#1d1214]"
     >
-      <div className="relative mx-auto max-w-4xl text-center">
-        <span className="reveal mb-4 inline-block text-sm font-semibold uppercase tracking-widest text-[#c72554]">
-          The Science
-        </span>
-
-        {/* Giant 66 */}
-        <div className="reveal-scale reveal-delay-1 font-heading bg-gradient-to-r from-[#c72554] to-[#ff4d7d] bg-clip-text text-transparent text-[clamp(120px,20vw,220px)] leading-none">
-          66
-        </div>
-
-        <h2 className="reveal reveal-delay-1 font-heading text-[clamp(32px,5vw,56px)] tracking-[2px] text-[#a0a0a0] mb-8">
-          DAYS TO BUILD A HABIT
-        </h2>
-
-        <p className="reveal reveal-delay-2 mx-auto max-w-2xl text-[17px] leading-[1.8] text-[#a0a0a0] mb-5">
-          Research from University College London found it takes an average of 66 days for a new
-          behavior to become automatic. That&apos;s just over two months of showing up before your
-          daily mile stops feeling like effort and starts feeling like second nature.
-        </p>
-
-        <p className="reveal reveal-delay-3 mx-auto max-w-2xl text-[17px] leading-[1.8] text-[#a0a0a0] mb-12">
-          The best part? Once it clicks, you don&apos;t have to think about it anymore. Your mile
-          becomes as automatic as brushing your teeth. You just do it. And Mile A Day is designed to
-          get you there — the streak, the accountability, the competition all keep you going until the
-          habit takes hold.
-        </p>
-
-        {/* Three phases */}
-        <div className="grid gap-4 md:grid-cols-3">
-          <div className="reveal-scale glass-card rounded-2xl p-7 text-center">
-            <div className="font-heading text-[42px] text-[#c72554] leading-none mb-1">
-              1–21
-            </div>
-            <h3 className="font-heading text-[20px] tracking-[1px] text-[#f5f5f5] mb-2">
-              THE GRIND
-            </h3>
-            <p className="text-[13px] leading-relaxed text-[#a0a0a0]">
-              It&apos;s hard. You&apos;ll want to skip. But your streak is on the line, and that
-              little number keeps you lacing up when the couch is calling.
+      <div className="mx-auto max-w-6xl">
+        {/* Row 1: the number and the research, side by side */}
+        <div className="grid items-end gap-8 lg:grid-cols-[auto_minmax(0,1fr)] lg:gap-16">
+          <div data-reveal="">
+            <p className="mb-2 text-[13px] font-semibold uppercase tracking-[0.18em] text-[#c72554]">
+              The science
             </p>
-          </div>
-
-          <div className="reveal-scale reveal-delay-1 glass-card rounded-2xl p-7 text-center">
-            <div className="font-heading text-[42px] text-[#c72554] leading-none mb-1">
-              22–66
-            </div>
-            <h3 className="font-heading text-[20px] tracking-[1px] text-[#f5f5f5] mb-2">
-              THE SHIFT
-            </h3>
-            <p className="text-[13px] leading-relaxed text-[#a0a0a0]">
-              It gets easier. You start looking forward to it. Your body expects it. Missing a day
-              feels wrong, not tempting.
-            </p>
-          </div>
-
-          <div className="reveal-scale reveal-delay-2 glass-card rounded-2xl p-7 text-center">
-            <div className="font-heading text-[42px] text-[#c72554] leading-none mb-1">
-              67+
-            </div>
-            <h3 className="font-heading text-[20px] tracking-[1px] text-[#f5f5f5] mb-2">
-              AUTOMATIC
-            </h3>
-            <p className="text-[13px] leading-relaxed text-[#a0a0a0]">
-              It&apos;s just what you do now. You don&apos;t negotiate with yourself. You lace up and
-              go. Congratulations — you&apos;re a walker. Or a runner. Either counts.
-            </p>
-          </div>
-        </div>
-
-        {/* Personal Records */}
-        <div className="mt-16">
-          <h3 className="reveal font-heading text-[24px] tracking-[2px] text-center text-[#a0a0a0] mb-6">
-            TRACK YOUR PERSONAL BESTS
-          </h3>
-          <div className="grid gap-4 sm:grid-cols-3">
-            {[
-              { icon: Rabbit, label: "Fastest Mile", value: "5:12", color: "#33B34D" },
-              { icon: Flame, label: "Longest Streak", value: "511 days", color: "#FF9900" },
-              { icon: CalendarDays, label: "Most in One Day", value: "26.2 mi", color: "#BF5AF2" },
-            ].map((record, i) => (
-              <div
-                key={record.label}
-                className={`reveal-scale reveal-delay-${i + 1} glass-card rounded-2xl p-5 text-center`}
+            <h2 className="font-heading leading-[0.88]">
+              <span
+                ref={numberRef}
+                className="block text-[clamp(128px,19vw,230px)] tabular-nums text-[#ec3047]"
+                aria-label="66"
               >
-                <record.icon className="mx-auto mb-2 h-5 w-5" style={{ color: record.color }} />
-                <div className="font-heading text-[32px] leading-none text-[#f5f5f5]">{record.value}</div>
-                <div className="mt-1 text-xs font-semibold uppercase tracking-wider" style={{ color: record.color }}>
-                  {record.label}
+                {inView ? count : 66}
+              </span>
+              <span className="block text-[clamp(32px,4vw,52px)]">
+                days to build a habit.
+              </span>
+            </h2>
+          </div>
+
+          <div
+            data-reveal=""
+            style={{ "--d": "100ms" } as CSSProperties}
+            className="max-w-2xl space-y-5 text-[17px] leading-[1.75] text-[#4a3a3d] lg:pb-3"
+          >
+            <p>
+              Research from University College London found it takes an average
+              of 66 days for a new behavior to become automatic. That&apos;s
+              just over two months of showing up before your daily mile stops
+              feeling like effort and starts feeling like second nature.
+            </p>
+            <p>
+              The best part? Once it clicks, you don&apos;t have to think about
+              it anymore. Your mile becomes as automatic as brushing your teeth.
+              You just do it. And Mile A Day is designed to get you there: the
+              streak, the accountability and the competition all keep you going
+              until the habit takes hold.
+            </p>
+          </div>
+        </div>
+
+        {/* Row 2: the track beside the real milestone screen, which rises from the band's bottom */}
+        <div className="mt-12 grid gap-12 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)] lg:items-end lg:gap-16">
+          {/* The track: one dot a day */}
+          <ol
+            data-reveal=""
+            className="habit-track rounded-[28px] bg-white p-6 sm:p-8 lg:mb-24"
+          >
+            {phases.map((phase, p) => (
+              <li
+                key={phase.title}
+                className={
+                  p > 0 ? "mt-7 border-t border-[#1d1214]/[0.07] pt-7" : ""
+                }
+              >
+                <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                  <h3 className="font-heading text-[22px] leading-none">
+                    {phase.title}
+                  </h3>
+                  <span
+                    className="text-[13px] font-semibold uppercase tracking-[0.14em]"
+                    style={{
+                      color:
+                        phase.color === "#f59aa5" ? "#d9566a" : phase.color,
+                    }}
+                  >
+                    {phase.days}
+                  </span>
                 </div>
-              </div>
+                <div
+                  className="mt-3 flex flex-wrap gap-[5px]"
+                  aria-hidden="true"
+                >
+                  {Array.from({ length: phase.dots }, (_, i) => {
+                    const d = dayIndex++ * DOT_STEP_MS;
+                    const fade = phase.trailing ? 1 - i / phase.dots : 1;
+                    return (
+                      <span
+                        key={i}
+                        className="habit-dot h-[11px] w-[11px] rounded-full"
+                        style={
+                          {
+                            "--dot": phase.color,
+                            "--d": `${d}ms`,
+                            opacity: fade,
+                          } as CSSProperties
+                        }
+                      />
+                    );
+                  })}
+                </div>
+                <p className="mt-3 max-w-xl text-[15px] leading-relaxed text-[#4a3a3d]">
+                  {phase.body}
+                </p>
+              </li>
             ))}
+          </ol>
+
+          {/* The real 500-day celebration, climbing out of the bottom of the band */}
+          <div className="flex items-end justify-center">
+          <div data-reveal="phone">
+            <Phone
+              shot="07-milestone"
+              alt="The 500 day streak celebration in Mile A Day"
+            />
+          </div>
           </div>
         </div>
       </div>
     </section>
-  )
+  );
 }

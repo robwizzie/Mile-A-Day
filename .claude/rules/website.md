@@ -9,7 +9,7 @@ paths: website/**
 - React 19, Tailwind CSS 4 (via `@tailwindcss/postcss` plugin)
 - Deployed on Vercel with `@vercel/analytics`
 - Icons: `lucide-react`
-- Animations: `tw-animate-css` + custom keyframes in globals.css
+- Animations: `tw-animate-css` + custom keyframes in globals.css (Motion block at the end)
 
 ## Structure
 - `app/` - Next.js App Router (layout.tsx, page.tsx, globals.css)
@@ -23,13 +23,18 @@ Use `npm` for all operations.
 ## Tailwind CSS 4
 - No `tailwind.config.js` - Tailwind 4 uses CSS-based configuration.
 - Theme tokens and custom properties defined in `globals.css` via `@theme` directive.
-- Custom glass-morphism classes (`.glass-card`, `.glass-nav`, `.glass-button`) in globals.css.
 
 ## Styling Patterns
-- Fonts: DM Sans (body) and Bebas Neue (headings) via `next/font/google`.
-- Primary color: `#c72554` (burgundy red).
-- Dark theme throughout (`bg-[#0a0a0a]`).
-- Scroll reveal animations via `ScrollReveal` component (Intersection Observer).
+- Home order is the conversion path (comment in `app/page.tsx`): hero → `LiveStatsBand` → `HowItWorksSection` → `FeaturePanels` → `CompetitionsSection` (a `PanelBand`) → `HabitSection` → `WhatsNewSection` → `StorySection` → `SupportSection` → `DeskTeaserSection` → `CtaSection`. Those sections and their headings ("The miles are adding up.", "Dead simple. By design.", "66 days to build a habit.", "It started with a stupid bet.", "Need a hand?", "Your streak starts today.") are the owner's; restyle, never drop or rewrite them.
+- The theme borrows the App Store screenshots without copying them: hero + a curated few `PanelBand`s (`components/feature-panels.tsx` `PANELS`, phones cut from `marketing/app-store/<version>/` into `public/images/app-store/`); every other section uses `SectionHeader` (eyebrow, heading, line) on alternating dark (`#0e0809`/`#140b0e`) and cream (`#f6f1ec`) bands, with solid colour cards in the screenshot palette.
+- Fonts: Inter (body, `--font-body`) and Inter Tight 800 (headings, `.font-heading`, `--font-display`) via `next/font/google`. Headlines are sentence case ending in a period, never all caps; eyebrows are small tracked caps. The OG cards keep their own vendored fonts.
+- Show only REAL app captures and REAL data: phones are `Phone` cutouts of the App Store screenshots, numbers come from `/public/*`; never hand-build an imitation of app UI (mock leaderboards, sample stat tiles, invented values).
+- Colour comes from the screenshot a section shows (its `PanelBand` from/to) or the one red `#ec3047`; no per-item rainbow accents. No glass cards, glow blobs, icon-chip grids or marquees; buttons are solid pills (`AppStoreButton`, red `.glass-button`, white secondary) with the `.lift` hover. The legacy `.glass-*`/`.hero-gradient` classes in globals.css are flattened to this look, so every page shares it.
+- Motion: mark elements `data-reveal` (`"phone"` climbs, `"pop"` scales; stagger with `--d`) and `RevealObserver` (root layout) eases them in once; the hero plays `mad-rise`/`mad-phone-in` on load. Hidden states live only under `html.reveal-on`, which Reduce Motion never gets, so content is never stuck invisible. Count-ups start on screen via `useInView` (callback ref). Never give a client component's props a server component's icons: shared lists like `ReleaseFeatureList` live in a file without "use client".
+- Every page renders `Navbar` + `Footer` (the 404 is the hero red with `LostFlamey`, the app's real `FlameyPack` stickers in `public/images/flamey-pack/`); profile medals are `HangingMedal` (`components/medal.tsx`, a port of the app's `MedalView`/`MedalRibbon` geometry and `MedalPalette`).
+- Search/AI: the `FAQ` in `support-section.tsx` also feeds the home page's FAQPage JSON-LD and `/llms.txt` (`app/llms.txt/route.ts`, built from `FAQ` + `CURRENT_RELEASE`); keep answers factual and change them in that one place.
+- Copy is plain and specific, written like a person: no em dashes, no "seamlessly"/"everything you need" filler.
+- Primary color: `#c72554` (burgundy red); the hero/CTA red is the screenshots' `#ec3047`→`#dc253b`.
 
 ## Admin dashboard (`app/admin/`)
 - Tabs render from the `TABS` array in `dashboard.tsx`; each tab is one file in `_components/`. Data goes through `getData("<path>")` → the same-origin proxy → backend `/admin/<path>`, so a new panel needs a backend route and nothing else.

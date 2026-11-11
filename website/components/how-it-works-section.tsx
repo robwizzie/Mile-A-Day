@@ -1,107 +1,71 @@
-"use client"
-
-import { useEffect, useRef, useState } from "react"
+import { AppStoreButton } from "./app-store-button";
+import { SectionHeader } from "./section-header";
 
 const steps = [
   {
     number: 1,
-    title: "DOWNLOAD",
+    title: "Download",
     description:
       "Grab Mile A Day free from the App Store. Create your account in 30 seconds.",
   },
   {
     number: 2,
-    title: "TAP START MILE",
+    title: "Tap Start Mile",
     description:
-      "Walk it or run it. Rain or shine. Hit that red button and get your mile done.",
+      "Walk it or run it. Rain or shine. Hit that red button and get your mile done. Walks from your Apple Watch or any app that saves to Apple Health count too.",
   },
   {
     number: 3,
-    title: "BUILD YOUR STREAK",
+    title: "Build your streak",
     description:
       "Watch your streak grow. Add friends. Start competitions. Keep showing up and it becomes a habit.",
   },
-]
+];
 
+/** How to start, in three steps, right under the proof: the shortest path to the download. */
 export function HowItWorksSection() {
-  const sectionRef = useRef<HTMLDivElement>(null)
-  const [visible, setVisible] = useState(false)
-
-  useEffect(() => {
-    const el = sectionRef.current
-    if (!el) return
-
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting) {
-          setVisible(true)
-          observer.disconnect()
-        }
-      },
-      { threshold: 0.1 }
-    )
-
-    observer.observe(el)
-    return () => observer.disconnect()
-  }, [])
-
   return (
     <section
-      ref={sectionRef}
-      className="section-lazy relative px-6 py-24"
-      style={{ background: "radial-gradient(ellipse 400px 400px at 50% 100%, rgba(199,37,84,0.04) 0%, transparent 70%)" }}
+      id="how-it-works"
+      className="scroll-mt-20 bg-[#f6f1ec] px-6 py-24 text-[#1d1214]"
     >
-      <div className="relative mx-auto max-w-6xl text-center">
-        <span
-          className={`mb-4 inline-block text-sm font-semibold uppercase tracking-widest text-[#c72554] transition-all duration-700 ${
-            visible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-8"
-          }`}
-        >
-          How It Works
-        </span>
-        <h2
-          className={`font-heading text-[clamp(40px,6vw,72px)] leading-none tracking-[-1px] text-[#f5f5f5] mb-14 transition-all duration-700 delay-100 ${
-            visible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-8"
-          }`}
-        >
-          DEAD SIMPLE. BY DESIGN.
-        </h2>
+      <div className="mx-auto max-w-6xl">
+        <SectionHeader
+          tone="light"
+          eyebrow="How it works"
+          title="Dead simple. By design."
+          body="One mile a day, walked or run, anywhere. That's the whole rule."
+        />
 
-        {/* Steps */}
-        <div className="relative flex flex-col items-center gap-6 md:flex-row md:gap-0">
-          {/* Connecting line (desktop only) */}
-          <div className="pointer-events-none absolute top-9 left-[16.67%] right-[16.67%] hidden h-[2px] md:block">
-            <div
-              className={`h-full w-full rounded-full bg-gradient-to-r from-[#8b1538] via-[#c72554] to-[#ff4d7d] opacity-30 origin-left transition-transform duration-1000 ease-out ${
-                visible ? "scale-x-100" : "scale-x-0"
-              }`}
-              style={{ transitionDelay: "0.2s" }}
-            />
-          </div>
-
+        <ol className="mt-14 grid gap-4 md:grid-cols-3">
           {steps.map((step, i) => (
-            <div key={step.number} className="relative flex flex-1 flex-col items-center px-5">
-              <div
-                className={`relative z-10 mb-4 flex h-[72px] w-[72px] items-center justify-center rounded-full border-2 border-[#c72554]/30 bg-[#0a0a0a] transition-all duration-300 hover:border-[#c72554]/60 hover:shadow-[0_0_20px_rgba(199,37,84,0.2)] ${
-                  visible ? `step-circle step-circle-delay-${i + 1}` : "opacity-0"
-                }`}
+            <li
+              key={step.number}
+              data-reveal=""
+              style={{ "--d": `${i * 110}ms` } as React.CSSProperties}
+              className="lift rounded-3xl bg-white px-7 py-8"
+            >
+              <span
+                data-reveal="pop"
+                style={{ "--d": `${i * 110 + 200}ms` } as React.CSSProperties}
+                className="flex h-11 w-11 items-center justify-center rounded-full bg-[#ec3047] font-heading text-[20px] text-white"
               >
-                <span className="font-heading text-[28px] text-[#c72554]">
-                  {step.number}
-                </span>
-              </div>
-              <div className={visible ? `step-content step-content-delay-${i + 1}` : "opacity-0"}>
-                <h3 className="font-heading mb-2 text-[22px] tracking-[1px] text-[#f5f5f5]">
-                  {step.title}
-                </h3>
-                <p className="text-sm leading-relaxed text-[#a0a0a0]">
-                  {step.description}
-                </p>
-              </div>
-            </div>
+                {step.number}
+              </span>
+              <h3 className="mt-6 font-heading text-[26px] leading-tight">
+                {step.title}
+              </h3>
+              <p className="mt-2 text-[16px] leading-relaxed text-[#4a3a3d]">
+                {step.description}
+              </p>
+            </li>
           ))}
+        </ol>
+
+        <div className="mt-10" data-reveal="">
+          <AppStoreButton tone="dark" />
         </div>
       </div>
     </section>
-  )
+  );
 }
