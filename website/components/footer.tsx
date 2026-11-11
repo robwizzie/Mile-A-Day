@@ -31,14 +31,14 @@ export function Footer() {
             <Link href="/updates" className="text-sm text-[#a0a0a0] transition-colors hover:text-[#f5f5f5]">
               What&apos;s new
             </Link>
-            <a href="/#story" className="text-sm text-[#a0a0a0] transition-colors hover:text-[#f5f5f5]">
+            <a href="/story" className="text-sm text-[#a0a0a0] transition-colors hover:text-[#f5f5f5]">
               Our story
             </a>
             <a href="/#support" className="text-sm text-[#a0a0a0] transition-colors hover:text-[#f5f5f5]">
               Help
             </a>
             <a
-              href="https://apps.apple.com/us/app/mile-a-day/id6746970905"
+              href="https://apps.apple.com/us/app/mile-a-day/id6746970905" data-track="app_store:footer"
               target="_blank"
               rel="noopener noreferrer"
               className="text-sm text-[#a0a0a0] transition-colors hover:text-[#f5f5f5]"

@@ -8,7 +8,7 @@ import { Menu, X } from "lucide-react";
 const navLinks = [
   { label: "Features", href: "/#features" },
   { label: "What's new", href: "/updates" },
-  { label: "Our story", href: "/#story" },
+  { label: "Our story", href: "/story" },
   { label: "Help", href: "/#support" },
 ];
 
@@ -66,7 +66,7 @@ export function Navbar() {
             </a>
           ))}
           <a
-            href="https://apps.apple.com/us/app/mile-a-day/id6746970905"
+            href="https://apps.apple.com/us/app/mile-a-day/id6746970905" data-track="app_store:nav"
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex items-center gap-2 rounded-full bg-white px-5 py-2.5 text-sm font-semibold text-[#16090c] hover:bg-white/90"
@@ -107,7 +107,7 @@ export function Navbar() {
               </a>
             ))}
             <a
-              href="https://apps.apple.com/us/app/mile-a-day/id6746970905"
+              href="https://apps.apple.com/us/app/mile-a-day/id6746970905" data-track="app_store:nav_menu"
               target="_blank"
               rel="noopener noreferrer"
               className="mt-2 inline-flex items-center justify-center gap-2 rounded-full bg-white px-5 py-3 text-sm font-semibold text-[#16090c]"

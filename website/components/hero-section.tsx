@@ -1,7 +1,7 @@
 import { CURRENT_RELEASE } from "@/lib/releases";
 import { AppStoreButton } from "./app-store-button";
 import { PanelBand } from "./feature-panels";
-import { LiveUserCount } from "./live-user-count";
+import { LiveCommunityCount } from "./live-community-count";
 
 /** The App Store header, as the top of the site. */
 export function HeroSection() {
@@ -21,16 +21,17 @@ export function HeroSection() {
       }}
     >
       <div className="mt-8 flex flex-wrap items-center gap-x-6 gap-y-4">
-        <AppStoreButton />
+        <AppStoreButton place="hero" />
         <a
           href="/updates"
+          data-track="whats_new_hero"
           className="text-[15px] font-semibold text-white/90 underline decoration-white/40 underline-offset-4 hover:decoration-white"
         >
           New in {CURRENT_RELEASE.version}
         </a>
       </div>
       <div className="mt-10">
-        <LiveUserCount />
+        <LiveCommunityCount label={["walking or running", "a mile a day with us"]} />
       </div>
     </PanelBand>
   );

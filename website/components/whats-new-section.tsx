@@ -78,6 +78,7 @@ export function WhatsNewSection() {
             </label>
             <Link
               href="/updates"
+              data-track="whats_new_all"
               className="inline-flex items-center gap-1.5 text-[15px] font-semibold text-white underline decoration-white/30 underline-offset-4 hover:decoration-white"
             >
               Every update <ArrowRight className="h-4 w-4" />
@@ -114,6 +115,7 @@ export function WhatsNewSection() {
               <button
                 type="button"
                 onClick={() => setIndex(index + 1)}
+                data-track="whats_new_previous"
                 className="lift shrink-0 rounded-full bg-white/[0.08] px-4 py-2 text-[14px] font-semibold text-white hover:bg-white/[0.12]"
               >
                 See {previous.version}

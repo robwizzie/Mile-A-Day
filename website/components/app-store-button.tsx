@@ -8,8 +8,11 @@ export function AppStoreButton({
   label = "Download on the App Store",
   tone = "light",
   className = "",
+  place,
 }: {
   label?: string;
+  /** Where the button sits, for the site analytics (`app_store:<place>`). */
+  place?: string;
   /** light = white pill (on colour); dark = near-black pill (on white). */
   tone?: "light" | "dark";
   className?: string;
@@ -21,6 +24,7 @@ export function AppStoreButton({
   return (
     <a
       href={APP_STORE_URL}
+      data-track={place ? `app_store:${place}` : "app_store"}
       target="_blank"
       rel="noopener noreferrer"
       className={`inline-flex items-center gap-2.5 lift rounded-full px-6 py-3.5 text-[15px] font-semibold ${colors} ${className}`}

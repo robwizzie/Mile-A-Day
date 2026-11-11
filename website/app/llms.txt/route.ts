@@ -39,6 +39,7 @@ ${FAQ.map((item) => `### ${item.q}\n\n${item.a}`).join("\n\n")}
 ## Pages
 
 - [Home](${SITE_URL}/): what the app does, live community numbers, how to start
+- [Our story](${SITE_URL}/story): how a bet between two friends became Mile A Day
 - [What's new](${SITE_URL}/updates): every release, newest first
 - [Community goal](${SITE_URL}/goal): how far the community has walked together
 - [Privacy policy](${SITE_URL}/privacy)

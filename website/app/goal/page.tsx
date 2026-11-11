@@ -134,7 +134,7 @@ export default async function GoalPage({
 
         <div className="flex flex-col gap-2">
           <a
-            href={APP_STORE_URL}
+            href={APP_STORE_URL} data-track="app_store:goal"
             className="lift rounded-full bg-[#ec3047] px-6 py-4 text-center text-lg font-bold text-white hover:bg-[#d6243a]"
           >
             Join on the App Store

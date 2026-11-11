@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { Activity, BellRing, Camera, Flame, Footprints, PartyPopper, Route, Users } from "lucide-react";
 import { LiveDot, SectionHeader } from "./section-header";
 import { useInView } from "./reveal";
 
@@ -49,36 +50,64 @@ function useCountUp(target: number | null, decimals = 0) {
   return display;
 }
 
+// Each stat in one of the App Store screenshots' colours, with its icon.
+const LOOKS = {
+  miles: { from: "#ec3047", to: "#c8203a", Icon: Route },
+  today: { from: "#ff7555", to: "#ea5a3b", Icon: Footprints },
+  members: { from: "#6656ea", to: "#4f3fcf", Icon: Users },
+  week: { from: "#16aeb1", to: "#0b9497", Icon: Activity },
+  photos: { from: "#3e82f4", to: "#2c6bdc", Icon: Camera },
+  streak: { from: "#f7aa2c", to: "#e08a0c", Icon: Flame },
+  hypes: { from: "#9452ec", to: "#7a39d4", Icon: PartyPopper },
+  nudges: { from: "#2bc189", to: "#17a56f", Icon: BellRing },
+} as const;
+
 function StatCard({
+  look,
   value,
   suffix,
   label,
   sublabel,
   index,
 }: {
+  look: keyof typeof LOOKS;
   value: string;
   suffix?: string;
   label: string;
   sublabel: string;
   index: number;
 }) {
+  const { from, to, Icon } = LOOKS[look];
   return (
     <div
-      data-reveal=""
-      style={{ "--d": `${index * 70}ms` } as React.CSSProperties}
-      className="lift rounded-3xl bg-white/[0.04] px-6 py-7 hover:bg-white/[0.06]"
+      data-reveal="pop"
+      style={
+        {
+          "--d": `${index * 70}ms`,
+          background: `linear-gradient(160deg, ${from} 0%, ${to} 100%)`,
+        } as React.CSSProperties
+      }
+      className="stat-tile lift group relative overflow-hidden rounded-3xl px-5 py-6 text-white sm:px-6 sm:py-7"
     >
-      <div className="mb-5 h-1 w-10 rounded-full bg-[#ec3047]" />
-      <div className="font-heading text-[clamp(34px,4.2vw,50px)] leading-none text-white tabular-nums">
+      {/* A big faint copy of the icon in the corner, tilting on hover */}
+      <Icon
+        aria-hidden
+        strokeWidth={1.6}
+        className="stat-watermark pointer-events-none absolute -bottom-5 -right-4 h-28 w-28 text-white/[0.16] sm:h-32 sm:w-32"
+      />
+      <span className="relative flex h-10 w-10 items-center justify-center rounded-full bg-white/20">
+        <Icon aria-hidden className="h-5 w-5 text-white" strokeWidth={2.4} />
+      </span>
+      <div className="relative mt-4 font-heading text-[clamp(30px,4vw,48px)] leading-none tabular-nums">
         {value}
         {suffix && (
-          <span className="ml-1.5 text-[0.42em] font-semibold tracking-normal text-white/50">
+          <span className="ml-1.5 text-[0.42em] font-semibold tracking-normal text-white/75">
             {suffix}
           </span>
         )}
       </div>
-      <div className="mt-3 text-[15px] font-semibold text-white">{label}</div>
-      <div className="mt-0.5 text-[13px] text-white/55">{sublabel}</div>
+      <div className="relative mt-2.5 text-[15px] font-semibold">{label}</div>
+      <div className="relative mt-0.5 text-[13px] text-white/80">{sublabel}</div>
     </div>
   );
 }
@@ -124,7 +153,6 @@ export function LiveStatsBand() {
   const hypes = useCountUp(live ? live.total_hypes : null);
   const nudges = useCountUp(live ? live.total_nudges : null);
 
-  if (stats === null) return null;
 
   return (
     <section ref={bandRef} className="bg-[#0e0809] px-6 py-24 text-white">
@@ -142,14 +170,14 @@ export function LiveStatsBand() {
         />
 
         <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
-          <StatCard index={0} value={Math.round(totalMiles).toLocaleString()} suffix="mi" label="Total miles logged" sublabel="every single one earned" />
-          <StatCard index={1} value={milesToday.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })} suffix="mi" label="Miles today" sublabel="and the day isn't over" />
-          <StatCard index={2} value={Math.round(totalUsers).toLocaleString()} label="Members strong" sublabel="the whole community" />
-          <StatCard index={3} value={Math.round(activeWeek).toLocaleString()} label="Out moving this week" sublabel="in the last 7 days" />
-          <StatCard index={4} value={Math.round(photosShared).toLocaleString()} label="Photos shared" sublabel="milestones worth capturing" />
-          <StatCard index={5} value={Math.round(longestStreak).toLocaleString()} suffix="days" label="Longest active streak" sublabel="unbroken and still going" />
-          <StatCard index={6} value={Math.round(hypes).toLocaleString()} label="Hypes sent" sublabel="double-taps of pure support" />
-          <StatCard index={7} value={Math.round(nudges).toLocaleString()} label="Nudges delivered" sublabel="friendly kicks off the couch" />
+          <StatCard index={0} look="miles" value={Math.round(totalMiles).toLocaleString()} suffix="mi" label="Total miles logged" sublabel="every single one earned" />
+          <StatCard index={1} look="today" value={milesToday.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })} suffix="mi" label="Miles today" sublabel="and the day isn't over" />
+          <StatCard index={2} look="members" value={Math.round(totalUsers).toLocaleString()} label="Members strong" sublabel="the whole community" />
+          <StatCard index={3} look="week" value={Math.round(activeWeek).toLocaleString()} label="Out moving this week" sublabel="in the last 7 days" />
+          <StatCard index={4} look="photos" value={Math.round(photosShared).toLocaleString()} label="Photos shared" sublabel="milestones worth capturing" />
+          <StatCard index={5} look="streak" value={Math.round(longestStreak).toLocaleString()} suffix="days" label="Longest active streak" sublabel="unbroken and still going" />
+          <StatCard index={6} look="hypes" value={Math.round(hypes).toLocaleString()} label="Hypes sent" sublabel="double-taps of pure support" />
+          <StatCard index={7} look="nudges" value={Math.round(nudges).toLocaleString()} label="Nudges delivered" sublabel="friendly kicks off the couch" />
         </div>
       </div>
     </section>

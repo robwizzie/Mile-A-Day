@@ -21,6 +21,11 @@ export default function sitemap(): MetadataRoute.Sitemap {
       priority: 0.6,
     },
     {
+      url: `${BASE_URL}/story`,
+      changeFrequency: "monthly",
+      priority: 0.6,
+    },
+    {
       url: `${BASE_URL}/goal`,
       changeFrequency: "daily",
       priority: 0.7,
@@ -33,7 +38,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
     },
     {
       url: `${BASE_URL}/privacy`,
-      lastModified: "2026-10-10",
+      lastModified: "2026-11-11",
       changeFrequency: "yearly",
       priority: 0.3,
     },

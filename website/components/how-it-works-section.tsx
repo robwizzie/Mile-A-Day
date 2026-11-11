@@ -63,7 +63,7 @@ export function HowItWorksSection() {
         </ol>
 
         <div className="mt-10" data-reveal="">
-          <AppStoreButton tone="dark" />
+          <AppStoreButton tone="dark" place="how_it_works" />
         </div>
       </div>
     </section>
