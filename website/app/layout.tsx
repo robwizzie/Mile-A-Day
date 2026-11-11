@@ -4,6 +4,7 @@ import { Analytics } from '@vercel/analytics/next'
 import './globals.css'
 import { ogVideos } from './_og/video/meta'
 import { RevealObserver } from '@/components/reveal'
+import { SiteTracker } from '@/components/site-tracker'
 
 // The App Store screenshots set their headlines in a heavy, tightly tracked
 // grotesk (SF Pro Display on device); Inter Tight is its web stand-in, and
@@ -114,6 +115,7 @@ export default function RootLayout({
         <RevealObserver />
         {children}
         <Analytics />
+        <SiteTracker />
       </body>
     </html>
   )

@@ -26,7 +26,7 @@ export const metadata: Metadata = {
 
 export default function PrivacyPage() {
 	return (
-		<LegalPage title="Privacy Policy" lastUpdated="November 6, 2026">
+		<LegalPage title="Privacy Policy" lastUpdated="November 10, 2026">
 			<Section heading="Overview">
 				<p>
 					Mile A Day (&ldquo;we,&rdquo; &ldquo;us,&rdquo; or &ldquo;the app&rdquo;) is a fitness app that helps you
@@ -166,8 +166,13 @@ export default function PrivacyPage() {
 					</li>
 				</ul>
 				<p>
-					<span className="font-semibold text-[#f5f5f5]">Website visits.</span> Our websites use Vercel Analytics to measure visits. Our public pages do
-					not set cookies, but your browser sends your IP address to any site you visit, including ours.
+					<span className="font-semibold text-[#f5f5f5]">Website visits.</span> Our websites use Vercel Analytics to measure visits, and
+					mileaday.run also counts its own page views and the links and buttons clicked on it (for example, how many visits
+					tap through to the App Store), along with the page, the site that linked you there, your device type and country.
+					We do not store your IP address for this: each visit is counted under a code made from your IP address and browser
+					with a key that changes every day, so a visit can&rsquo;t be traced back to you or linked to your visits on other
+					days. If your browser sends Do Not Track or Global Privacy Control, we don&rsquo;t count you at all. Our public pages
+					do not set cookies, but your browser sends your IP address to any site you visit, including ours.
 				</p>
 				<p>
 					The app contains no advertising or third-party analytics software, and we do not track you across other

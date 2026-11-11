@@ -309,6 +309,15 @@ export const RATE_LIMIT_SPECS = {
     key: "ip",
     message: "Thanks! We already have your signup. Try again later if you need to change it.",
   },
+  // POST /public/web-events: the site's page views and clicks. A busy reader
+  // sends a few a minute; this only stops a script flooding the table.
+  webEvents: {
+    name: "WEB_EVENTS",
+    windowMs: 10 * MIN,
+    max: 300,
+    key: "ip",
+    message: "Too many events. Try again in a few minutes.",
+  },
   // POST /plus/gifts/redeem: a wrong code is the only way to probe the code
   // space, so a person typing one in gets a few retries and nothing more.
   plusRedeem: {
@@ -350,4 +359,5 @@ export const globalUserLimiter = makeLimiter(RATE_LIMIT_SPECS.global);
 export const displayLimiter = makeLimiter(RATE_LIMIT_SPECS.display);
 export const publicDeskLimiter = makeLimiter(RATE_LIMIT_SPECS.publicDesk);
 export const deskInterestLimiter = makeLimiter(RATE_LIMIT_SPECS.deskInterest);
+export const webEventsLimiter = makeLimiter(RATE_LIMIT_SPECS.webEvents);
 export const plusRedeemLimiter = makeLimiter(RATE_LIMIT_SPECS.plusRedeem);

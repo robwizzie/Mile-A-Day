@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { composeLook, loadSkinImages, paletteTokens } from "@/lib/flamey/compose";
+import { CONSTANTS, composeLook, loadSkinImages, paletteTokens } from "@/lib/flamey/compose";
+import { drawFlameyBody, type PaletteJson } from "@/lib/flamey/flameyBody";
 import type { Skin, Surface, SurfaceName } from "@/lib/flamey/compose";
 import type { ImageMap } from "@/lib/flamey/skinRender";
 
@@ -81,15 +82,39 @@ export function FlameyStage({
     cv.height = W;
     const ctx = cv.getContext("2d");
     if (!ctx) return;
-    // A colour skin's own palette feeds `tok` paints (its crown).
-    const palette = skin.slot === "color" ? paletteTokens(skin.palette) : null;
+    // A color skin's own palette feeds `tok` paints (its crown), and
+    // recolors his body: the app draws a color from code, not from layers,
+    // so the plain image (default colors) would hide the very thing the skin
+    // is. flameyBody.ts draws him from the same shapes in the skin's palette.
+    const isColor = skin.slot === "color" && !!skin.palette;
+    const palette = isColor ? paletteTokens(skin.palette) : null;
+    const drawBody = () => {
+      const U = W / 3;
+      ctx.save();
+      ctx.translate(W / 2, W / 2);
+      ctx.scale(U, U);
+      if (surface.compact) {
+        // The widget figure, as compose.ts places layers on it.
+        ctx.translate(0, 0.5);
+        ctx.scale(1 / (1 + CONSTANTS.leg_length), 1 / (1 + CONSTANTS.leg_length));
+        ctx.translate(0, -0.5);
+      }
+      drawFlameyBody(ctx, { palette: skin.palette as PaletteJson });
+      ctx.restore();
+    };
 
     Promise.all([plainImage(surface.name), skinImages(skin)]).then(([plain, images]) => {
       if (!alive) return;
       const draw = (time: number | null) => {
         ctx.setTransform(1, 0, 0, 1, 0, 0);
         ctx.clearRect(0, 0, W, W);
-        composeLook(ctx, W, skin, surface, { plain, images }, { time, palette, shadowScale: 2 });
+        if (isColor) {
+          // A color skin's only art is a crown in front, so the body goes first.
+          drawBody();
+          composeLook(ctx, W, skin, surface, { images }, { time, palette, shadowScale: 2, figure: false });
+        } else {
+          composeLook(ctx, W, skin, surface, { plain, images }, { time, palette, shadowScale: 2 });
+        }
       };
       const animated = !still && skin.motion && Object.keys(skin.motion).length > 0;
       if (animated) unsub = subscribe((t) => draw(t));

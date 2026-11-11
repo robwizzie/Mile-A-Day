@@ -108,6 +108,11 @@ jobs:
       - name: Admin network check
         run: node scripts/admin-network-check.mjs
 
+      # The site's own analytics: anonymous daily visitor hashes, bots and
+      # junk dropped, and the Website tab's totals as deltas.
+      - name: Web analytics check
+        run: node scripts/web-analytics-check.mjs
+
       # The competition a post carries. `CompetitionFlairRow` was removed for
       # announcing a closed group to the poster's whole circle unasked; the
       # opt-in replacement is only as good as its gate. Every failure is

@@ -757,6 +757,13 @@
       "when": 1794269784592,
       "tag": "0107_special_event_push_log",
       "breakpoints": true
+    },
+    {
+      "idx": 108,
+      "version": "7",
+      "when": 1794347458555,
+      "tag": "0108_web_events",
+      "breakpoints": true
     }
   ]
 }

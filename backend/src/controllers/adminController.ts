@@ -61,6 +61,7 @@ import {
   getUserLocations,
 } from "../services/adminNetworkService.js";
 import { signMediaUrlsDeep } from "../services/mediaSigningService.js";
+import { getWebAnalytics } from "../services/webAnalyticsService.js";
 
 const APPLE_ISS = "https://appleid.apple.com";
 const appleJwks = createRemoteJWKSet(
@@ -397,6 +398,11 @@ export async function friendNetwork(_req: Request, res: Response) {
 /** Where people walk, as a coarse grid of counts — never a per-person point. */
 export async function userLocations(_req: Request, res: Response) {
   res.json(await getUserLocations());
+}
+
+/** The marketing site's traffic (Website tab). `?days=1|7|30|90`. */
+export async function webAnalytics(req: Request, res: Response) {
+  res.json(await getWebAnalytics(req.query.days));
 }
 
 export async function retention(_req: Request, res: Response) {
