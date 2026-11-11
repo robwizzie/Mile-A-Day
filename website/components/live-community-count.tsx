@@ -20,7 +20,12 @@ const FACES = [
 /** The "live community" pill on the closing panel: a stack of real member photos, an
  * animated live-updating user count, and a pulsing LIVE dot. Refreshes every
  * minute so anyone on the site can watch the community grow in real time. */
-export function LiveCommunityCount() {
+export function LiveCommunityCount({
+  label = ["runners moving", "every day"],
+}: {
+  /** The two short lines beside the number. */
+  label?: [string, string]
+} = {}) {
   const [count, setCount] = useState<number | null>(null)
   const [display, setDisplay] = useState(0)
   const displayRef = useRef(0)
@@ -65,32 +70,38 @@ export function LiveCommunityCount() {
     return () => cancelAnimationFrame(frame)
   }, [count])
 
-  if (count === null) return null
-
+  // Always drawn (a placeholder count until the real one lands), so the
+  // header never jumps when it arrives.
   return (
-    <div className="inline-flex max-w-full flex-wrap items-center justify-center gap-x-4 gap-y-3 rounded-full bg-black/20 px-5 py-3 sm:gap-x-5 sm:px-6">
-      {/* Overlapping member photos */}
-      <div className="flex -space-x-3">
-        {FACES.map((face) => (
-          <ProfileAvatar
+    <div className="group inline-flex max-w-full flex-wrap items-center gap-x-3 gap-y-2 rounded-[28px] bg-black/20 py-2.5 pl-2.5 pr-4 sm:gap-x-5 sm:pl-3 sm:pr-6">
+      {/* Overlapping member photos: they pop in one by one and spread on hover */}
+      <div className="flex -space-x-2.5 transition-all duration-300 group-hover:-space-x-1">
+        {FACES.map((face, i) => (
+          <span
             key={face.username}
-            username={face.username}
-            initials={face.initials}
-            size={36}
-            className="border-2 border-[#e42c42]"
-          />
+            className="community-face inline-block transition-transform duration-200 hover:-translate-y-1"
+            style={{ "--i": i } as React.CSSProperties}
+          >
+            <ProfileAvatar
+              username={face.username}
+              initials={face.initials}
+              size={30}
+              className="border-2 border-[#e42c42]"
+            />
+          </span>
         ))}
       </div>
 
       {/* Animated live count */}
       <div className="flex items-center gap-2">
         <LiveDot />
-        <span className="font-heading text-[28px] leading-none text-white tabular-nums sm:text-[34px]">
-          {display.toLocaleString()}
+        <span className="font-heading text-[26px] leading-none text-white tabular-nums sm:text-[34px]">
+          {count === null ? "…" : display.toLocaleString()}
         </span>
-        <span className="text-left text-[13px] font-medium leading-tight text-white/80">
-          runners moving
-          <br className="hidden sm:block" /> every day
+        <span className="text-left text-[12px] font-semibold leading-tight text-white/85 sm:text-[13px]">
+          {label[0]}
+          <br />
+          {label[1]}
         </span>
       </div>
     </div>

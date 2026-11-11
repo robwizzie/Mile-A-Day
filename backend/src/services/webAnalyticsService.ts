@@ -14,8 +14,12 @@ const db = PostgresService.getInstance();
 export const WEB_EVENT_KINDS = ["view", "click"] as const;
 export type WebEventKind = (typeof WEB_EVENT_KINDS)[number];
 
-/** The tracker's label for every App Store link (the conversion we care about). */
+/** The tracker's label for every App Store link (the conversion we care about).
+ *  A button can say where it sits after a colon (`app_store:hero`); every
+ *  `app_store` or `app_store:*` label counts as an App Store tap. */
 export const APP_STORE_TARGET = "app_store";
+/** SQL LIKE pattern for every App Store label. */
+export const APP_STORE_LIKE = "app_store%";
 
 /** Windows the admin tab offers, in days. */
 export const WEB_WINDOWS = [1, 7, 30, 90] as const;
@@ -213,7 +217,7 @@ const TOTALS_SQL = `
     SELECT visitor,
            count(*) FILTER (WHERE kind = 'view') AS views,
            count(*) FILTER (WHERE kind = 'click') AS clicks,
-           count(*) FILTER (WHERE kind = 'click' AND target = $3) AS store
+           count(*) FILTER (WHERE kind = 'click' AND target LIKE $3) AS store
       FROM web_events
      WHERE created_at >= $1 AND created_at < $2
      GROUP BY visitor
@@ -230,7 +234,7 @@ async function totalsBetween(from: Date, to: Date): Promise<Totals> {
   const rows = await db.query(TOTALS_SQL, [
     from.toISOString(),
     to.toISOString(),
-    APP_STORE_TARGET,
+    APP_STORE_LIKE,
   ]);
   const r = rows[0] ?? {};
   const views = num(r.views);
@@ -276,10 +280,10 @@ async function loadWebAnalytics(days: number): Promise<WebAnalytics> {
       `SELECT to_char((created_at AT TIME ZONE '${TZ}')::date, 'YYYY-MM-DD') AS date,
                 count(*) FILTER (WHERE kind = 'view') AS views,
                 count(DISTINCT visitor) FILTER (WHERE kind = 'view') AS visits,
-                count(*) FILTER (WHERE kind = 'click' AND target = $3) AS store_taps
+                count(*) FILTER (WHERE kind = 'click' AND target LIKE $3) AS store_taps
            FROM web_events WHERE created_at >= $1 AND created_at < $2
           GROUP BY 1 ORDER BY 1`,
-      [...range, APP_STORE_TARGET],
+      [...range, APP_STORE_LIKE],
     ),
     db.query(
       `SELECT extract(hour FROM created_at AT TIME ZONE '${TZ}')::int AS hour, count(*) AS views
@@ -320,9 +324,9 @@ async function loadWebAnalytics(days: number): Promise<WebAnalytics> {
     ),
     db.query(
       `SELECT path, count(*) AS taps
-           FROM web_events WHERE kind = 'click' AND target = $3 AND created_at >= $1 AND created_at < $2
+           FROM web_events WHERE kind = 'click' AND target LIKE $3 AND created_at >= $1 AND created_at < $2
           GROUP BY path ORDER BY taps DESC, path LIMIT 10`,
-      [...range, APP_STORE_TARGET],
+      [...range, APP_STORE_LIKE],
     ),
     db.query(
       `SELECT coalesce(device, 'unknown') AS device, count(DISTINCT visitor) AS visits

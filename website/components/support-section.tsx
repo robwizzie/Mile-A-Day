@@ -77,7 +77,7 @@ export function SupportSection() {
                 key={item.q}
                 className="group py-5 [&_summary::-webkit-details-marker]:hidden"
               >
-                <summary className="flex cursor-pointer list-none items-center justify-between gap-4 text-[17px] font-semibold">
+                <summary data-track={`faq:${item.q.slice(0, 40)}`} className="flex cursor-pointer list-none items-center justify-between gap-4 text-[17px] font-semibold">
                   {item.q}
                   <ChevronDown className="h-5 w-5 shrink-0 text-white/50 transition-transform group-open:rotate-180" />
                 </summary>

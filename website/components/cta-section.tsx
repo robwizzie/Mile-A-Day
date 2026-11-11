@@ -65,7 +65,7 @@ export function CtaSection() {
           lasts a lifetime. Download Mile A Day free and never look back.
         </p>
         <div data-reveal="" style={{ "--d": "320ms" } as React.CSSProperties} className="mt-9 flex justify-center">
-          <AppStoreButton />
+          <AppStoreButton place="cta" />
         </div>
 
         <div className="mx-auto mt-14 max-w-md">
@@ -91,6 +91,7 @@ export function CtaSection() {
                 />
                 <button
                   type="submit"
+                  data-track="android_waitlist"
                   disabled={status === "sending"}
                   className="whitespace-nowrap rounded-full bg-white px-5 py-3 text-[15px] font-semibold text-[#16090c] disabled:opacity-60"
                 >

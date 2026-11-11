@@ -94,7 +94,7 @@ export function DeskShowcase() {
             ))}
           </div>
           <p className="text-sm text-white/50">{STYLES.find((s) => s.id === style)?.blurb}</p>
-          <a href="#want-one"
+          <a href="#want-one" data-track="desk_want_one"
              className="lift mt-3 rounded-full bg-[#ec3047] px-6 py-3.5 text-[15px] font-semibold hover:bg-[#d6243a]">
             I want one ↓
           </a>
@@ -209,7 +209,7 @@ function InterestForm() {
             {/* a field people never see; bots fill it in */}
             <input tabIndex={-1} autoComplete="off" aria-hidden value={trap} onChange={(e) => setTrap(e.target.value)}
                    name="website" style={{ position: "absolute", left: "-10000px", width: 1, height: 1, opacity: 0 }} />
-            <button type="submit" disabled={status === "sending"}
+            <button type="submit" data-track="desk_interest" disabled={status === "sending"}
                     className="lift mt-1 rounded-full bg-[#ec3047] py-3.5 text-base font-semibold hover:bg-[#d6243a] disabled:opacity-60">
               {status === "sending" ? "Saving…" : "I'd buy one"}
             </button>

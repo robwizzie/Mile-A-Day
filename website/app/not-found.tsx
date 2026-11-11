@@ -76,7 +76,7 @@ export default function NotFound() {
               Take me home
             </Link>
             <a
-              href={APP_STORE_URL}
+              href={APP_STORE_URL} data-track="app_store:404"
               className="lift rounded-full bg-black/20 px-6 py-3.5 text-[15px] font-semibold text-white hover:bg-black/30"
             >
               Get the app

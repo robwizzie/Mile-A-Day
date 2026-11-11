@@ -37,6 +37,7 @@ export function LostFlamey() {
         type="button"
         onClick={poke}
         aria-label="Poke Flamey"
+        data-track="flamey_poke"
         className="group relative h-[230px] w-[230px] cursor-pointer select-none sm:h-[280px] sm:w-[280px]"
       >
         {/* Shadow on the ground, so he stands somewhere */}

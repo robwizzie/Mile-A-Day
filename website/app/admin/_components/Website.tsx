@@ -75,9 +75,37 @@ const TARGET_LABELS: Record<string, string> = {
   email: "Email us",
   android_waitlist: "Android waitlist",
   desk_interest: "Desk: I'd buy one",
+  desk_want_one: "Desk: I want one",
+  desk_see_live: "Desk: see it live",
+  open_in_app: "Open in Mile A Day",
+  flamey_poke: "404: poked Flamey",
+  whats_new_hero: "Header: New in …",
+  whats_new_all: "What's new: every update",
+  whats_new_previous: "What's new: previous release",
 };
-const targetLabel = (t: string) =>
-  TARGET_LABELS[t] ?? (t.startsWith("out:") ? `↗ ${t.slice(4)}` : t);
+const PLACE_LABELS: Record<string, string> = {
+  hero: "header",
+  how_it_works: "how it works",
+  cta: "closing panel",
+  nav: "navbar",
+  nav_menu: "phone menu",
+  footer: "footer",
+  updates: "What's new page",
+  goal: "goal page",
+  "404": "404 page",
+  post: "shared post",
+  profile: "profile page",
+  story: "story page",
+};
+const targetLabel = (t: string) => {
+  // `app_store:<place>` = an App Store button that says where it sits.
+  if (t.startsWith("app_store:")) {
+    const place = t.slice("app_store:".length);
+    return `App Store · ${PLACE_LABELS[place] ?? place.replace(/_/g, " ")}`;
+  }
+  if (t.startsWith("faq:")) return `FAQ: ${t.slice(4)}`;
+  return TARGET_LABELS[t] ?? (t.startsWith("out:") ? `↗ ${t.slice(4)}` : t.replace(/_/g, " "));
+};
 
 const pageLabel = (p: string) =>
   p === "/"
@@ -337,7 +365,7 @@ export function WebsiteTab() {
                 label: targetLabel(c.target),
                 value: c.clicks,
                 sub: `${fmt(c.visits)} visits`,
-                color: c.target === "app_store" ? MAD_SUCCESS : undefined,
+                color: c.target.startsWith("app_store") ? MAD_SUCCESS : undefined,
               }))}
               emptyLabel="No clicks yet."
             />

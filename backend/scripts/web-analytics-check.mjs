@@ -161,6 +161,11 @@ try {
     { kind: "click", path: `${PREFIX}/updates`, target: APP_STORE_TARGET },
     ctx("198.51.100.1"),
   );
+  // A placed App Store button (`app_store:hero`) counts as a tap too.
+  await recordWebEvent(
+    { kind: "click", path: `${PREFIX}/home`, target: `${APP_STORE_TARGET}:hero` },
+    ctx("198.51.100.1"),
+  );
   // Visitor B: one page, nothing else (a bounce), on a Mac.
   await recordWebEvent(
     { kind: "view", path: `${PREFIX}/home` },
@@ -204,9 +209,9 @@ try {
   const d = (k) => after.totals[k] - before.totals[k];
   check("views +3", d("views"), 3);
   check("visits +2", d("visits"), 2);
-  check("clicks +1", d("clicks"), 1);
-  check("App Store taps +1", d("store_taps"), 1);
-  check("visits that tapped the App Store +1", d("store_visits"), 1);
+  check("clicks +2", d("clicks"), 2);
+  check("App Store taps +2 (plain and placed)", d("store_taps"), 2);
+  check("visits that tapped the App Store +1 (one visitor, two taps)", d("store_visits"), 1);
   check("bounced +1 (B only)", d("bounced"), 1);
 
   const page = after.pages.find((p) => p.path === `${PREFIX}/home`);

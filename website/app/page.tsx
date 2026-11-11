@@ -3,7 +3,8 @@ import { Navbar } from "@/components/navbar";
 import { HeroSection } from "@/components/hero-section";
 import { LiveStatsBand } from "@/components/live-stats-band";
 import { HowItWorksSection } from "@/components/how-it-works-section";
-import { FeaturePanels } from "@/components/feature-panels";
+import { featureSlides } from "@/components/feature-panels";
+import { PanelCarousel } from "@/components/panel-carousel";
 import { CompetitionsSection } from "@/components/competitions-section";
 import { HabitSection } from "@/components/habit-section";
 import { WhatsNewSection } from "@/components/whats-new-section";
@@ -136,11 +137,16 @@ export default function Home() {
       <HeroSection />
       <LiveStatsBand />
       <HowItWorksSection />
-      <FeaturePanels />
-      <CompetitionsSection />
+      <PanelCarousel
+        id="features"
+        slides={[
+          ...featureSlides(),
+          { key: "competitions", label: "Competitions", color: "#9452ec", node: <CompetitionsSection fill /> },
+        ]}
+      />
       <HabitSection />
       <WhatsNewSection />
-      <StorySection />
+      <StorySection more />
       <SupportSection />
       <DeskTeaserSection />
       <CtaSection />

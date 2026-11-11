@@ -27,7 +27,7 @@ async function getProfileImageUrl(username: string): Promise<string | null> {
   }
 }
 
-export function StorySection() {
+export function StorySection({ more = false }: { more?: boolean } = {}) {
   const streakDays = getStreakDays();
   const [robImage, setRobImage] = useState<string | null>(null);
   const [daveImage, setDaveImage] = useState<string | null>(null);
@@ -78,6 +78,15 @@ export function StorySection() {
             this for the money. We built this because this challenge genuinely
             changed our lives, and we think it can change yours too.
           </p>
+          {more && (
+            <a
+              href="/story"
+              data-track="story_more"
+              className="lift mt-7 inline-flex items-center gap-2 rounded-full bg-[#1d1214] px-6 py-3.5 text-[15px] font-semibold text-white hover:bg-black"
+            >
+              Read the whole story →
+            </a>
+          )}
         </div>
 
         {/* Right column: founders card */}

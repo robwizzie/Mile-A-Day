@@ -39,7 +39,7 @@ export function DeskTeaserSection() {
           <p className="mt-4 max-w-md text-[17px] text-white/70">
             A little LED box running on live Mile A Day data. This one is real and running right now. Tap it.
           </p>
-          <a href="/desk"
+          <a href="/desk" data-track="desk_see_live"
              className="lift mt-6 inline-flex items-center gap-2 rounded-full bg-white px-6 py-3.5 text-[15px] font-semibold text-[#16090c] hover:bg-white/90">
             See it live
           </a>

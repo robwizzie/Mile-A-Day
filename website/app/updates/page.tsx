@@ -90,7 +90,7 @@ export default function UpdatesPage() {
               {CURRENT_RELEASE.date} · {CURRENT_RELEASE.headline}
             </p>
             <div className="mt-5 flex md:justify-end">
-              <AppStoreButton />
+              <AppStoreButton place="updates" />
             </div>
           </div>
         </div>

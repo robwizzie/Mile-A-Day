@@ -39,9 +39,10 @@ const modes = [
 ];
 
 /** Competitions, as one more screenshot panel: the real final standings, and the five modes in words. */
-export function CompetitionsSection() {
+export function CompetitionsSection({ fill = false }: { fill?: boolean } = {}) {
   return (
     <PanelBand
+      fill={fill}
       flip={false}
       panel={{
         id: "competitions",
@@ -69,7 +70,7 @@ export function CompetitionsSection() {
                 · {mode.tagline}
               </span>
             </dt>
-            <dd className="mt-1 text-[14px] leading-relaxed text-white/75">
+            <dd className={`mt-1 text-[14px] leading-relaxed text-white/75 ${fill ? "hidden" : "hidden sm:block"}`}>
               {mode.description}
             </dd>
           </div>

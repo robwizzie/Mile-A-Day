@@ -118,6 +118,7 @@ export function PanelBand({
   children,
   priority = false,
   hero = false,
+  fill = false,
 }: {
   panel: Panel;
   flip?: boolean;
@@ -127,18 +128,21 @@ export function PanelBand({
   priority?: boolean;
   /** The top panel: clears the fixed navbar and gives the words more room. */
   hero?: boolean;
+  /** A carousel slide: fill the slide's height (the tallest slide sets it)
+   *  and clear the tab row drawn over the top. */
+  fill?: boolean;
 }) {
   return (
     <section
-      id={panel.id}
-      className="relative overflow-hidden text-white"
+      id={fill ? undefined : panel.id}
+      className={`relative overflow-hidden text-white ${fill ? "h-full" : ""}`}
       style={{
         background: `linear-gradient(180deg, ${panel.from} 0%, ${panel.to} 100%)`,
       }}
     >
       <Silhouette side={flip ? "left" : "right"} />
       <div
-        className={`relative mx-auto flex max-w-6xl flex-col gap-10 px-6 md:min-h-[640px] md:flex-row md:items-stretch md:gap-14 ${hero ? "pt-28 md:pt-0" : "pt-20 md:pt-0"} ${
+        className={`relative mx-auto flex max-w-6xl flex-col gap-10 px-6 md:min-h-[640px] md:flex-row md:items-stretch md:gap-14 ${hero ? "pt-28 md:pt-0" : fill ? "h-full pt-24 md:pt-6" : "pt-20 md:pt-0"} ${
           flip ? "md:flex-row-reverse" : ""
         }`}
       >
@@ -172,10 +176,13 @@ export function PanelBand({
         </div>
         <div className={`flex flex-1 items-end justify-center ${hero ? "md:pt-32" : "md:pt-20"}`}>
           <div
-            className={hero ? "mad-phone-in" : ""}
+            className={hero ? "mad-phone-in -mb-12" : ""}
             style={{ "--d": "120ms" } as CSSProperties}
             {...(hero ? {} : { "data-reveal": "phone" })}
           >
+            {/* The hero phone floats, so it runs 48px past the band's bottom
+                edge (clipped by the section): the cut end of the screenshot
+                never shows as it bobs up. */}
             <div className={hero ? "mad-float" : ""}>
               <Phone shot={panel.shot} alt={panel.alt} priority={priority} />
             </div>
@@ -186,12 +193,12 @@ export function PanelBand({
   );
 }
 
-export function FeaturePanels() {
-  return (
-    <div id="features">
-      {PANELS.map((panel, i) => (
-        <PanelBand key={panel.shot} panel={panel} flip={i % 2 === 0} />
-      ))}
-    </div>
-  );
+/** The feature panels as carousel slides (they alternate sides). */
+export function featureSlides() {
+  return PANELS.map((panel, i) => ({
+    key: panel.shot,
+    label: panel.eyebrow,
+    color: panel.from,
+    node: <PanelBand panel={panel} flip={i % 2 === 0} fill />,
+  }));
 }

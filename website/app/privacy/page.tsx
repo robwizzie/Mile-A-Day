@@ -26,7 +26,7 @@ export const metadata: Metadata = {
 
 export default function PrivacyPage() {
 	return (
-		<LegalPage title="Privacy Policy" lastUpdated="November 10, 2026">
+		<LegalPage title="Privacy Policy" lastUpdated="November 11, 2026">
 			<Section heading="Overview">
 				<p>
 					Mile A Day (&ldquo;we,&rdquo; &ldquo;us,&rdquo; or &ldquo;the app&rdquo;) is a fitness app that helps you
@@ -172,7 +172,9 @@ export default function PrivacyPage() {
 					We do not store your IP address for this: each visit is counted under a code made from your IP address and browser
 					with a key that changes every day, so a visit can&rsquo;t be traced back to you or linked to your visits on other
 					days. If your browser sends Do Not Track or Global Privacy Control, we don&rsquo;t count you at all. Our public pages
-					do not set cookies, but your browser sends your IP address to any site you visit, including ours.
+					do not set cookies, but your browser sends your IP address to any site you visit, including ours. Our story page can show posts
+					embedded from Instagram; when you scroll to one, your browser loads it from Instagram (Meta), which handles that
+					under its own privacy policy.
 				</p>
 				<p>
 					The app contains no advertising or third-party analytics software, and we do not track you across other

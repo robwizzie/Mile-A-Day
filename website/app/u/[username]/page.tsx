@@ -217,7 +217,7 @@ export default async function ProfilePage({
             Open in Mile A Day
           </a>
           <a
-            href={APP_STORE_URL}
+            href={APP_STORE_URL} data-track="app_store:profile"
             className="flex w-full items-center justify-center gap-2 rounded-full bg-white px-6 py-4 text-[16px] font-semibold text-[#16090c] transition-colors hover:bg-white/90"
           >
             <Apple className="h-5 w-5" aria-hidden />
