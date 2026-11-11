@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { DeskBox } from "./desk/desk-box";
 import { useDeskFeed } from "@/lib/use-desk-feed";
 import { MASCOT, STYLE } from "@/lib/desk-engine";
+import { LiveDot } from "./section-header";
 
 /** Homepage: a small live desk box (loaded only once it scrolls into view)
  *  and a link to mileaday.run/desk. */
@@ -26,24 +27,24 @@ export function DeskTeaserSection() {
   }, []);
 
   return (
-    <section ref={ref} className="section-lazy relative px-6 py-20">
+    <section ref={ref} className="relative bg-[#0e0809] px-6 py-24 text-white">
       <div className="mx-auto grid max-w-6xl items-center gap-10 md:grid-cols-[1fr_1.2fr]">
-        <div>
-          <span className="reveal mb-3 inline-block text-sm font-semibold uppercase tracking-widest text-[#c72554]">
-            New · Mile A Day Desk
-          </span>
-          <h2 className="reveal font-heading text-[clamp(40px,6vw,72px)] leading-[0.95] text-[#f5f5f5]">
-            YOUR STREAK,<br />ON YOUR <span className="text-[#c72554]">DESK</span>
+        <div data-reveal="">
+          <p className="mb-4 inline-flex items-center gap-2 text-[13px] font-semibold uppercase tracking-[0.18em] text-[#ff5a6e]">
+            <LiveDot /> Mile A Day Desk · live
+          </p>
+          <h2 className="font-heading text-[clamp(40px,6vw,72px)] leading-[0.95] text-white">
+            Your streak,<br />on your desk.
           </h2>
-          <p className="reveal mt-4 max-w-md text-[#a0a0a0]">
+          <p className="mt-4 max-w-md text-[17px] text-white/70">
             A little LED box running on live Mile A Day data. This one is real and running right now. Tap it.
           </p>
           <a href="/desk"
-             className="reveal mt-6 inline-flex items-center gap-2 rounded-2xl bg-[#c72554] px-6 py-3.5 font-bold text-white transition-transform hover:-translate-y-0.5">
-            See it live and get one →
+             className="lift mt-6 inline-flex items-center gap-2 rounded-full bg-white px-6 py-3.5 text-[15px] font-semibold text-[#16090c] hover:bg-white/90">
+            See it live
           </a>
         </div>
-        <div>
+        <div data-reveal="pop" style={{ "--d": "150ms" } as React.CSSProperties}>
           {seen ? (
             <DeskBox feed={feed} style={STYLE.ARCADE} mascot={MASCOT.FLAMEY} />
           ) : (

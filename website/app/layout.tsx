@@ -1,20 +1,24 @@
 import type { Metadata, Viewport } from 'next'
-import { DM_Sans, Bebas_Neue } from 'next/font/google'
+import { Inter, Inter_Tight } from 'next/font/google'
 import { Analytics } from '@vercel/analytics/next'
 import './globals.css'
 import { ogVideos } from './_og/video/meta'
+import { RevealObserver } from '@/components/reveal'
 
-const dmSans = DM_Sans({
+// The App Store screenshots set their headlines in a heavy, tightly tracked
+// grotesk (SF Pro Display on device); Inter Tight is its web stand-in, and
+// Inter the body. Headlines are sentence case, never all caps.
+const inter = Inter({
   subsets: ['latin'],
   weight: ['400', '500', '600', '700'],
-  variable: '--font-dm-sans',
+  variable: '--font-body',
   display: 'swap',
 })
 
-const bebasNeue = Bebas_Neue({
+const interTight = Inter_Tight({
   subsets: ['latin'],
-  weight: '400',
-  variable: '--font-bebas-neue',
+  weight: ['700', '800', '900'],
+  variable: '--font-display',
   display: 'swap',
 })
 
@@ -105,8 +109,9 @@ export default function RootLayout({
   children: React.ReactNode
 }>) {
   return (
-    <html lang="en" className={`${dmSans.variable} ${bebasNeue.variable}`}>
-      <body className="font-sans antialiased bg-[#0a0a0a] text-[#f5f5f5]">
+    <html lang="en" className={`${inter.variable} ${interTight.variable}`}>
+      <body className="font-sans antialiased bg-[#0e0809] text-[#f5f5f5]">
+        <RevealObserver />
         {children}
         <Analytics />
       </body>

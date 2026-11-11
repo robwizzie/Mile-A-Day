@@ -1,16 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import {
-  Route,
-  TrendingUp,
-  Users,
-  Activity,
-  Camera,
-  Flame,
-  Hand,
-  Bell,
-} from "lucide-react";
+import { LiveDot, SectionHeader } from "./section-header";
+import { useInView } from "./reveal";
 
 const API_URL =
   process.env.NEXT_PUBLIC_API_URL || "https://mad.mindgoblin.tech";
@@ -28,7 +20,7 @@ type PublicStats = {
   longest_streak: number;
 };
 
-/** Eases a displayed number toward `target` — same feel as the community
+/** Eases a displayed number toward `target`, the same feel as the community
  * counter. Handles decimals so "miles today" can animate to e.g. 41.3. */
 function useCountUp(target: number | null, decimals = 0) {
   const [display, setDisplay] = useState(0);
@@ -58,53 +50,40 @@ function useCountUp(target: number | null, decimals = 0) {
 }
 
 function StatCard({
-  icon: Icon,
-  color,
   value,
   suffix,
   label,
   sublabel,
-  delay,
+  index,
 }: {
-  icon: typeof Route;
-  color: string;
   value: string;
   suffix?: string;
   label: string;
   sublabel: string;
-  delay: number;
+  index: number;
 }) {
   return (
     <div
-      className={`reveal-scale reveal-delay-${delay} glass-card type-card group relative overflow-hidden rounded-2xl px-6 py-7 text-center`}
-      style={{ "--accent": color } as React.CSSProperties}
+      data-reveal=""
+      style={{ "--d": `${index * 70}ms` } as React.CSSProperties}
+      className="lift rounded-3xl bg-white/[0.04] px-6 py-7 hover:bg-white/[0.06]"
     >
-      {/* Accent glow that breathes on hover */}
-      <div
-        className="pointer-events-none absolute -top-10 left-1/2 h-24 w-24 -translate-x-1/2 rounded-full opacity-[0.12] blur-2xl transition-opacity duration-300 group-hover:opacity-30"
-        style={{ background: color }}
-      />
-      <div
-        className="relative mx-auto mb-4 flex h-11 w-11 items-center justify-center rounded-2xl"
-        style={{ background: `${color}1F`, border: `1px solid ${color}33` }}
-      >
-        <Icon className="h-5 w-5" style={{ color }} />
-      </div>
-      <div className="relative font-heading text-[clamp(34px,4.5vw,52px)] leading-none tracking-[0.5px] text-[#f5f5f5] tabular-nums">
+      <div className="mb-5 h-1 w-10 rounded-full bg-[#ec3047]" />
+      <div className="font-heading text-[clamp(34px,4.2vw,50px)] leading-none text-white tabular-nums">
         {value}
         {suffix && (
-          <span className="ml-1 text-[0.45em] text-[#a0a0a0]">{suffix}</span>
+          <span className="ml-1.5 text-[0.42em] font-semibold tracking-normal text-white/50">
+            {suffix}
+          </span>
         )}
       </div>
-      <div className="relative mt-2 text-sm font-semibold text-[#f5f5f5]/90">
-        {label}
-      </div>
-      <div className="relative mt-0.5 text-xs text-[#a0a0a0]">{sublabel}</div>
+      <div className="mt-3 text-[15px] font-semibold text-white">{label}</div>
+      <div className="mt-0.5 text-[13px] text-white/55">{sublabel}</div>
     </div>
   );
 }
 
-/** Live community counters — real numbers straight from the Mile A Day API
+/** Live community counters: real numbers straight from the Mile A Day API
  * (global aggregates only), refreshed every minute with an animated count-up
  * so the page always shows the movement moving. */
 export function LiveStatsBand() {
@@ -119,7 +98,7 @@ export function LiveStatsBand() {
         const data = (await res.json()) as PublicStats;
         if (!cancelled && typeof data.total_miles === "number") setStats(data);
       } catch {
-        // Fail silently — the band just doesn't render.
+        // Fail silently: the band just doesn't render.
       }
     };
     load();
@@ -130,115 +109,47 @@ export function LiveStatsBand() {
     };
   }, []);
 
-  const totalMiles = useCountUp(stats ? stats.total_miles : null);
-  const milesToday = useCountUp(stats ? stats.miles_today : null, 1);
-  const totalUsers = useCountUp(stats ? stats.total_users : null);
+  // The numbers count up when the band comes on screen, not while it's
+  // still below the fold.
+  const [bandRef, inView] = useInView<HTMLElement>(0.2);
+  const live = inView ? stats : null;
+  const totalMiles = useCountUp(live ? live.total_miles : null);
+  const milesToday = useCountUp(live ? live.miles_today : null, 1);
+  const totalUsers = useCountUp(live ? live.total_users : null);
   // `?? 0` guards the brief window where the site deploys before the backend
-  // ships the new fields — a missing value would otherwise animate to NaN.
-  const activeWeek = useCountUp(stats ? (stats.active_7d ?? 0) : null);
-  const photosShared = useCountUp(stats ? (stats.photos_shared ?? 0) : null);
-  const longestStreak = useCountUp(stats ? (stats.longest_streak ?? 0) : null);
-  const hypes = useCountUp(stats ? stats.total_hypes : null);
-  const nudges = useCountUp(stats ? stats.total_nudges : null);
+  // ships the new fields; a missing value would otherwise animate to NaN.
+  const activeWeek = useCountUp(live ? (live.active_7d ?? 0) : null);
+  const photosShared = useCountUp(live ? (live.photos_shared ?? 0) : null);
+  const longestStreak = useCountUp(live ? (live.longest_streak ?? 0) : null);
+  const hypes = useCountUp(live ? live.total_hypes : null);
+  const nudges = useCountUp(live ? live.total_nudges : null);
 
   if (stats === null) return null;
 
   return (
-    <section
-      className="section-lazy relative px-6 py-20"
-      style={{
-        background:
-          "radial-gradient(ellipse 800px 400px at 50% 0%, rgba(199,37,84,0.06) 0%, transparent 70%)",
-      }}
-    >
-      <div className="relative mx-auto max-w-6xl">
-        <div className="mx-auto mb-12 max-w-2xl text-center">
-          <span className="reveal mb-4 inline-flex items-center gap-2 text-sm font-semibold uppercase tracking-widest text-[#c72554]">
-            <span className="relative flex h-2.5 w-2.5">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#33B34D] opacity-75" />
-              <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-[#33B34D]" />
-            </span>
-            Live from the community
-          </span>
-          <h2 className="reveal reveal-delay-1 font-heading text-[clamp(40px,6vw,72px)] leading-none tracking-[-1px] text-[#f5f5f5]">
-            THE MILES ARE <span className="text-[#c72554]">ADDING UP</span>
-          </h2>
-          <p className="reveal reveal-delay-2 mt-4 text-base leading-relaxed text-[#a0a0a0]">
-            Real numbers from real walkers and runners — updating as the community moves.
-          </p>
-        </div>
+    <section ref={bandRef} className="bg-[#0e0809] px-6 py-24 text-white">
+      <div className="mx-auto max-w-6xl">
+        <SectionHeader
+          className="mb-12"
+          eyebrow={
+            <>
+              <LiveDot />
+              Live from the community
+            </>
+          }
+          title="The miles are adding up."
+          body="Real numbers from real walkers and runners, updating as the community moves."
+        />
 
-        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4 lg:gap-6">
-          <StatCard
-            icon={Route}
-            color="#c72554"
-            value={Math.round(totalMiles).toLocaleString()}
-            suffix="mi"
-            label="Total miles logged"
-            sublabel="every single one earned"
-            delay={1}
-          />
-          <StatCard
-            icon={TrendingUp}
-            color="#33B34D"
-            value={milesToday.toLocaleString(undefined, {
-              minimumFractionDigits: 1,
-              maximumFractionDigits: 1,
-            })}
-            suffix="mi"
-            label="Miles today"
-            sublabel="and the day isn't over"
-            delay={2}
-          />
-          <StatCard
-            icon={Users}
-            color="#38bdf8"
-            value={Math.round(totalUsers).toLocaleString()}
-            label="Members strong"
-            sublabel="the whole community"
-            delay={3}
-          />
-          <StatCard
-            icon={Activity}
-            color="#22d3ee"
-            value={Math.round(activeWeek).toLocaleString()}
-            label="Out moving this week"
-            sublabel="out logging miles right now"
-            delay={4}
-          />
-          <StatCard
-            icon={Camera}
-            color="#a78bfa"
-            value={Math.round(photosShared).toLocaleString()}
-            label="Photos shared"
-            sublabel="milestones worth capturing"
-            delay={5}
-          />
-          <StatCard
-            icon={Flame}
-            color="#FF9900"
-            value={Math.round(longestStreak).toLocaleString()}
-            suffix="days"
-            label="Longest active streak"
-            sublabel="unbroken and still going"
-            delay={6}
-          />
-          <StatCard
-            icon={Hand}
-            color="#f472b6"
-            value={Math.round(hypes).toLocaleString()}
-            label="Hypes sent"
-            sublabel="double-taps of pure support"
-            delay={7}
-          />
-          <StatCard
-            icon={Bell}
-            color="#fbbf24"
-            value={Math.round(nudges).toLocaleString()}
-            label="Nudges delivered"
-            sublabel="friendly kicks off the couch"
-            delay={8}
-          />
+        <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
+          <StatCard index={0} value={Math.round(totalMiles).toLocaleString()} suffix="mi" label="Total miles logged" sublabel="every single one earned" />
+          <StatCard index={1} value={milesToday.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })} suffix="mi" label="Miles today" sublabel="and the day isn't over" />
+          <StatCard index={2} value={Math.round(totalUsers).toLocaleString()} label="Members strong" sublabel="the whole community" />
+          <StatCard index={3} value={Math.round(activeWeek).toLocaleString()} label="Out moving this week" sublabel="in the last 7 days" />
+          <StatCard index={4} value={Math.round(photosShared).toLocaleString()} label="Photos shared" sublabel="milestones worth capturing" />
+          <StatCard index={5} value={Math.round(longestStreak).toLocaleString()} suffix="days" label="Longest active streak" sublabel="unbroken and still going" />
+          <StatCard index={6} value={Math.round(hypes).toLocaleString()} label="Hypes sent" sublabel="double-taps of pure support" />
+          <StatCard index={7} value={Math.round(nudges).toLocaleString()} label="Nudges delivered" sublabel="friendly kicks off the couch" />
         </div>
       </div>
     </section>

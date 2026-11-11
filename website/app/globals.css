@@ -32,8 +32,8 @@
 }
 
 @theme inline {
-  --font-sans: var(--font-dm-sans), system-ui, sans-serif;
-  --font-heading: var(--font-bebas-neue), sans-serif;
+  --font-sans: var(--font-body), system-ui, sans-serif;
+  --font-heading: var(--font-display), var(--font-body), system-ui, sans-serif;
   --font-mono: ui-monospace, monospace;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -87,23 +87,14 @@
 
 /* Liquid Glass Effects */
 .glass-card {
-  background: linear-gradient(135deg, rgba(26, 26, 26, 0.7), rgba(37, 37, 37, 0.4));
-  backdrop-filter: blur(40px) saturate(1.8);
-  -webkit-backdrop-filter: blur(40px) saturate(1.8);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow:
-    inset 0 1px 0 0 rgba(255, 255, 255, 0.05),
-    0 20px 60px -10px rgba(0, 0, 0, 0.5);
+  /* Flat, like the app's DashboardCardSurface: no blur, gradient or shadow. */
+  background: rgba(255, 255, 255, 0.045);
+  border: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 .glass-card-highlight {
-  background: linear-gradient(135deg, rgba(199, 37, 84, 0.15), rgba(139, 21, 56, 0.08));
-  backdrop-filter: blur(40px) saturate(1.8);
-  -webkit-backdrop-filter: blur(40px) saturate(1.8);
-  border: 1px solid rgba(199, 37, 84, 0.25);
-  box-shadow:
-    inset 0 1px 0 0 rgba(255, 255, 255, 0.05),
-    0 20px 60px -10px rgba(199, 37, 84, 0.2);
+  background: rgba(236, 48, 71, 0.12);
+  border: 1px solid rgba(236, 48, 71, 0.25);
 }
 
 .glass-nav {
@@ -114,18 +105,13 @@
 }
 
 .glass-button {
-  background: linear-gradient(135deg, #c72554, #8b1538);
-  box-shadow:
-    0 0 30px rgba(199, 37, 84, 0.4),
-    inset 0 1px 0 0 rgba(255, 255, 255, 0.15);
-  transition: all 0.3s ease;
+  /* A solid pill colour, the site's one red. */
+  background: #ec3047;
+  transition: background-color 0.2s ease;
 }
 
 .glass-button:hover {
-  box-shadow:
-    0 0 50px rgba(199, 37, 84, 0.6),
-    inset 0 1px 0 0 rgba(255, 255, 255, 0.2);
-  transform: translateY(-2px);
+  background: #d6243a;
 }
 
 .phone-mockup {
@@ -172,25 +158,10 @@
 
 /* Mobile Safari performance: eliminate GPU-heavy effects */
 @media (max-width: 768px) {
-  .glass-card {
-    backdrop-filter: none;
-    -webkit-backdrop-filter: none;
-    background: rgba(26, 26, 26, 0.85);
-    box-shadow: 0 4px 20px -4px rgba(0, 0, 0, 0.4);
-  }
-  .glass-card-highlight {
-    backdrop-filter: none;
-    -webkit-backdrop-filter: none;
-    background: rgba(199, 37, 84, 0.1);
-    box-shadow: none;
-  }
   .glass-nav {
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
     background: rgba(10, 10, 10, 0.92);
-  }
-  .glass-button {
-    box-shadow: none;
   }
   .phone-mockup {
     box-shadow:
@@ -272,7 +243,9 @@ html {
 
 /* Heading font utility */
 .font-heading {
-  font-family: var(--font-bebas-neue), sans-serif;
+  font-family: var(--font-display), var(--font-body), system-ui, sans-serif;
+  font-weight: 800;
+  letter-spacing: -0.035em;
 }
 
 /* Scroll reveal animations */
@@ -409,24 +382,10 @@ html {
 
 /* Hero gradient — static base + opacity-only animated glow (GPU composited) */
 .hero-gradient {
-  background:
-    radial-gradient(ellipse 600px 500px at 15% 10%, rgba(199,37,84,0.13) 0%, transparent 70%),
-    radial-gradient(ellipse 500px 600px at 85% 85%, rgba(139,21,56,0.10) 0%, transparent 70%),
-    radial-gradient(ellipse 400px 300px at 50% 40%, rgba(42,10,26,0.08) 0%, transparent 60%),
-    #0a0a0a;
+  background: #0e0809;
 }
 
 /* Animated glow — only animates opacity (no layout/paint, pure compositor) */
-.hero-gradient::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: radial-gradient(ellipse 500px 400px at 30% 20%, rgba(199,37,84,0.10) 0%, transparent 70%);
-  animation: hero-glow-pulse 6s ease-in-out infinite alternate;
-  will-change: opacity;
-  pointer-events: none;
-  z-index: 0;
-}
 
 @keyframes hero-glow-pulse {
   0%   { opacity: 0.4; }
@@ -536,7 +495,7 @@ html {
   height: 12.5cqw;
 }
 .desk-brand {
-  font-family: var(--font-dm-sans), "Arial Rounded MT Bold", system-ui, sans-serif;
+  font-family: var(--font-body), "Arial Rounded MT Bold", system-ui, sans-serif;
   font-weight: 800; letter-spacing: 0.02em; line-height: 1;
   font-size: 6.6cqw; color: #f4f2ee;
   /* raised printed lettering: a lit top edge and a little depth below */
@@ -569,3 +528,75 @@ html {
 @media (prefers-reduced-motion: reduce) { .desk-box { transition: none; } .desk-board::after { animation: none; } }
 .desk-pop { animation: desk-pop 0.5s cubic-bezier(.2,1.6,.4,1) both; }
 @keyframes desk-pop { from { transform: scale(0.3); opacity: 0 } to { transform: scale(1); opacity: 1 } }
+
+/* ── Motion ─────────────────────────────────────────────────────────────
+   Scroll reveals: `data-reveal` (rise), `="phone"` (the phone climbs out of
+   the panel), `="pop"` (scale in); `style={{"--d": "120ms"}}` staggers.
+   Hidden only under `reveal-on`, which RevealObserver sets (never for
+   Reduce Motion), so nothing is ever stuck invisible. */
+.reveal-on [data-reveal] {
+  opacity: 0;
+  transform: translateY(28px);
+  transition:
+    opacity 0.7s cubic-bezier(0.22, 1, 0.36, 1),
+    transform 0.9s cubic-bezier(0.22, 1, 0.36, 1);
+  transition-delay: var(--d, 0ms);
+}
+.reveal-on [data-reveal="phone"] {
+  transform: translateY(110px) rotate(-2deg) scale(0.97);
+  transition-duration: 0.9s, 1.1s;
+}
+.reveal-on [data-reveal="pop"] {
+  transform: scale(0.8);
+  transition-timing-function: ease, cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.reveal-on [data-reveal].is-in {
+  opacity: 1;
+  transform: none;
+}
+
+/* Hero: words then phone, once, on load. */
+@keyframes mad-rise {
+  from { opacity: 0; transform: translateY(26px); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes mad-phone-in {
+  from { opacity: 0; transform: translateY(140px) rotate(3deg); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes mad-float {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-10px); }
+}
+.mad-rise { animation: mad-rise 0.8s cubic-bezier(0.22, 1, 0.36, 1) both; animation-delay: var(--d, 0ms); }
+.mad-phone-in { animation: mad-phone-in 1.1s cubic-bezier(0.22, 1, 0.36, 1) 0.25s both; }
+.mad-float { animation: mad-float 6s ease-in-out 1.4s infinite; }
+
+/* The 66-day track: each dot lights in turn once the track is on screen. */
+.habit-dot { background: var(--dot); transition: background-color 0.3s ease, transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1); }
+.reveal-on .habit-track .habit-dot { transition-delay: var(--d, 0ms); }
+.reveal-on .habit-track:not(.is-in) .habit-dot { background: rgba(29, 18, 20, 0.1); transform: scale(0.6); }
+
+/* Buttons and cards: a small, quick lift. */
+.lift { transition: transform 0.2s ease, background-color 0.2s ease; }
+.lift:hover { transform: translateY(-2px); }
+.lift:active { transform: translateY(0) scale(0.97); }
+
+@media (prefers-reduced-motion: reduce) {
+  .mad-rise, .mad-phone-in, .mad-float { animation: none; }
+}
+
+/* 404: Flamey pops in with each poke; the lost route draws itself in. */
+@keyframes flamey-pop {
+  0%   { transform: scale(0.6) rotate(-8deg); opacity: 0; }
+  60%  { transform: scale(1.08) rotate(3deg); opacity: 1; }
+  100% { transform: scale(1) rotate(0); }
+}
+.flamey-pop { animation: flamey-pop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) both; }
+@keyframes lost-route-draw { from { stroke-dashoffset: 1400; } to { stroke-dashoffset: 0; } }
+.lost-route { animation: lost-route-draw 4s cubic-bezier(0.22, 1, 0.36, 1) both; }
+@keyframes lost-pin-bob { 0%, 100% { transform: translate(1080px, 90px); } 50% { transform: translate(1080px, 78px); } }
+.lost-pin { animation: lost-pin-bob 2.4s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .flamey-pop, .lost-route, .lost-pin { animation: none; }
+}

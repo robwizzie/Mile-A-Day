@@ -3,6 +3,7 @@ import Link from "next/link";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { Apple } from "lucide-react";
+import { Navbar } from "@/components/navbar";
 import { Footer } from "@/components/footer";
 
 import {
@@ -93,37 +94,16 @@ export default async function PostPage({
   const streak = publicStreak(post);
 
   return (
-    <main className="relative min-h-screen overflow-x-hidden bg-[#0a0a0a]">
-      <nav className="border-b border-[#333333]/40 py-5">
-        <div className="mx-auto flex max-w-3xl items-center justify-between px-6">
-          <Link href="/" className="flex items-center gap-3">
-            <Image
-              src="/images/mad-circle-icon.png"
-              alt="Mile A Day logo"
-              width={44}
-              height={44}
-              className="rounded-full"
-            />
-            <span className="font-heading text-[22px] tracking-[2px] text-[#f5f5f5]">
-              MILE A DAY
-            </span>
-          </Link>
-          <Link
-            href="/"
-            className="text-sm font-medium text-[#a0a0a0] tracking-wide transition-colors hover:text-[#f5f5f5]"
-          >
-            What is Mile A Day?
-          </Link>
-        </div>
-      </nav>
+    <main className="relative min-h-screen overflow-x-hidden bg-[#0e0809]">
+      <Navbar />
 
-      <section className="relative flex items-center justify-center px-6 py-20">
+      <section className="relative flex items-center justify-center px-6 pb-20 pt-32">
         <div className="glass-card w-full max-w-md rounded-3xl p-10 text-center">
           {/* The real avatar, server-rendered: this page already knows it, so
               there is no initials-then-photo flash. Profile images are the one
               media path the backend leaves unsigned, precisely so world-readable
               share pages can show them. */}
-          <div className="mx-auto flex h-28 w-28 items-center justify-center overflow-hidden rounded-full border-2 border-[#c72554]/50 bg-[#252525] font-heading text-4xl tracking-[1px] text-[#f5f5f5]">
+          <div className="mx-auto flex h-28 w-28 items-center justify-center overflow-hidden rounded-full border-[3px] border-[#ec3047] bg-[#252525] font-heading text-4xl text-white">
             {avatar ? (
               <Image
                 src={avatar}
@@ -138,13 +118,13 @@ export default async function PostPage({
           </div>
 
           {streak !== null && (
-            <div className="mt-4 inline-flex items-center rounded-full border border-[#c72554]/60 bg-[#c72554]/20 px-4 py-1.5 text-[13px] font-semibold tracking-wide text-[#f5f5f5]">
+            <div className="mt-4 inline-flex items-center rounded-full bg-[#ec3047] px-4 py-1.5 text-[13px] font-semibold text-white">
               {streak} day streak
             </div>
           )}
 
-          <h1 className="mt-4 font-heading text-[32px] leading-tight tracking-[0.5px] text-[#f5f5f5]">
-            {name} shared a post
+          <h1 className="mt-4 font-heading text-[32px] leading-tight text-white">
+            {name} shared a post.
           </h1>
           <p className="mt-3 text-[15px] leading-relaxed text-[#a0a0a0]">
             Posts are shared with friends inside the app, so this page only says
@@ -154,13 +134,13 @@ export default async function PostPage({
           <div className="mt-9 space-y-3">
             <a
               href={`mileaday://p/${encodeURIComponent(post.post_id)}`}
-              className="glass-button flex w-full items-center justify-center gap-2 rounded-2xl bg-[#c72554] px-6 py-4 text-[16px] font-semibold text-white transition-transform hover:scale-[1.02]"
+              className="glass-button flex w-full items-center justify-center gap-2 rounded-full px-6 py-4 text-[16px] font-semibold text-white"
             >
               Open in Mile A Day
             </a>
             <a
               href={APP_STORE_URL}
-              className="glass-button flex w-full items-center justify-center gap-2 rounded-2xl border border-[#c72554]/50 px-6 py-4 text-[16px] font-semibold text-[#f5f5f5] transition-transform hover:scale-[1.02]"
+              className="flex w-full items-center justify-center gap-2 rounded-full bg-white px-6 py-4 text-[16px] font-semibold text-[#16090c] transition-colors hover:bg-white/90"
             >
               <Apple className="h-5 w-5" aria-hidden />
               Get the app on the App Store

@@ -26,7 +26,7 @@ export const metadata: Metadata = {
 
 export default function PrivacyPage() {
 	return (
-		<LegalPage title="PRIVACY POLICY" lastUpdated="November 6, 2026">
+		<LegalPage title="Privacy Policy" lastUpdated="November 6, 2026">
 			<Section heading="Overview">
 				<p>
 					Mile A Day (&ldquo;we,&rdquo; &ldquo;us,&rdquo; or &ldquo;the app&rdquo;) is a fitness app that helps you

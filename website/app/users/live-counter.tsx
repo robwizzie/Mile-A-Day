@@ -79,7 +79,7 @@ export function LiveCounter() {
 			{/* Wordmark */}
 			<a href="/" className="absolute top-8 flex items-center gap-3 opacity-80 transition-opacity hover:opacity-100">
 				<Image src="/images/mad-circle-icon.png" alt="Mile A Day" width={36} height={36} className="rounded-full" />
-				<span className="font-heading text-xl tracking-[2px] text-[#f5f5f5]">MILE A DAY</span>
+				<span className="font-heading text-xl text-white">Mile A Day</span>
 			</a>
 
 			{/* Live badge */}
