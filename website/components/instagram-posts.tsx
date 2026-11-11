@@ -5,7 +5,7 @@ function embedUrl(link: string): string | null {
   const m = link.match(/instagram\.com\/(p|reel|reels|tv)\/([A-Za-z0-9_-]+)/);
   if (!m) return null;
   const kind = m[1] === "reels" ? "reel" : m[1];
-  return `https://www.instagram.com/${kind}/${m[2]}/embed/captioned/`;
+  return `https://www.instagram.com/${kind}/${m[2]}/embed/`;
 }
 
 /**
@@ -20,7 +20,11 @@ export function InstagramPosts() {
   return (
     <div>
       {embeds.length > 0 && (
-        <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+        <div
+          className={`grid gap-5 sm:grid-cols-2 ${
+            embeds.length >= 3 ? "lg:grid-cols-3" : "mx-auto max-w-4xl"
+          }`}
+        >
           {embeds.map((src, i) => (
             <div
               key={src}
@@ -32,7 +36,7 @@ export function InstagramPosts() {
                 src={src}
                 title={`Mile A Day on Instagram, post ${i + 1}`}
                 loading="lazy"
-                className="block h-[620px] w-full border-0"
+                className="block aspect-[4/5.9] w-full border-0"
                 scrolling="no"
               />
             </div>

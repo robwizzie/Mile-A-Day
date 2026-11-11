@@ -17,7 +17,10 @@ export function monthOfDay(day: number): string {
 }
 
 /** Instagram posts to show on /story, newest or best first. */
-export const INSTAGRAM_POSTS: string[] = [];
+export const INSTAGRAM_POSTS: string[] = [
+  "https://www.instagram.com/p/Dej6dY-AeX1/",
+  "https://www.instagram.com/p/DfVsTIvN_OR/",
+];
 
 export const INSTAGRAM_URL = "https://www.instagram.com/mileadayapp";
 export const TIKTOK_URL = "https://www.tiktok.com/@mileadayapp";
