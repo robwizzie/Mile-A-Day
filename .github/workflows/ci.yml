@@ -361,6 +361,11 @@ jobs:
       # silent and idempotent. A medal nobody gets is reported by nobody.
       - name: Badge recalibrate check
         run: node scripts/badge-recalibrate-check.mjs
+      # The secret "Good Girl" medal: earned only by finishing a completed
+      # buddy walk with Posey (never by her), left out of the public catalog,
+      # and it owns the Posey companion skin.
+      - name: Posey badge check
+        run: node scripts/posey-badge-check.mjs
 
       # An auto card is DATA, never a picture: accepted with no media, served
       # as auto to live-card builds and as an ordinary post to older ones.

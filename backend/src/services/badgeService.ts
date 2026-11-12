@@ -27,6 +27,22 @@ const db = PostgresService.getInstance();
 
 // ─── Catalog reads ──────────────────────────────────────────────────
 
+/** Posey, the dog account (David's golden retriever); see the posey app. */
+export const POSEY_USER_ID = "c06210c6f7ca4f9091c39640da5d3d81";
+export const POSEY_BADGE_ID = "buddy_posey";
+
+/**
+ * Medals nobody can see until they've earned them: left out of the public
+ * catalog (so no locked preview), served normally in a user's own badges.
+ * By id, not `is_hidden`, so no existing row changes behaviour.
+ */
+export const SECRET_BADGE_IDS = new Set<string>([POSEY_BADGE_ID]);
+
+/** The public catalog: everything except the secret medals. */
+export async function getVisibleCatalog(): Promise<Badge[]> {
+  return (await getCatalog()).filter((b) => !SECRET_BADGE_IDS.has(b.badgeId));
+}
+
 export async function getCatalog(): Promise<Badge[]> {
   const rows = await db.query<any>(
     `SELECT badge_id, category, name, description, icon, rarity, requirement, is_hidden, sort_order
@@ -169,6 +185,7 @@ async function computeSocialAggregates(userId: string): Promise<{
   buddySessionsCompleted: number;
   buddyDistinctPartners: number;
   buddySessionsWon: number;
+  buddyWalksWithPosey: number;
   ghostsBeaten: number;
   bestGhostMargin: number;
   weeklyChallengesCompleted: number;
@@ -184,6 +201,7 @@ async function computeSocialAggregates(userId: string): Promise<{
     buddySessionsCompleted: 0,
     buddyDistinctPartners: 0,
     buddySessionsWon: 0,
+    buddyWalksWithPosey: 0,
     ghostsBeaten: 0,
     bestGhostMargin: 0,
     weeklyChallengesCompleted: 0,
@@ -200,6 +218,7 @@ async function computeSocialAggregates(userId: string): Promise<{
       buddyDone,
       buddyPartners,
       buddyWon,
+      poseyWalks,
       ghosts,
       weekly,
     ] = await Promise.all([
@@ -306,6 +325,25 @@ async function computeSocialAggregates(userId: string): Promise<{
           [userId],
         )
         .catch(() => [{ count: "0" }]),
+      // Completed buddy walks that Posey (the dog's account) also finished.
+      // Same "both finished, walk completed" bar as the crew count above.
+      db
+        .query<{
+          count: string;
+        }>(
+          `SELECT COUNT(DISTINCT mine.session_id)::text AS count
+             FROM buddy_session_participants mine
+             JOIN buddy_sessions s ON s.id = mine.session_id
+             JOIN buddy_session_participants posey
+               ON posey.session_id = mine.session_id
+              AND posey.user_id = $2
+            WHERE mine.user_id = $1 AND mine.user_id <> $2
+              AND mine.status = 'finished'
+              AND posey.status = 'finished'
+              AND s.status = 'completed'`,
+          [userId, POSEY_USER_ID],
+        )
+        .catch(() => [{ count: "0" }]),
       // Ghost races WON. `ghost_margin_seconds` is signed — every completed
       // race is stored, losses included — so this must compare, not just test
       // for presence. The MAX matters as much as the count: without `> 0` a
@@ -358,6 +396,7 @@ async function computeSocialAggregates(userId: string): Promise<{
       buddySessionsCompleted: parseInt(buddyDone[0]?.count ?? "0", 10) || 0,
       buddyDistinctPartners: parseInt(buddyPartners[0]?.count ?? "0", 10) || 0,
       buddySessionsWon: parseInt(buddyWon[0]?.count ?? "0", 10) || 0,
+      buddyWalksWithPosey: parseInt(poseyWalks[0]?.count ?? "0", 10) || 0,
       ghostsBeaten: parseInt(ghosts[0]?.count ?? "0", 10) || 0,
       bestGhostMargin: Math.floor(Number(ghosts[0]?.best ?? 0)) || 0,
       weeklyChallengesCompleted: parseInt(weekly[0]?.count ?? "0", 10) || 0,
@@ -783,6 +822,9 @@ function evaluatePredicate(
           aggregateOnly: true,
         };
       }
+      if (badge.badgeId === POSEY_BADGE_ID) {
+        return { earned: agg.buddyWalksWithPosey >= req, aggregateOnly: true };
+      }
       if (badge.badgeId.startsWith("buddy_won_")) {
         return { earned: agg.buddySessionsWon >= req, aggregateOnly: true };
       }
@@ -983,6 +1025,8 @@ const EXTRA_BADGES: Array<{
   rarity: "common" | "rare" | "legendary";
   requirement: number | null;
   sortOrder: number;
+  /** Secret until earned (also list it in SECRET_BADGE_IDS). */
+  isHidden?: boolean;
 }> = [
   // Community Goals and referrals. Granted by their own services, never
   // evaluated: a null requirement earns nothing, and "competition" isn't
@@ -1342,6 +1386,21 @@ const EXTRA_BADGES: Array<{
     requirement: 10,
     sortOrder: 956,
   },
+  // Secret: a buddy walk with Posey, David's golden retriever (a real MAD
+  // account driven by her FitBark). Hidden from the catalog until earned
+  // (SECRET_BADGE_IDS); unlocks the Posey companion (flameyCatalog.ts).
+  // `pawprint.fill` ships in SF Symbols 3, safe on the iOS 17 target.
+  {
+    badgeId: POSEY_BADGE_ID,
+    category: "buddy",
+    name: "Good Girl",
+    description: "Went on a buddy walk with Posey",
+    icon: "pawprint.fill",
+    rarity: "rare",
+    requirement: 1,
+    sortOrder: 957,
+    isHidden: true,
+  },
   // ── Ghost Races ──
   // Two families by badgeId prefix (see evaluatePredicate's "ghost" case):
   // ghost_beat_* = races won, ghost_margin_* = biggest single winning margin
@@ -1500,7 +1559,7 @@ export async function seedExtraBadges(): Promise<void> {
   try {
     const queries = EXTRA_BADGES.map((b) => ({
       query: `INSERT INTO badges (badge_id, category, name, description, icon, rarity, requirement, is_hidden, sort_order)
-				VALUES ($1, $2, $3, $4, $5, $6, $7, false, $8)
+				VALUES ($1, $2, $3, $4, $5, $6, $7, $9, $8)
 				ON CONFLICT (badge_id) DO NOTHING`,
       params: [
         b.badgeId,
@@ -1511,6 +1570,7 @@ export async function seedExtraBadges(): Promise<void> {
         b.rarity,
         b.requirement,
         b.sortOrder,
+        b.isHidden === true,
       ],
     }));
     await db.transaction(queries);

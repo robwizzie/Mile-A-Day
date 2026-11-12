@@ -1,13 +1,13 @@
 import { Request, Response } from 'express';
 import { AuthenticatedRequest } from '../middleware/auth.js';
-import { getCatalog, getUserBadges, markBadgesViewed, setPinnedBadges, BadgePinError } from '../services/badgeService.js';
+import { getVisibleCatalog, getUserBadges, markBadgesViewed, setPinnedBadges, BadgePinError } from '../services/badgeService.js';
 import { areFriends } from '../services/friendshipService.js';
 import { earnedDetailsFor } from '../services/badgeEarnedDetail.js';
 import hasRequiredKeys from '../utils/hasRequiredKeys.js';
 
 export async function getPublicCatalog(_req: Request, res: Response) {
 	try {
-		const badges = await getCatalog();
+		const badges = await getVisibleCatalog();
 		return res.status(200).json({ badges });
 	} catch (err: any) {
 		console.error('Error getting badge catalog:', err.message);

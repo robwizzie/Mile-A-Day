@@ -352,6 +352,8 @@ export interface UserAggregates {
   buddySessionsCompleted: number;
   buddyDistinctPartners: number;
   buddySessionsWon: number;
+  // Completed buddy walks Posey (the dog account) also finished.
+  buddyWalksWithPosey: number;
   // Ghost races. `workouts.ghost_margin_seconds` is written only on a WIN, so
   // the count is simply how many workouts carry one; `bestGhostMargin` is the
   // biggest single margin, in seconds.
