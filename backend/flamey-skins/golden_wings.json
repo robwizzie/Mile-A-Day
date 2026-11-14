@@ -12,7 +12,7 @@
   "compact": false,
   "tier": 60,
   "auto_eligible": true,
-  "rules": {"hides":[],"clashes":[],"glow":"wings"},
+  "rules": {"hides":[],"clashes":[],"glow":"wings","back_rise":0.1},
   "art": {
     "behind@reach=0.8,glow=0": {
       "clips": [

@@ -76,6 +76,7 @@ export type Skin = {
     hides?: string[];
     clashes?: string[];
     hover_lift?: number;
+    back_rise?: number;
     floats?: boolean;
     is_cape?: boolean;
   };

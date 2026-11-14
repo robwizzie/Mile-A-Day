@@ -145,7 +145,22 @@ enum FlameyArt {
     /// whole look instead (`extentAboveView`), so the mask only has to stop
     /// things that are NOT his head (a banner pole, a camera flash).
     static func tightTopBound(for look: FlameyLook, scale: CGFloat) -> CGFloat {
-        min(tightTopBound, lookTop(look, scale: scale) - 0.03)
+        min(tightTopBound, wornTop(look, scale: scale) - 0.03)
+    }
+
+    /// How far above his TIP a back piece's narrow-surface drawing reaches
+    /// (the skin's `rules.back_rise`, body units): wings fold UP over his
+    /// head to fit the hero's column, and the top mask used to slice them
+    /// flat at his crest. Not his crest: the bubble still anchors on his head.
+    static func backRise(_ item: FlameyItem) -> CGFloat {
+        CGFloat(item.skin?.rule("back_rise") ?? 0)
+    }
+
+    /// The top of everything he WEARS, as `lookTop` measures it: his crest,
+    /// or a back piece rising past it (`backRise`), whichever is higher.
+    static func wornTop(_ look: FlameyLook, scale: CGFloat) -> CGFloat {
+        let rise = max(crest(of: look), look[.back].map(backRise) ?? 0)
+        return 0.5 - (look.bodyLift + 0.98 + rise) * scale
     }
 
     // MARK: - Headroom (everything above his tip)
@@ -209,6 +224,9 @@ enum FlameyArt {
     static func extentAboveView(look: FlameyLook, size: CGFloat, scale: CGFloat, fit: CGFloat, bubble: Bool) -> CGFloat {
         var top = lookTop(look, scale: scale) * size
         if bubble { top -= bubbleGap * size + bubbleReserve(size) }
+        // Wings rising over his head sit beside the bubble, inside the room
+        // it reserves; only a rise past the bubble's top needs more.
+        top = min(top, wornTop(look, scale: scale) * size)
         let scaled = size / 2 + fit * (top - size / 2)
         return -size / 2 - scaled
     }
