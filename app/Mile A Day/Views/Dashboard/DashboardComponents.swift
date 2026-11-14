@@ -2151,11 +2151,14 @@ extension View {
 
 // MARK: - Log a past workout
 
-/// The quiet way in to manual entry, directly under Start Mile in both
-/// styles. It was a header button once: a fourth icon up top, beside the
+/// The quiet way in to manual entry, directly under Start Mile, before and
+/// after the day's mile. It was a header button once: a fourth icon up top, beside the
 /// inbox and settings, for the rarest action on the screen. Here it reads as
 /// what it is — the other way to get a mile onto today.
 struct LogPastWorkoutLink: View {
+    /// "Log a past workout" before the mile; on a done day it reads as adding
+    /// another one (`FunStartCard`).
+    var title: String = "Log a past workout"
     let action: () -> Void
 
     var body: some View {
@@ -2167,7 +2170,7 @@ struct LogPastWorkoutLink: View {
                 Image(systemName: "square.and.pencil")
                     .madFont(size: 12, weight: .bold, maxScale: 1.3)
                     .accessibilityHidden(true)
-                Text("Log a past workout")
+                Text(title)
                     .madFont(size: 13, weight: .semibold, design: .rounded)
                     .lineLimit(1)
             }

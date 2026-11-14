@@ -258,10 +258,11 @@ export function validateSkin(s: Skin, existing: Skin[]): { errors: Problem[]; wa
     if (!isNum(r.hover_lift) || r.hover_lift < 0 || r.hover_lift > 0.5) err("rules", "hover_lift is 0 to 0.5 body units.");
     if (s.slot !== "feet") warn("rules", "hover_lift only applies to feet.");
   }
-  for (const k of ["head_rise", "head_scale"] as const) {
+  for (const k of ["head_rise", "head_scale", "back_rise"] as const) {
     if (r[k] !== undefined && !isNum(r[k])) err("rules", `${k} must be a number.`);
   }
   if (r.head_rise !== undefined && !["head", "costume"].includes(s.slot)) warn("rules", "head_rise applies to head and costume.");
+  if (r.back_rise !== undefined && s.slot !== "back") warn("rules", "back_rise applies to back items.");
   if (r.floats !== undefined && s.slot !== "companion") warn("rules", "floats applies to companions.");
   if (s.slot === "companion" && typeof r.floats !== "boolean") err("rules", "A companion needs floats: true or false.");
   if (r.is_cape !== undefined && s.slot !== "back") warn("rules", "is_cape applies to back items.");

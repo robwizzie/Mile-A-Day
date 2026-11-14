@@ -52,6 +52,7 @@ his body moves with him when he hovers; see `attach` below.
 | `hover_lift` | feet: how far he floats, body units (full surfaces only) |
 | `head_rise` | head/costume: how far above his tip it reaches (speech bubble, fitting) |
 | `head_scale` | head: size factor |
+| `back_rise` | back: how far above his tip its NARROW-surface (`reach=0.62`) drawing reaches, body units; the hero's top mask lets it through (wings over his head) |
 | `is_cape` | back: tucks/squeezes like a cape on narrow surfaces |
 | `floats` | companion: hovers by his shoulder instead of walking |
 | `shows_face` / `shows_arms` | false = the item covers them (ghost sheet) |

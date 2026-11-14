@@ -1888,9 +1888,14 @@ private struct FunStartCard: View {
                 // The day is won, but the red button stays: going again is
                 // what we want people to do, and a small "Go again" capsule
                 // on the done line was easy to miss and read oddly.
-                DashboardStartMileButton(hasActiveWorkout: hasActiveWorkout, prominent: true,
-                                         goalDone: true, showWorkoutView: $showWorkoutView)
-                    .tourAnchor("home.start")
+                VStack(spacing: 6) {
+                    DashboardStartMileButton(hasActiveWorkout: hasActiveWorkout, prominent: true,
+                                             goalDone: true, showWorkoutView: $showWorkoutView)
+                        .tourAnchor("home.start")
+                    // A treadmill session or a walk the watch missed still
+                    // belongs on a done day: manual entry stays one tap away.
+                    LogPastWorkoutLink(title: "Add a workout manually", action: onLogPastWorkout)
+                }
                 // Then the post-it prompt. See `DoneTodayCard`.
                 DoneTodayCard(
                     healthManager: healthManager,
@@ -1900,8 +1905,6 @@ private struct FunStartCard: View {
                 VStack(spacing: 6) {
                     DashboardStartMileButton(hasActiveWorkout: hasActiveWorkout, prominent: true, showWorkoutView: $showWorkoutView)
                         .tourAnchor("home.start")
-                    // Before the mile is where logging one done elsewhere
-                    // matters; after it, the done card owns this space.
                     LogPastWorkoutLink(action: onLogPastWorkout)
                 }
             }
