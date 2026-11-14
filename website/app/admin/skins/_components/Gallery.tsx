@@ -15,6 +15,7 @@ export const SLOT_LABELS: Record<string, string> = {
   head: "Head",
   eyes: "Eyes",
   chest: "Chest",
+  waist: "Waist",
   back: "Back",
   feet: "Feet",
   costume: "Costumes",

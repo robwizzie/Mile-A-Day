@@ -77,7 +77,7 @@ struct FlameyItemArt: View {
         switch item.slot {
         case .head: return (1.12, 0, -0.52)
         case .eyes: return (1.55, 0, 0.14)
-        case .chest: return (1.45, 0, 0.30)
+        case .chest, .waist: return (1.45, 0, 0.30)
         case .feet: return (1.45, 0, 0.46)
         case .back: return (0.66, -0.22, 0.0)
         case .costume: return (0.66, 0, -0.02)

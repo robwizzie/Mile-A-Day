@@ -200,9 +200,10 @@ enum HolidayCalendar {
 ///   companion  stands on the viewer's RIGHT
 ///   held       in FRONT, at his side (the viewer's left, close to the body)
 ///   chest      flat, under the mouth only — there is no neck
+///   waist      round his middle, UNDER a chest piece (shorts under a medal)
 ///   aura       one effect around him (see `FlameyGlow`)
 enum FlameySlot: String, CaseIterable, Codable, Hashable {
-    case color, head, eyes, chest, back, feet, costume, held, trail, companion, aura, bubble
+    case color, head, eyes, chest, waist, back, feet, costume, held, trail, companion, aura, bubble
 
     var displayName: String {
         switch self {
@@ -210,6 +211,7 @@ enum FlameySlot: String, CaseIterable, Codable, Hashable {
         case .head: return "Head"
         case .eyes: return "Eyes"
         case .chest: return "Chest"
+        case .waist: return "Waist"
         case .back: return "Back"
         case .feet: return "Feet"
         case .costume: return "Costume"
@@ -225,7 +227,7 @@ enum FlameySlot: String, CaseIterable, Codable, Hashable {
     /// tracker). Everything else is too wide, too noisy, or unreadable there.
     var survivesCompact: Bool {
         switch self {
-        case .color, .head, .eyes, .chest, .feet, .costume: return true
+        case .color, .head, .eyes, .chest, .waist, .feet, .costume: return true
         case .back, .held, .trail, .companion, .aura, .bubble: return false
         }
     }
@@ -469,7 +471,18 @@ struct FlameyItem: RawRepresentable, Hashable, Codable {
 
     var isMoodProp: Bool { skin?.moodProp ?? false }
 
-    var slot: FlameySlot { skin.flatMap { FlameySlot(rawValue: $0.slot) } ?? .color }
+    var slot: FlameySlot { layerSlot ?? fileSlot }
+
+    /// The slot its skin FILE names. Builds without a newer slot read only
+    /// this, so a waist piece is filed under `chest` (`layerSlot`).
+    var fileSlot: FlameySlot { skin.flatMap { FlameySlot(rawValue: $0.slot) } ?? .color }
+
+    /// The skin's `rules.layer`: the slot this build wears it in instead of
+    /// its file slot (Champ Shorts: filed under chest, worn at the waist, so
+    /// a medal and shorts go on together).
+    private var layerSlot: FlameySlot? {
+        skin?.ruleString("layer").flatMap(FlameySlot.init(rawValue:)).flatMap { $0 == fileSlot ? nil : $0 }
+    }
 
     /// How it becomes his. Mirrors the backend catalog row for row (its CI
     /// check holds the skin files to it).
@@ -745,15 +758,33 @@ struct FlameyLookChoice: Hashable, Codable {
     init(wire: [String: String?]) {
         for (key, value) in wire {
             guard let slot = FlameySlot(rawValue: key), let raw = value,
-                  let item = FlameyItem(rawValue: raw), item.slot == slot, !item.isMoodProp else { continue }
-            slots[slot] = item
+                  let item = FlameyItem(rawValue: raw), !item.isMoodProp,
+                  // Its own slot, or the file slot a build without its layer
+                  // wrote it under (`chest: champ_shorts` → the waist).
+                  item.slot == slot || item.fileSlot == slot else { continue }
+            // An explicit key for its own slot wins over the legacy copy.
+            if item.slot != slot, slots[item.slot] != nil { continue }
+            slots[item.slot] = item
         }
     }
 
-    /// To the wire dictionary: only picked slots.
+    /// Builds without a layered item's slot only read its file slot, so it
+    /// is mirrored there while that slot is free: a friend on an older build
+    /// still sees the shorts, unless a medal is on (then they see the medal).
+    private var legacyMirror: [FlameySlot: FlameyItem] {
+        var out: [FlameySlot: FlameyItem] = [:]
+        for (slot, item) in slots where item.fileSlot != slot && slots[item.fileSlot] == nil {
+            out[item.fileSlot] = item
+        }
+        return out
+    }
+
+    /// To the wire dictionary: only picked slots (+ `legacyMirror`).
     var wire: [String: String?] {
         var out: [String: String?] = [:]
-        for (slot, item) in slots { out[slot.rawValue] = .some(item.rawValue) }
+        for (slot, item) in slots.merging(legacyMirror, uniquingKeysWith: { a, _ in a }) {
+            out[slot.rawValue] = .some(item.rawValue)
+        }
         return out
     }
 
@@ -780,8 +811,9 @@ struct FlameyLookChoice: Hashable, Codable {
 
     func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: Key.self)
+        let all = slots.merging(legacyMirror, uniquingKeysWith: { a, _ in a })
         for slot in FlameySlot.allCases {
-            guard let item = slots[slot] else { continue }
+            guard let item = all[slot] else { continue }
             try c.encode(item.rawValue, forKey: Key(stringValue: slot.rawValue))
         }
     }
@@ -846,7 +878,7 @@ struct FlameyLook: Equatable, Hashable, Codable {
 
     /// The draw order for the front of him.
     var frontItems: [FlameyItem] {
-        [FlameySlot.feet, .costume, .chest, .eyes, .head, .held].compactMap { worn[$0] }
+        [FlameySlot.feet, .costume, .waist, .chest, .eyes, .head, .held].compactMap { worn[$0] }
     }
 
     /// Resolves the look for a day.

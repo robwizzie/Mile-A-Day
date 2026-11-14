@@ -12,7 +12,7 @@
   "compact": true,
   "tier": 55,
   "auto_eligible": false,
-  "rules": {"hides":[],"clashes":[]},
+  "rules": {"hides":[],"clashes":[],"layer":"waist"},
   "art": {
     "front": {
       "ops": [

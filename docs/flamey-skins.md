@@ -53,6 +53,7 @@ his body moves with him when he hovers; see `attach` below.
 | `head_rise` | head/costume: how far above his tip it reaches (speech bubble, fitting) |
 | `head_scale` | head: size factor |
 | `back_rise` | back: how far above his tip its NARROW-surface (`reach=0.62`) drawing reaches, body units; the hero's top mask lets it through (wings over his head) |
+| `layer` | a NEWER slot the item is worn in (`"waist"`), while `slot` stays one shipped builds know (`chest`); see "Waist" below |
 | `is_cape` | back: tucks/squeezes like a cape on narrow surfaces |
 | `floats` | companion: hovers by his shoulder instead of walking |
 | `shows_face` / `shows_arms` | false = the item covers them (ghost sheet) |
@@ -155,3 +156,16 @@ drawing into a recording `GraphicsContext`), assembled with
 `convert/assemble.mjs`, and checked with `match.sh`: 490/490 renders within 1%
 of the code's own. The Swift art and those tools were then deleted; they live
 at commit `82f9f07a` if a re-export is ever needed.
+
+## Waist (Nov 2026)
+
+Champ Shorts and the medals all sat in `chest`, one item per slot, so shorts
+and a medal couldn't be worn together. Shorts now wear in a `waist` slot,
+drawn before the chest piece (a medal hangs over the shorts). Shipped builds
+drop an item whose `slot` they don't know, so the file keeps `slot: "chest"`
+and says `rules.layer: "waist"`: older builds still see shorts as a chest
+item; newer ones (and the server, via `wearsIn`) wear them at the waist. A
+newer client also writes the shorts under `chest` when no chest piece is worn
+(`FlameyLookChoice.legacyMirror`), so a friend on an older build sees them; with
+a medal on, that friend sees the medal. Costumes that hide `chest` also hide
+`waist`. The Skin Builder refuses `slot: "waist"`.

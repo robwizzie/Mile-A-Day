@@ -35,7 +35,7 @@ enum FlameyClosetTab: String, CaseIterable, Identifiable, Hashable {
     var slots: [FlameySlot] {
         switch self {
         case .flame: return [.color]
-        case .outfit: return [.head, .eyes, .chest, .feet, .back, .costume]
+        case .outfit: return [.head, .eyes, .chest, .waist, .feet, .back, .costume]
         case .extras: return [.companion, .trail, .held, .aura]
         case .style: return [.bubble]
         }
@@ -54,6 +54,7 @@ extension FlameySlot {
         case .head: return "Hats"
         case .eyes: return "Eyewear"
         case .chest: return "Chest"
+        case .waist: return "Shorts"
         case .back: return "Capes & wings"
         case .feet: return "Shoes"
         case .costume: return "Costumes"
@@ -72,6 +73,7 @@ extension FlameySlot {
         case .head: return "Hats"
         case .eyes: return "Eyes"
         case .chest: return "Chest"
+        case .waist: return "Shorts"
         case .back: return "Capes"
         case .feet: return "Shoes"
         case .costume: return "Costumes"
@@ -104,6 +106,7 @@ extension FlameySlot {
         case .head: return "Hats come from lifetime-mile medals — walk further, better hats."
         case .eyes: return "Eyewear comes from daily-challenge medals."
         case .chest: return "Chest pieces come from weekly-challenge medals."
+        case .waist: return "Shorts come from special events, and go on under a chest piece."
         case .back: return "Capes come from entering competitions; wings and banners from winning them."
         case .feet: return "Shoes come from pace medals — run faster, cooler kicks."
         case .costume: return "Costumes are rare: beat ghosts, walk huge miles — or it's Halloween."
@@ -122,6 +125,7 @@ extension FlameySlot {
         case .head: return "Hat"
         case .eyes: return "Eyewear"
         case .chest: return "Chest"
+        case .waist: return "Shorts"
         case .back: return "Cape or wings"
         case .feet: return "Shoes"
         case .costume: return "Costume"
@@ -438,6 +442,7 @@ enum FlameyClosetCopy {
         case .head: lines = ["How's the \(name.lowercased())?", "Hat hair, don't care", "Topped off!"]
         case .eyes: lines = ["Looking sharp", "Can't see the haters", "Eyes on the mile"]
         case .chest: lines = ["Dressed to walk", "Fancy!", "Very distinguished"]
+        case .waist: lines = ["Ready to rumble", "Suited up", "Legs day!"]
         case .back: lines = ["Swoosh!", "Heroic, right?", "Off we go!"]
         case .feet: lines = ["Fresh kicks!", "Built for speed", "Let's move!"]
         case .costume: lines = ["Guess who!", "Totally in disguise", "Ta-da!"]

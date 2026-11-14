@@ -10,6 +10,10 @@ export const FLAMEY_SLOTS = [
   "head",
   "eyes",
   "chest",
+  // Worn WITH a chest piece (shorts under a medal). Its items keep
+  // `slot: "chest"` in their skin file, so builds that predate this slot
+  // still see them, and name it in `rules.layer` (see `wearsIn`).
+  "waist",
   "back",
   "feet",
   "costume",

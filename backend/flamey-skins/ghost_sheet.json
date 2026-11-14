@@ -13,7 +13,7 @@
   "tier": 10,
   "auto_eligible": false,
   "rules": {
-    "hides": ["back","chest","eyes","feet","head","held"],
+    "hides": ["back","chest","waist","eyes","feet","head","held"],
     "clashes": [],
     "head_rise": 0.14,
     "shows_face": false,

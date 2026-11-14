@@ -29,7 +29,18 @@ import { FLAMEY_SKINS } from "./flameySkins.js";
 export interface FlameyItem {
   id: string;
   slot: FlameySlot;
+  /** The skin's `rules.layer`: a second slot it may be worn in. */
+  layer?: FlameySlot;
   unlock: FlameyUnlock;
+}
+
+/**
+ * Whether `item` may sit in `slot` of a look: its own slot, or its layer.
+ * Shorts are filed under `chest` for shipped builds and worn in `waist` by
+ * newer ones, so a stored `chest: champ_shorts` stays valid either way.
+ */
+export function wearsIn(item: FlameyItem, slot: FlameySlot): boolean {
+  return item.slot === slot || item.layer === slot;
 }
 
 // [itemId, slot, unlocking badge id | "always" | "plus" | "month:<1-12>"]
@@ -217,7 +228,7 @@ function buildCatalog(): ReadonlyMap<string, FlameyItem> {
   const map = new Map<string, FlameyItem>(FLAMEY_ROW_ITEMS);
   for (const skin of FLAMEY_SKINS) {
     if (map.has(skin.id) || skin.moodProp) continue;
-    map.set(skin.id, { id: skin.id, slot: skin.slot, unlock: skin.unlock });
+    map.set(skin.id, { id: skin.id, slot: skin.slot, unlock: skin.unlock, ...(skin.layer ? { layer: skin.layer } : {}) });
   }
   return map;
 }

@@ -33,7 +33,7 @@ enum FlameyJourneyStep: String, CaseIterable, Hashable {
         switch self {
         case .flame: return [.color, .aura]
         case .face: return [.head, .eyes]
-        case .outfit: return [.chest, .back, .feet, .costume]
+        case .outfit: return [.chest, .waist, .back, .feet, .costume]
         case .side: return [.held, .trail, .companion]
         case .voice: return [.bubble]
         }
