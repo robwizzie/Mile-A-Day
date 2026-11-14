@@ -422,9 +422,13 @@ enum FlameyClosetSync {
         // Only what's owned goes up — the server refuses a look naming
         // anything else, and an outfit is worn without it anyway.
         let owned = FlameyFacts.ownedItems.union(serverOwned)
+        let earned = FlameyFacts.earnedBadgeIds
         let entries = list.map { outfit -> OutfitsBody.Entry in
             var look = outfit.look
-            for slot in FlameySlot.allCases where look[slot].map({ !owned.contains($0) && $0.unlock != .always }) == true {
+            for slot in FlameySlot.allCases where look[slot].map({ item in
+                if let medal = item.wornMedal { return !earned.contains(medal.badgeId) }
+                return !owned.contains(item) && item.unlock != .always
+            }) == true {
                 look[slot] = nil
             }
             return .init(id: outfit.serverId, name: outfit.name, look: look)
@@ -504,13 +508,16 @@ enum FlameyMedalCatalog {
         (UserDefaults.standard.dictionary(forKey: namesKey) as? [String: String]) ?? [:]
     }
 
-    static func medals() -> [String: FlameyMedalInfo] {
+    /// `includingEarned`: also every earned medal, catalog or not, so a worn
+    /// medal (`WornMedal`) has its name on its Closet tile.
+    static func medals(includingEarned: Bool = false) -> [String: FlameyMedalInfo] {
         let earned = Dictionary(UserManager.shared.currentUser.badges.filter { !$0.isLocked }.map { ($0.id, $0) },
                                 uniquingKeysWith: { first, _ in first })
         let names = cachedNames
         let details = BadgeEarnedDetails.all()
         var out: [String: FlameyMedalInfo] = [:]
-        for id in FlameyWardrobe.catalogBadgeIds {
+        let ids = includingEarned ? FlameyWardrobe.catalogBadgeIds.union(earned.keys) : FlameyWardrobe.catalogBadgeIds
+        for id in ids {
             let badge = earned[id] ?? Badge(id: id, name: names[id] ?? "", description: "")
             let name = earned[id]?.name ?? names[id] ?? HolidayKey(badgeId: id)?.medalName
             let rarity: FlameyMedalRarity
@@ -647,7 +654,7 @@ struct FlameyClosetScreen: View {
                     FlameyEarnRouter.go(route)
                 }
             }
-            FlameyMedalCatalog.refreshNames { model.medals = FlameyMedalCatalog.medals() }
+            FlameyMedalCatalog.refreshNames { model.medals = FlameyMedalCatalog.medals(includingEarned: true) }
             if request.openDetail, let item = request.focus, !showingJourney {
                 // After the cover has finished presenting: a sheet raised in
                 // the same transaction as its host's presentation is dropped.
@@ -680,9 +687,10 @@ struct FlameyClosetScreen: View {
         )
         let fresh = FlameySeenLedger.unseen(in: owned).union(request.highlight.intersection(owned))
         let model = FlameyClosetModel(owned: owned, choice: FlameyFacts.choice, newItems: fresh, facts: facts,
-                                      medals: FlameyMedalCatalog.medals(),
+                                      medals: FlameyMedalCatalog.medals(includingEarned: true),
                                       signupDate: FlameyFacts.signupDate, focus: request.focus,
-                                      name: FlameyFacts.name, outfits: FlameyClosetSync.outfits)
+                                      name: FlameyFacts.name, outfits: FlameyClosetSync.outfits,
+                                      wearableMedals: FlameyFacts.wearableMedalIds)
         // Only a SAVE reaches here — the Closet edits a draft.
         model.onChoiceChange = { FlameyClosetSync.choiceChanged($0) }
         model.onRename = { await FlameyClosetSync.rename($0) }

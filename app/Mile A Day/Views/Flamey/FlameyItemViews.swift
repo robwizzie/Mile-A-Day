@@ -372,13 +372,14 @@ struct FlameyClosetTile: View {
                         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                         .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(FlameyClosetStyle.artFill))
                     // The medal that unlocks it, on every tile — owned or not.
-                    if let medal = model.medal(for: item) {
+                    // (Not on a worn medal's tile: the art IS the medal.)
+                    if item.wornMedal == nil, let medal = model.medal(for: item) {
                         FlameyTileMedal(medal: medal, size: 18)
                             .padding(3)
                     }
                 }
 
-                Text(item.displayName)
+                Text(model.title(of: item))
                     .madFont(size: 11.5, weight: .heavy, design: .rounded, maxScale: 1.35)
                     .foregroundColor(owned ? .white : .white.opacity(0.55))
                     .multilineTextAlignment(.center)
@@ -481,7 +482,7 @@ struct FlameyClosetTile: View {
     }
 
     private var accessibilityLabel: String {
-        var parts = [item.displayName, item.slot.shortLabel]
+        var parts = [model.title(of: item), item.slot.shortLabel]
         if let name = model.medal(for: item)?.name { parts.append("from the \(name) medal") }
         if !owned {
             parts.append("locked")

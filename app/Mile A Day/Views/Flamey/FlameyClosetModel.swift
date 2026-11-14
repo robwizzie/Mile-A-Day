@@ -709,8 +709,10 @@ final class FlameyClosetModel {
     init(owned: Set<FlameyItem>, choice: FlameyLookChoice, newItems: Set<FlameyItem> = [],
          facts: FlameyProgressFacts = .init(), medals: [String: FlameyMedalInfo] = [:],
          date: Date = Date(), signupDate: Date? = nil, focus: FlameyItem? = nil,
-         name: String? = nil, outfits: [FlameyOutfit] = []) {
+         name: String? = nil, outfits: [FlameyOutfit] = [], wearableMedals: [String] = []) {
         self.owned = owned.union(FlameyItem.allCases.filter { $0.unlock == .always })
+        self.wearableMedalIds = wearableMedals
+        self.wearableMedalSet = Set(wearableMedals)
         self.choice = choice
         self.savedChoice = choice
         self.newItems = newItems
@@ -728,7 +730,24 @@ final class FlameyClosetModel {
 
     // MARK: Reading
 
-    func owns(_ item: FlameyItem) -> Bool { owned.contains(item) }
+    func owns(_ item: FlameyItem) -> Bool {
+        if let medal = item.wornMedal { return wearableMedalSet.contains(medal.badgeId) }
+        return owned.contains(item)
+    }
+
+    /// Every medal they've earned, wearable on his chest (`WornMedal`), in
+    /// Closet order. Kept apart from `owned`: not catalog items.
+    private(set) var wearableMedalIds: [String]
+    @ObservationIgnored private var wearableMedalSet: Set<String>
+
+    /// The earned medals as items, for the "Your medals" section.
+    var medalItems: [FlameyItem] { wearableMedalIds.map(FlameyItem.medal) }
+
+    /// An item's name on a tile: a worn medal is called by its medal's name.
+    func title(of item: FlameyItem) -> String {
+        if let medal = item.wornMedal { return medals[medal.badgeId]?.name ?? "Medal" }
+        return item.displayName
+    }
 
     /// "Flamey", or what they named him.
     var displayName: String { FlameyNameRules.display(name) }
@@ -923,7 +942,7 @@ final class FlameyClosetModel {
         focus = item
         say(FlameyClosetCopy.wearLine(item, seed: nextSeed()))
         // Picking the Classic colour / bubble is the same as leaving it basic.
-        edit(choice.picking(item, in: item.slot), toast: "Trying on \(item.displayName)")
+        edit(choice.picking(item, in: item.slot), toast: "Trying on \(title(of: item))")
     }
 
     func takeOff(_ slot: FlameySlot) {
@@ -932,7 +951,7 @@ final class FlameyClosetModel {
         say(FlameyClosetCopy.takeOffLines[nextSeed() % FlameyClosetCopy.takeOffLines.count])
         var next = choice
         next[slot] = nil
-        edit(next, toast: "Took off \(item.displayName)")
+        edit(next, toast: "Took off \(title(of: item))")
     }
 
     /// "Best look": the best thing owned in every everyday slot.

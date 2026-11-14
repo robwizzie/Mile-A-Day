@@ -93,6 +93,20 @@ enum FlameyFacts {
         Set(UserManager.shared.currentUser.badges.filter { !$0.isLocked }.map(\.id))
     }
 
+    /// Every medal this user has earned, as Closet order for wearing on his
+    /// chest (`WornMedal`): rarest first, then newest. Not `ownedItems`: a
+    /// worn medal is not a catalog item (no "new" dot, no unlock moment).
+    @MainActor
+    static var wearableMedalIds: [String] {
+        let rank: [WornMedal.Rarity: Int] = [.legendary: 0, .rare: 1, .common: 2]
+        return UserManager.shared.currentUser.badges.filter { !$0.isLocked }
+            .sorted { a, b in
+                let ra = rank[WornMedal.rarity(forBadgeId: a.id)] ?? 3, rb = rank[WornMedal.rarity(forBadgeId: b.id)] ?? 3
+                return ra != rb ? ra < rb : a.dateAwarded > b.dateAwarded
+            }
+            .map(\.id)
+    }
+
     @MainActor
     static var longestStreak: Int {
         let user = UserManager.shared.currentUser

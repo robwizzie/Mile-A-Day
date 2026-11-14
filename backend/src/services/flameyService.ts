@@ -8,6 +8,8 @@ import { monthlyFlamesStatus, perfectMonths, type MonthlyFlamesStatus } from "./
 import {
   FLAMEY_CATALOG,
   wearsIn,
+  isWornMedalId,
+  clientOwnedItemIds,
   FLAMEY_CATALOG_VERSION,
   FLAMEY_SLOTS,
   isFlameySlot,
@@ -108,7 +110,7 @@ export async function flameyBlockFor(
     holiday_keys: HOLIDAYS.map((h) => h.key).filter((k) => held.has(k)),
     signup_date: row.signup_date,
     look: servedFlameyLook(row.flamey_look, owned),
-    owned_item_ids: [...owned],
+    owned_item_ids: clientOwnedItemIds(owned),
     name: row.flamey_name ?? null,
   };
 }
@@ -168,6 +170,12 @@ export function parseFlameyLook(input: unknown, owned: Set<string>): LookParse {
       continue;
     }
     if (typeof value !== "string") return { ok: false, detail };
+    // An earned medal, on his chest only.
+    if (isWornMedalId(value)) {
+      if (slot !== "chest" || !owned.has(value)) return { ok: false, detail };
+      look[slot] = value;
+      continue;
+    }
     const item = FLAMEY_CATALOG.get(value);
     if (!item || !wearsIn(item, slot) || !owned.has(value)) {
       return { ok: false, detail };
@@ -202,6 +210,10 @@ export function servedFlameyLook(stored: unknown, owned: Set<string>): FlameyLoo
     if (value === null) {
       look[slot] = null;
     } else if (typeof value === "string") {
+      if (isWornMedalId(value)) {
+        if (slot === "chest" && owned.has(value)) look[slot] = value;
+        continue;
+      }
       const item = FLAMEY_CATALOG.get(value);
       if (item && wearsIn(item, slot) && owned.has(value)) look[slot] = value;
     }
@@ -235,7 +247,7 @@ export async function getFlameyCloset(userId: string): Promise<FlameyCloset | nu
   ]);
   return {
     look: servedFlameyLook(rows[0].flamey_look, owned),
-    owned_item_ids: [...owned],
+    owned_item_ids: clientOwnedItemIds(owned),
     catalog_version: FLAMEY_CATALOG_VERSION,
     name: rows[0].flamey_name ?? null,
     outfits: await readFlameyOutfits(userId, owned),

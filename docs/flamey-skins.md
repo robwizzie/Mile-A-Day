@@ -53,6 +53,7 @@ his body moves with him when he hovers; see `attach` below.
 | `head_rise` | head/costume: how far above his tip it reaches (speech bubble, fitting) |
 | `head_scale` | head: size factor |
 | `back_rise` | back: how far above his tip its NARROW-surface (`reach=0.62`) drawing reaches, body units; the hero's top mask lets it through (wings over his head) |
+| `hero_rise` | trail: how far above his tip its `behind-hero` drawing reaches (the hero lets it into his headroom) |
 | `layer` | a NEWER slot the item is worn in (`"waist"`), while `slot` stays one shipped builds know (`chest`); see "Waist" below |
 | `is_cape` | back: tucks/squeezes like a cape on narrow surfaces |
 | `floats` | companion: hovers by his shoulder instead of walking |
@@ -74,6 +75,7 @@ surface (nearest `reach`).
 |---|---|---|
 | `front` | in front of him | `jets=0/1` for feet |
 | `behind` | behind him | `reach=0.9/0.8/0.62`, `low=0/1` (trail under a cape), `glow=0/1` (wings) |
+| `behind-hero` | trail only, on the hero instead of `behind`: drawn as recorded (no `trail_tuck`, no drift) by builds that know it | — |
 | `crown` | in front, colour items | — |
 | `held-body`, `held-accent` | in his hand | `reach` |
 | `companion-body`, `companion-shadow` | beside him | `pose=rest/cheer/…` |
@@ -184,3 +186,27 @@ applies lands it there. That's a data-only fix: shipped builds pick it up
 from `GET /flamey/skins`. Most trails now rise behind his left shoulder; dust
 puffs and speed lines were held within 20° of level (they only read that
 way). A new trail needs the same: fit its 0.62 layers, then widen by 1/0.56.
+
+### The rainbow's arch (Nov 2026)
+
+Fitting the Rainbow Streak beside him still read badly: the hero has almost
+no room at his side, and its free space is ABOVE him (the speech bubble's
+headroom). Its `behind-hero` layer is a rainbow arching over his head with a
+cloud at each end, and `rules.hero_rise` (0.18) lets the hero's top mask
+(`FlameyArt.wornTop`) through. The part has its own NAME on purpose: a
+condition on `behind` would be picked by older builds too (an unasked
+condition matches anything) and they would slice the arch at his crest;
+`layerKey` matches parts by name, so older builds never see it and keep the
+fitted `behind` layer.
+
+## Earned medals (Nov 2026)
+
+Any medal a user has earned can be worn on his chest: look value
+`medal:<badge id>`, chest slot only. It is not a skin file: one drawing
+(`FlameyOutfitLayer.wornMedal`, a ribbon V down to a disc in the medal's
+rarity colours with its icon) serves every badge, and the rarity and icon
+come from the badge id alone (`WornMedal`, shared with the widgets and
+Watch, so a friend's medal draws without their badge list). The server
+accepts it while the badge is earned and drops it at read once it isn't;
+it never appears in `owned_item_ids`. Older builds drop the unknown id, so
+they show his chest bare.

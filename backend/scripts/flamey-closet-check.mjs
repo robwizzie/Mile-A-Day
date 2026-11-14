@@ -216,6 +216,22 @@ try {
   r = await call("PUT", `/users/${STRANGER}/flamey-look`, STRANGER, { look: { waist: "finisher_medal" } });
   check("a medal at the waist → 400", [r.status, r.json?.detail], [400, "waist:finisher_medal"]);
 
+  // An EARNED medal worn on his chest (`medal:<badge id>`), never anywhere
+  // else, never one not earned, and never listed as an owned item.
+  r = await call("PUT", `/users/${STRANGER}/flamey-look`, STRANGER, { look: { chest: "medal:weekly_5", waist: "champ_shorts" } });
+  check("earned medal on the chest → 200", [r.status, r.json?.look], [200, { chest: "medal:weekly_5", waist: "champ_shorts" }]);
+  check("…owned_item_ids never lists medals", (r.json?.owned_item_ids ?? []).some((id) => id.startsWith("medal:")), false);
+  r = await call("PUT", `/users/${STRANGER}/flamey-look`, STRANGER, { look: { chest: "medal:streak_365" } });
+  check("unearned medal → 400", [r.status, r.json?.detail], [400, "chest:medal:streak_365"]);
+  r = await call("PUT", `/users/${STRANGER}/flamey-look`, STRANGER, { look: { head: "medal:weekly_5" } });
+  check("medal off the chest → 400", [r.status, r.json?.detail], [400, "head:medal:weekly_5"]);
+  r = await call("PUT", `/users/${STRANGER}/flamey-look`, STRANGER, { look: { chest: "medal:Weekly-5" } });
+  check("malformed medal id → 400", r.status, 400);
+  r = await call("PUT", `/users/${STRANGER}/flamey-look`, STRANGER, { look: { chest: "medal:weekly_5" } });
+  await db.query(`DELETE FROM user_badges WHERE user_id = $1 AND badge_id = 'weekly_5'`, [STRANGER]);
+  r = await call("GET", `/users/${STRANGER}/flamey-closet`, STRANGER);
+  check("a lost medal comes off at read", r.json?.look, null);
+
   // ── 5. The flamey block: friend + self see it, stranger doesn't, raw column never.
   r = await call("PUT", `/users/${OWNER}/flamey-look`, OWNER, { look: LOOK });
   r = await call("GET", `/users/${OWNER}`, FRIEND);
