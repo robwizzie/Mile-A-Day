@@ -169,3 +169,18 @@ newer client also writes the shorts under `chest` when no chest piece is worn
 (`FlameyLookChoice.legacyMirror`), so a friend on an older build sees them; with
 a medal on, that friend sees the medal. Costumes that hide `chest` also hide
 `waist`. The Skin Builder refuses `slot: "waist"`.
+
+## Trails on the hero (Nov 2026)
+
+The hero (`reach < 0.75`) draws a trail's `reach=0.62` layer and then squeezes
+it to `trail_tuck` (0.56) width, in Swift and in `compose.ts` alike. The old
+0.62 drawings were the full trail shortened, so after the squeeze it sat
+almost entirely behind his body: the rainbow showed as a lone cloud by his
+foot. Each 0.62 layer (`low=0` and `low=1`) is now the 0.9 drawing rotated and
+scaled about where it meets him, chosen to show the most of it beside his
+body inside the hero's room (x -0.48..0.44, y -0.68..0.62 body units at the
+blazing scale), and stored PRE-WIDENED by 1/0.56 so the squeeze every build
+applies lands it there. That's a data-only fix: shipped builds pick it up
+from `GET /flamey/skins`. Most trails now rise behind his left shoulder; dust
+puffs and speed lines were held within 20° of level (they only read that
+way). A new trail needs the same: fit its 0.62 layers, then widen by 1/0.56.
