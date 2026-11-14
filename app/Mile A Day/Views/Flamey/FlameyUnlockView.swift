@@ -185,6 +185,7 @@ struct FlameyUnlockView: View {
         case .head: return "fresh headwear"
         case .eyes: return "a new look"
         case .chest: return "something sharp"
+        case .waist: return "something to walk in"
         case .back: return "for the big entrances"
         case .feet: return "new kicks"
         case .costume: return "a full disguise"

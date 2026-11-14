@@ -42,7 +42,7 @@ export const SURFACES: Surface[] = [
 ];
 
 export const SLOTS = [
-  "color", "head", "eyes", "chest", "back", "feet", "costume", "held", "trail", "companion", "aura", "bubble",
+  "color", "head", "eyes", "chest", "waist", "back", "feet", "costume", "held", "trail", "companion", "aura", "bubble",
 ] as const;
 export type Slot = (typeof SLOTS)[number];
 
@@ -77,6 +77,7 @@ export type Skin = {
     clashes?: string[];
     hover_lift?: number;
     back_rise?: number;
+    layer?: string;
     floats?: boolean;
     is_cape?: boolean;
   };

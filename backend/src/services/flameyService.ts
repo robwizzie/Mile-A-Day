@@ -7,6 +7,7 @@ import { isPlusActive } from "./plusService.js";
 import { monthlyFlamesStatus, perfectMonths, type MonthlyFlamesStatus } from "./monthlyFlames.js";
 import {
   FLAMEY_CATALOG,
+  wearsIn,
   FLAMEY_CATALOG_VERSION,
   FLAMEY_SLOTS,
   isFlameySlot,
@@ -168,7 +169,7 @@ export function parseFlameyLook(input: unknown, owned: Set<string>): LookParse {
     }
     if (typeof value !== "string") return { ok: false, detail };
     const item = FLAMEY_CATALOG.get(value);
-    if (!item || item.slot !== slot || !owned.has(value)) {
+    if (!item || !wearsIn(item, slot) || !owned.has(value)) {
       return { ok: false, detail };
     }
     look[slot] = value;
@@ -202,7 +203,7 @@ export function servedFlameyLook(stored: unknown, owned: Set<string>): FlameyLoo
       look[slot] = null;
     } else if (typeof value === "string") {
       const item = FLAMEY_CATALOG.get(value);
-      if (item && item.slot === slot && owned.has(value)) look[slot] = value;
+      if (item && wearsIn(item, slot) && owned.has(value)) look[slot] = value;
     }
   }
   return canonicalLook(look);

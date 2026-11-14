@@ -89,7 +89,7 @@ struct FriendFlameyFacts: Equatable {
     /// in one, else a costume, else his hat, then colour, shoes, eyes, chest.
     func headlineItem(in look: FlameyLook) -> FlameyItem? {
         if let dayItem = look.items.first(where: { $0.isHolidayOutfit }) { return dayItem }
-        for slot in [FlameySlot.costume, .head, .color, .feet, .eyes, .chest] {
+        for slot in [FlameySlot.costume, .head, .color, .feet, .eyes, .chest, .waist] {
             if let item = look[slot], !item.isMoodProp, item != .classic { return item }
         }
         return nil

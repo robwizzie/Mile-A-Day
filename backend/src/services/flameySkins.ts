@@ -22,6 +22,12 @@ export interface FlameySkin {
   id: string;
   order: number;
   slot: FlameySlot;
+  /**
+   * A second slot the item is ALSO worn in (`rules.layer`), for an item filed
+   * under an older slot so shipped builds keep it: Champ Shorts is a `chest`
+   * file with `layer: "waist"`. Newer builds wear it in the layer.
+   */
+  layer?: FlameySlot;
   /** Parsed form of the file's `unlock`. */
   unlock: FlameyUnlock;
   /** Automatic mood dressing — drawn by the app, never in the Closet. */
@@ -86,11 +92,15 @@ function parseSkin(file: string, text: string): FlameySkin | string {
   const unlock = parseSkinUnlock(o.unlock);
   if (!unlock) return `bad unlock ${JSON.stringify(o.unlock)}`;
   if (!o.art || typeof o.art !== "object" || Array.isArray(o.art)) return "art must be an object";
+  const rules = o.rules && typeof o.rules === "object" ? (o.rules as Record<string, unknown>) : {};
+  const layer = rules.layer;
+  if (layer !== undefined && (!isFlameySlot(layer) || layer === o.slot)) return `bad rules.layer ${JSON.stringify(layer)}`;
   return {
     format: o.format as number,
     id,
     order: o.order,
     slot: o.slot,
+    ...(layer !== undefined ? { layer: layer as FlameySlot } : {}),
     unlock,
     moodProp: o.mood_prop === true,
     raw: o,

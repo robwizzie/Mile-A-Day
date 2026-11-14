@@ -308,7 +308,8 @@ struct FlameyOutfitLayer: View {
                 if let crown = FlameyArt.monthCrown(of: look) {
                     skin(crown, "crown", in: &ctx)
                 }
-                for item in items where [.chest, .eyes, .head].contains(item.slot) && !last(item) {
+                // Waist before chest (`frontItems`): a medal hangs over shorts.
+                for item in items where [.waist, .chest, .eyes, .head].contains(item.slot) && !last(item) {
                     skin(item, "front", in: &ctx)
                     // The heart bopper's band sits still on his head.
                     skin(item, "bopper-band", in: &ctx)

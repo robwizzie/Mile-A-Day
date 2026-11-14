@@ -146,7 +146,7 @@ try {
   check("catalog ⊇ ROWS", [...FLAMEY_ROW_ITEMS.keys()].filter((id) => !FLAMEY_CATALOG.has(id)), []);
   check(
     "every slot has items",
-    FLAMEY_SLOTS.filter((s) => ![...FLAMEY_CATALOG.values()].some((i) => i.slot === s)),
+    FLAMEY_SLOTS.filter((s) => ![...FLAMEY_CATALOG.values()].some((i) => i.slot === s || i.layer === s)),
     [],
   );
   check(
@@ -204,6 +204,17 @@ try {
   r = await call("PUT", `/users/${OWNER}/flamey-look`, OWNER, { look: LOOK });
   r = await call("PUT", `/users/${OWNER}/flamey-look`, OWNER, { look: null });
   check("look:null resets to auto", [r.status, r.json?.look, await storedLook(OWNER)], [200, null, null]);
+
+  // Waist: shorts are a `chest` file worn in `waist` (rules.layer), so a
+  // medal and shorts go on together; builds without the slot keep sending
+  // them as chest, which must stay valid.
+  await grant(STRANGER, "weekly_5", "event_champ_5k_2026");
+  r = await call("PUT", `/users/${STRANGER}/flamey-look`, STRANGER, { look: { waist: "champ_shorts", chest: "finisher_medal" } });
+  check("medal + shorts → 200 canonical", [r.status, r.json?.look], [200, { chest: "finisher_medal", waist: "champ_shorts" }]);
+  r = await call("PUT", `/users/${STRANGER}/flamey-look`, STRANGER, { look: { chest: "champ_shorts" } });
+  check("shorts as chest (older builds) → 200", [r.status, r.json?.look], [200, { chest: "champ_shorts" }]);
+  r = await call("PUT", `/users/${STRANGER}/flamey-look`, STRANGER, { look: { waist: "finisher_medal" } });
+  check("a medal at the waist → 400", [r.status, r.json?.detail], [400, "waist:finisher_medal"]);
 
   // ── 5. The flamey block: friend + self see it, stranger doesn't, raw column never.
   r = await call("PUT", `/users/${OWNER}/flamey-look`, OWNER, { look: LOOK });

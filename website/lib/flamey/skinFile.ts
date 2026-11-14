@@ -231,6 +231,9 @@ export function validateSkin(s: Skin, existing: Skin[]): { errors: Problem[]; wa
   else if (existing.some((e) => e.id === s.id)) err("id", `"${s.id}" is already a skin. Ids are permanent: pick a new one.`);
   if (!s.name?.trim()) err("name", "Name it.");
   if (!(SLOTS as readonly string[]).includes(s.slot)) err("slot", "Pick a slot.");
+  // Shipped builds drop an item filed under a slot they don't know, so a
+  // waist piece is filed under chest and names the waist in rules.layer.
+  if (s.slot === "waist") err("slot", 'File waist pieces under "chest" with rules.layer "waist", or builds without the waist slot lose them.');
   if (!s.family?.trim()) err("family", "Family (the Closet group) is required.");
   if (!s.unlock_copy?.trim()) err("unlock_copy", "Say how it's unlocked (shown in the Closet).");
   if (!Number.isInteger(s.order)) err("order", "Order must be an integer.");
@@ -263,6 +266,7 @@ export function validateSkin(s: Skin, existing: Skin[]): { errors: Problem[]; wa
   }
   if (r.head_rise !== undefined && !["head", "costume"].includes(s.slot)) warn("rules", "head_rise applies to head and costume.");
   if (r.back_rise !== undefined && s.slot !== "back") warn("rules", "back_rise applies to back items.");
+  if (r.layer !== undefined && (!(SLOTS as readonly string[]).includes(String(r.layer)) || r.layer === s.slot)) err("rules", "layer must be another slot (waist).");
   if (r.floats !== undefined && s.slot !== "companion") warn("rules", "floats applies to companions.");
   if (s.slot === "companion" && typeof r.floats !== "boolean") err("rules", "A companion needs floats: true or false.");
   if (r.is_cape !== undefined && s.slot !== "back") warn("rules", "is_cape applies to back items.");
