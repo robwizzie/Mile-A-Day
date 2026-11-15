@@ -77,6 +77,7 @@ export type Skin = {
     clashes?: string[];
     hover_lift?: number;
     back_rise?: number;
+    hero_rise?: number;
     layer?: string;
     floats?: boolean;
     is_cape?: boolean;
@@ -289,10 +290,15 @@ export function composeLook(
   // Behind.
   if (draws) body(() => {
     if (slot === "trail") {
-      ctx.save();
-      if (tight) ctx.scale(C.trail_tuck, 1);
-      layer("behind", { low: 0 });
-      ctx.restore();
+      if (tight && pickLayer(art, "behind-hero", { reach })) {
+        // Drawn for the hero as-is (no tuck), with the trail's own motion.
+        layer("behind-hero", {}, "behind");
+      } else {
+        ctx.save();
+        if (tight) ctx.scale(C.trail_tuck, 1);
+        layer("behind", { low: 0 });
+        ctx.restore();
+      }
     } else if (slot === "back") {
       layer("behind", { glow: 1 });
     } else {

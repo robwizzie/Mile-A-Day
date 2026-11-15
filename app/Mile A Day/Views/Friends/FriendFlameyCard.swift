@@ -670,7 +670,8 @@ struct FriendFlameyWardrobeSheet: View {
                     .foregroundColor(.white.opacity(0.45))
                     .lineLimit(1)
                     .minimumScaleFactor(0.75)
-                Text(item.displayName)
+                // A worn medal goes by its medal's name.
+                Text(item.wornMedal != nil ? (medal?.name ?? item.displayName) : item.displayName)
                     .madFont(size: 15, weight: .bold, design: .rounded)
                     .foregroundColor(.white)
                     .madNameLines()
@@ -728,7 +729,9 @@ enum FriendFlameyMedals {
                               uniquingKeysWith: { first, _ in first })
         let names = Dictionary(catalog.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first })
         var out: [String: FlameyMedalInfo] = [:]
-        for id in FlameyWardrobe.catalogBadgeIds {
+        // Their earned medals too, so a medal they wear on Flamey's chest
+        // (`WornMedal`) is named.
+        for id in FlameyWardrobe.catalogBadgeIds.union(mine.keys) {
             let badge = mine[id] ?? Badge(id: id, name: names[id] ?? "", description: "")
             let name = [mine[id]?.name, names[id], HolidayKey(badgeId: id)?.medalName]
                 .compactMap { $0 }.first { !$0.isEmpty }

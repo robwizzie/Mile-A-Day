@@ -79,7 +79,7 @@ export const skinFileText = (s: Skin) => stringifySkin(orderedSkin(s)) + "\n";
 // ---------------------------------------------------------------- vocab
 
 export const LAYER_PARTS = [
-  "front", "behind", "crown", "held-body", "held-accent", "companion-body", "companion-shadow", "bopper-band", "bopper-springs",
+  "front", "behind", "behind-hero", "crown", "held-body", "held-accent", "companion-body", "companion-shadow", "bopper-band", "bopper-springs",
 ] as const;
 
 /** Which layers make sense for a slot (the Closet's renderer draws them there). */
@@ -91,7 +91,9 @@ export const SLOT_LAYERS: Record<string, string[]> = {
   costume: ["front"],
   feet: ["front"],
   back: ["behind"],
-  trail: ["behind"],
+  // behind-hero: drawn instead of behind on the hero, un-squeezed, by builds
+  // that know it (the rainbow's arch over his head); older builds ignore it.
+  trail: ["behind", "behind-hero"],
   held: ["held-body", "held-accent"],
   companion: ["companion-body", "companion-shadow"],
   aura: [],
@@ -261,7 +263,7 @@ export function validateSkin(s: Skin, existing: Skin[]): { errors: Problem[]; wa
     if (!isNum(r.hover_lift) || r.hover_lift < 0 || r.hover_lift > 0.5) err("rules", "hover_lift is 0 to 0.5 body units.");
     if (s.slot !== "feet") warn("rules", "hover_lift only applies to feet.");
   }
-  for (const k of ["head_rise", "head_scale", "back_rise"] as const) {
+  for (const k of ["head_rise", "head_scale", "back_rise", "hero_rise"] as const) {
     if (r[k] !== undefined && !isNum(r[k])) err("rules", `${k} must be a number.`);
   }
   if (r.head_rise !== undefined && !["head", "costume"].includes(s.slot)) warn("rules", "head_rise applies to head and costume.");

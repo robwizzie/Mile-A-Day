@@ -365,39 +365,10 @@ private struct PinnedBadgeSlotEmpty: View {
 
 // MARK: - Visual helpers (mirrors PremiumBadgeCard styling so the showcase looks consistent)
 
+/// The medal's stamped icon. The rules live in `WornMedal.icon(forBadgeId:)`
+/// (shared, so Flamey wears the same icon on widgets and the Watch).
 func iconName(for badge: Badge) -> String {
-    if let holiday = HolidayKey(badgeId: badge.id) {
-        return holiday.medalIcon
-    }
-    if badge.id.starts(with: "event_champ_5k") {
-        return "figure.boxing"
-    }
-    if badge.id.starts(with: "streak_") || badge.id.starts(with: "consistency_") {
-        return "flame.fill"
-    } else if badge.id.starts(with: "miles_") {
-        return "figure.run"
-    } else if badge.id.starts(with: "pace_") {
-        return "bolt.fill"
-    } else if badge.id.starts(with: "daily_") {
-        return "figure.run.circle.fill"
-    } else if badge.id.starts(with: "challenge_") {
-        return "trophy.fill"
-    } else if badge.id.starts(with: "story_") {
-        return "camera.fill"
-    } else if badge.id.starts(with: "hype_") {
-        return "hands.clap.fill"
-    } else if badge.id.starts(with: "nudge_") {
-        return "hand.wave.fill"
-    } else if badge.id.starts(with: "comp_won_") {
-        return "crown.fill"
-    } else if badge.id.starts(with: "comp_started_") {
-        return "flag.checkered"
-    } else if badge.id.starts(with: "comp_entered_") || badge.id.starts(with: "comp_") {
-        return "trophy.fill"
-    } else if badge.id.starts(with: "hidden_") || badge.id.starts(with: "secret_") || badge.id.starts(with: "special_") {
-        return "sparkles"
-    }
-    return "star.fill"
+    WornMedal.icon(forBadgeId: badge.id)
 }
 
 func medalGradientColors(for badge: Badge) -> [Color] {

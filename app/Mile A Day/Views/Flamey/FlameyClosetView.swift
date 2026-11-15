@@ -653,6 +653,7 @@ struct FlameyClosetView: View {
         VStack(alignment: .leading, spacing: 22) {
             ForEach(model.tab.slots, id: \.self) { slot in
                 section(slot)
+                if slot == .chest, !model.medalItems.isEmpty { medalsSection }
             }
         }
         .padding(.horizontal, 16)
@@ -680,7 +681,7 @@ struct FlameyClosetView: View {
                         .accessibilityLabel("\(model.ownedCount(in: slot)) of \(model.totalCount(in: slot)) unlocked")
                     Spacer(minLength: 8)
                     if let worn = model.worn(in: slot) {
-                        Text("Wearing \(worn.displayName)")
+                        Text("Wearing \(model.title(of: worn))")
                             .madFont(size: 11.5, weight: .bold, design: .rounded, maxScale: 1.3)
                             .foregroundColor(FlameyClosetStyle.worn)
                             .lineLimit(1)
@@ -699,6 +700,45 @@ struct FlameyClosetView: View {
                 ForEach(model.items(in: slot), id: \.self) { item in
                     FlameyClosetTile(item: item, model: model) {
                         if model.owns(item) { MADHaptics.success() } else { MADHaptics.tap() }
+                        withAnimation(reduceMotion ? nil : .snappy) { model.tap(item) }
+                    } onDetails: {
+                        MADHaptics.action()
+                        model.detail = item
+                    }
+                }
+            }
+        }
+    }
+
+    /// Every medal they've earned, worn on his chest in place of a chest
+    /// piece (`WornMedal`). Right under Chest, since that's the slot it takes.
+    private var medalsSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text("Your medals")
+                        .madFont(size: 13, weight: .black, design: .rounded, maxScale: 1.4)
+                        .tracking(1)
+                        .textCase(.uppercase)
+                        .foregroundColor(.white)
+                        .lineLimit(1)
+                        .accessibilityAddTraits(.isHeader)
+                    Text("\(model.medalItems.count)")
+                        .madFont(size: 12, weight: .bold, design: .rounded, maxScale: 1.4, monospacedDigit: true)
+                        .foregroundColor(.white.opacity(0.45))
+                        .lineLimit(1)
+                        .accessibilityLabel("\(model.medalItems.count) earned")
+                    Spacer(minLength: 8)
+                }
+                Text("Any medal you've earned. He wears it on his chest.")
+                    .madFont(size: 12, weight: .semibold, design: .rounded, maxScale: 1.3)
+                    .foregroundColor(.white.opacity(0.5))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            LazyVGrid(columns: columns, spacing: 10) {
+                ForEach(model.medalItems, id: \.self) { item in
+                    FlameyClosetTile(item: item, model: model) {
+                        MADHaptics.success()
                         withAnimation(reduceMotion ? nil : .snappy) { model.tap(item) }
                     } onDetails: {
                         MADHaptics.action()

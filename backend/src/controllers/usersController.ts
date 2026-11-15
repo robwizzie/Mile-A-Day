@@ -36,7 +36,7 @@ import {
 	replaceFlameyOutfits,
 	type FlameyBlock
 } from '../services/flameyService.js';
-import { FLAMEY_CATALOG_VERSION } from '../services/flameyCatalog.js';
+import { FLAMEY_CATALOG_VERSION, clientOwnedItemIds } from '../services/flameyCatalog.js';
 import type { AuthenticatedRequest } from '../middleware/auth.js';
 
 const db = PostgresService.getInstance();
@@ -97,7 +97,7 @@ export async function putFlameyLook(req: Request, res: Response) {
 	}
 	res.json({
 		look: parsed.look,
-		owned_item_ids: [...owned],
+		owned_item_ids: clientOwnedItemIds(owned),
 		catalog_version: FLAMEY_CATALOG_VERSION
 	});
 }

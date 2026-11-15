@@ -780,83 +780,15 @@ struct Badge: Identifiable, Codable {
         return components.compactMap { Int($0) }.first ?? 0
     }
 
-    // Badge rarity — monotonic with difficulty within each category.
-    // Mirrors backend/scripts/badges-seed.sql tiers.
+    // Badge rarity — monotonic with difficulty within each category. The
+    // rules live in `WornMedal` (shared with the widgets and Watch, which draw
+    // a medal Flamey wears without the badge list).
     var rarity: BadgeRarity {
-        let n = numericValue
-
-        if id.starts(with: "consistency_") {
-            return .common
+        switch WornMedal.rarity(forBadgeId: id) {
+        case .common: return .common
+        case .rare: return .rare
+        case .legendary: return .legendary
         }
-        if id.starts(with: "streak_") {
-            if n >= 365 { return .legendary }
-            if n >= 50 { return .rare }
-            return .common
-        }
-        if id.starts(with: "miles_") {
-            if n >= 1000 { return .legendary }
-            if n >= 500 { return .rare }
-            return .common
-        }
-        if id.starts(with: "pace_") {
-            // Lower min/mi = harder.
-            if n <= 6 { return .legendary }
-            if n <= 8 { return .rare }
-            return .common
-        }
-        if id.starts(with: "daily_") {
-            switch id {
-            case "daily_marathon", "daily_50k", "daily_ultra":
-                return .legendary
-            case "daily_half", "daily_15", "daily_20":
-                return .rare
-            default:
-                return .common
-            }
-        }
-        if id.starts(with: "challenge_") {
-            if n >= 100 { return .legendary }
-            if n >= 25 { return .rare }
-            return .common
-        }
-        if id.starts(with: "story_") {
-            if n >= 100 { return .legendary }
-            if n >= 25 { return .rare }
-            return .common
-        }
-        if id.starts(with: "hype_") {
-            if n >= 500 { return .legendary }
-            if n >= 100 { return .rare }
-            return .common
-        }
-        if id.starts(with: "nudge_") {
-            if n >= 500 { return .legendary }
-            if n >= 100 { return .rare }
-            return .common
-        }
-        if id.starts(with: "comp_won_") {
-            return n >= 5 ? .legendary : .rare
-        }
-        if id.starts(with: "comp_started_") {
-            return n >= 10 ? .rare : .common
-        }
-        if id.starts(with: "comp_entered_") || id.starts(with: "comp_") {
-            if n >= 50 { return .legendary }
-            if n >= 10 { return .rare }
-            return .common
-        }
-        if id.starts(with: "special_") {
-            return .rare
-        }
-        // A holiday medal comes round once a year — rare by construction.
-        if id.starts(with: "holiday_") {
-            return .rare
-        }
-        // A one-day event (Champ 5K Day) happens once, ever.
-        if id.starts(with: "event_") {
-            return .legendary
-        }
-        return .common
     }
 }
 

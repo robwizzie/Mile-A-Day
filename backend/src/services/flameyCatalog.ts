@@ -259,17 +259,36 @@ const FLAMEY_ALL_ACCESS_USER_IDS: ReadonlySet<string> = new Set([
  * Items owned given the user's earned badge ids, Plus state and perfect
  * months (1–12), in catalog order. `purchase` items are never owned yet.
  */
+/**
+ * A medal the user EARNED, worn on Flamey's chest: `medal:<badge id>`. Not a
+ * catalog item (one drawing serves every badge, made by the app from the
+ * badge id), so it never appears in `owned_item_ids`; it is wearable in
+ * `chest` while the badge is earned (`ownedFlameyItemIds` adds it).
+ */
+export const WORN_MEDAL_PREFIX = "medal:";
+const BADGE_ID_RE = /^[a-z0-9_]+$/;
+
+export function isWornMedalId(id: string): boolean {
+  return id.startsWith(WORN_MEDAL_PREFIX) && BADGE_ID_RE.test(id.slice(WORN_MEDAL_PREFIX.length));
+}
+
+/** `owned` as the client sees it: catalog items only, never worn medals. */
+export function clientOwnedItemIds(owned: Iterable<string>): string[] {
+  return [...owned].filter((id) => !isWornMedalId(id));
+}
+
 export function ownedFlameyItemIds(
   earnedBadgeIds: Iterable<string>,
   userId?: string,
   plus = false,
   perfectMonths: ReadonlySet<number> | ReadonlyMap<number, unknown> = new Set<number>(),
 ): Set<string> {
-  if (userId && FLAMEY_ALL_ACCESS_USER_IDS.has(userId)) {
-    return new Set(FLAMEY_CATALOG.keys());
-  }
   const earned = new Set(earnedBadgeIds);
-  const owned = new Set<string>();
+  const medals = [...earned].filter((b) => BADGE_ID_RE.test(b)).map((b) => WORN_MEDAL_PREFIX + b);
+  if (userId && FLAMEY_ALL_ACCESS_USER_IDS.has(userId)) {
+    return new Set([...FLAMEY_CATALOG.keys(), ...medals]);
+  }
+  const owned = new Set<string>(medals);
   for (const item of FLAMEY_CATALOG.values()) {
     if (item.unlock.kind === "always") owned.add(item.id);
     else if (item.unlock.kind === "plus" && plus) owned.add(item.id);

@@ -195,8 +195,16 @@ struct FlameyOutfitLayer: View {
             // The trail goes UNDER a cape: both stream to his left, and the
             // cape is the bigger, chosen piece — the trail shows around it.
             if let trail = look[.trail] {
+                // A trail drawn FOR the hero (`behind-hero`: the rainbow's
+                // arch over his head) goes on as recorded — no tuck, no drift
+                // — and may rise into his headroom (`FlameyArt.heroRise`).
+                let heroArt = FlameyArt.isTight(reach) && trail.skin?.layer("behind-hero") != nil
                 Canvas { ctx, canvas in
                     ctx.translateBy(x: canvas.width / 2, y: canvas.height / 2)
+                    if heroArt {
+                        skin(trail, "behind-hero", in: &ctx)
+                        return
+                    }
                     // A tight surface shortens the stream so it only peeks
                     // out from behind him.
                     if FlameyArt.isTight(reach) { ctx.scaleBy(x: FlameyArt.trailTuck, y: 1) }
@@ -207,7 +215,7 @@ struct FlameyOutfitLayer: View {
                 }
                 .frame(width: size * 3, height: size * 3)
                 // Streaming: drifts back from him and breathes.
-                .offset(x: moving && phase ? -(tight ? 0.015 : 0.035) * u : 0)
+                .offset(x: moving && phase && !heroArt ? -(tight ? 0.015 : 0.035) * u : 0)
                 .opacity(moving && phase ? 0.78 : 1)
             }
             if let back = look[.back] {
@@ -310,6 +318,10 @@ struct FlameyOutfitLayer: View {
                 }
                 // Waist before chest (`frontItems`): a medal hangs over shorts.
                 for item in items where [.waist, .chest, .eyes, .head].contains(item.slot) && !last(item) {
+                    if let medal = item.wornMedal {
+                        wornMedal(medal, in: &ctx)
+                        continue
+                    }
                     skin(item, "front", in: &ctx)
                     // The heart bopper's band sits still on his head.
                     skin(item, "bopper-band", in: &ctx)
@@ -432,6 +444,48 @@ struct FlameyOutfitLayer: View {
         var c = ctx
         c.translateBy(x: 0, y: size / 2 - 0.5 * u + (place == .body ? -look.hoverLift * u : 0))
         FlameySkinArt.draw(layer, in: &c, u: u, palette: palette)
+    }
+
+    /// An earned medal on his chest (`WornMedal`): a ribbon V framing the
+    /// grin down to a disc in the medal's rarity colours, stamped with its
+    /// icon. One drawing for every badge, in body units like a skin's.
+    private func wornMedal(_ medal: WornMedal, in ctx: inout GraphicsContext) {
+        let u = self.u
+        var c = ctx
+        c.translateBy(x: 0, y: size / 2 - 0.5 * u - look.hoverLift * u)
+        func p(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: x * u, y: y * u) }
+        let (light, mid, dark) = Self.medalColors(medal.rarity)
+        let cy: CGFloat = 0.305, r: CGFloat = 0.072
+        for side in [CGFloat(-1), 1] {
+            var tail = Path()
+            tail.move(to: p(side * 0.27, 0.185))
+            tail.addLine(to: p(side * 0.19, 0.185))
+            tail.addLine(to: p(side * 0.012, cy - r * 0.55))
+            tail.addLine(to: p(side * 0.055, cy - r * 0.3))
+            tail.closeSubpath()
+            c.fill(tail, with: .color(side < 0 ? mid : dark))
+            c.stroke(tail, with: .color(.white.opacity(0.35)), style: StrokeStyle(lineWidth: 0.006 * u, lineJoin: .round))
+        }
+        let disc = Path(ellipseIn: CGRect(x: -r * u, y: (cy - r) * u, width: 2 * r * u, height: 2 * r * u))
+        // A light outer rim first, so a gold medal still reads on an orange flame.
+        c.stroke(disc, with: .color(.white.opacity(0.55)), lineWidth: 0.018 * u)
+        c.fill(disc, with: .linearGradient(Gradient(colors: [light, mid]), startPoint: p(-r, cy - r), endPoint: p(r, cy + r)))
+        c.stroke(disc, with: .color(dark), lineWidth: 0.010 * u)
+        let ring = Path(ellipseIn: CGRect(x: -r * 0.72 * u, y: (cy - r * 0.72) * u, width: 1.44 * r * u, height: 1.44 * r * u))
+        c.stroke(ring, with: .color(.white.opacity(0.45)), lineWidth: 0.005 * u)
+        var icon = c.resolve(Image(systemName: medal.icon))
+        icon.shading = .color(.white)
+        let side = r * 1.05 * u
+        c.draw(icon, in: CGRect(x: -side / 2, y: cy * u - side / 2, width: side, height: side))
+    }
+
+    /// (light, mid, dark) per rarity: the Medals screen's blue / purple / gold.
+    static func medalColors(_ rarity: WornMedal.Rarity) -> (Color, Color, Color) {
+        switch rarity {
+        case .common: return (Color(red: 0.40, green: 0.70, blue: 1.00), Color(red: 0.15, green: 0.45, blue: 0.85), Color(red: 0.12, green: 0.31, blue: 0.63))
+        case .rare: return (Color(red: 0.70, green: 0.40, blue: 1.00), Color(red: 0.50, green: 0.15, blue: 0.85), Color(red: 0.35, green: 0.10, blue: 0.61))
+        case .legendary: return (Color(red: 1.00, green: 0.84, blue: 0.00), Color(red: 0.85, green: 0.45, blue: 0.00), Color(red: 0.61, green: 0.32, blue: 0.00))
+        }
     }
 
     /// A recorded body-unit point (a pivot) in this canvas's coordinates.

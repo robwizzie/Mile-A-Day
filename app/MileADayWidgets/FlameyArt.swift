@@ -156,10 +156,16 @@ enum FlameyArt {
         CGFloat(item.skin?.rule("back_rise") ?? 0)
     }
 
+    /// How far above his TIP a trail's hero drawing (`behind-hero`) reaches
+    /// (`rules.hero_rise`, body units): the rainbow arches over his head.
+    static func heroRise(_ item: FlameyItem) -> CGFloat {
+        CGFloat(item.skin?.rule("hero_rise") ?? 0)
+    }
+
     /// The top of everything he WEARS, as `lookTop` measures it: his crest,
     /// or a back piece rising past it (`backRise`), whichever is higher.
     static func wornTop(_ look: FlameyLook, scale: CGFloat) -> CGFloat {
-        let rise = max(crest(of: look), look[.back].map(backRise) ?? 0)
+        let rise = max(crest(of: look), look[.back].map(backRise) ?? 0, look[.trail].map(heroRise) ?? 0)
         return 0.5 - (look.bodyLift + 0.98 + rise) * scale
     }
 

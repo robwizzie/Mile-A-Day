@@ -301,11 +301,22 @@ enum FlameyFamily: String, CaseIterable, Hashable {
 struct FlameyItem: RawRepresentable, Hashable, Codable {
     let rawValue: String
 
-    /// An id the catalog has (and this renderer can draw); nil otherwise.
+    /// An id the catalog has (and this renderer can draw), or an earned
+    /// medal (`medal:<badge id>`, `WornMedal`); nil otherwise.
     init?(rawValue: String) {
+        if WornMedal(itemId: rawValue) != nil {
+            self.rawValue = rawValue
+            return
+        }
         guard let skin = FlameySkinCatalog.shared[rawValue], FlameySlot(rawValue: skin.slot) != nil else { return nil }
         self.rawValue = rawValue
     }
+
+    /// A medal the user earned, worn on his chest.
+    static func medal(_ badgeId: String) -> FlameyItem { FlameyItem(known: WornMedal.prefix + badgeId) }
+
+    /// The earned medal this item is; nil for every catalog item.
+    var wornMedal: WornMedal? { WornMedal(itemId: rawValue) }
 
     /// The items this build names in code. Always in the bundled catalog.
     private init(known: String) { rawValue = known }
@@ -475,7 +486,10 @@ struct FlameyItem: RawRepresentable, Hashable, Codable {
 
     /// The slot its skin FILE names. Builds without a newer slot read only
     /// this, so a waist piece is filed under `chest` (`layerSlot`).
-    var fileSlot: FlameySlot { skin.flatMap { FlameySlot(rawValue: $0.slot) } ?? .color }
+    var fileSlot: FlameySlot {
+        if wornMedal != nil { return .chest }
+        return skin.flatMap { FlameySlot(rawValue: $0.slot) } ?? .color
+    }
 
     /// The skin's `rules.layer`: the slot this build wears it in instead of
     /// its file slot (Champ Shorts: filed under chest, worn at the waist, so
@@ -487,6 +501,7 @@ struct FlameyItem: RawRepresentable, Hashable, Codable {
     /// How it becomes his. Mirrors the backend catalog row for row (its CI
     /// check holds the skin files to it).
     var unlock: FlameyUnlock {
+        if let medal = wornMedal { return .badge(medal.badgeId) }
         guard let u = skin?.unlock else { return .always }
         if let s = u as? String {
             switch s {
@@ -539,6 +554,7 @@ struct FlameyItem: RawRepresentable, Hashable, Codable {
     /// Picked by the Closet's "Best look" action when owned (the skin says;
     /// holiday outfits, costumes, Plus and Monthly items never are).
     var autoEligible: Bool {
+        if wornMedal != nil { return false }
         if let v = skin?.autoEligible { return v }
         if isMoodProp || isHolidayOutfit || slot == .costume || unlock == .plus || month != nil { return false }
         return true
@@ -561,7 +577,13 @@ struct FlameyItem: RawRepresentable, Hashable, Codable {
     /// surface: the rocket jets and the winged hover.
     var hoverLift: CGFloat { CGFloat(skin?.rule("hover_lift") ?? 0) }
 
-    var displayName: String { skin?.name ?? rawValue }
+    /// The item's name. A worn medal's real name lives in the app's badge
+    /// list, which shared code can't read: hosts that print it say which
+    /// medal (`FlameyClosetModel.title(of:)`).
+    var displayName: String {
+        if wornMedal != nil { return "Medal" }
+        return skin?.name ?? rawValue
+    }
 
     var family: FlameyFamily {
         if let f = skin.flatMap({ FlameyFamily(rawValue: $0.family) }) { return f }
@@ -916,7 +938,9 @@ struct FlameyLook: Equatable, Hashable, Codable {
         let owned = owned.union(FlameyItem.allCases.filter { $0.unlock == .always })
 
         // 3. The choice.
-        for item in choice.items where owned.contains(item) {
+        // An earned medal is vetted by the server (it refuses an unearned one
+        // and drops a lost one at read), so it is never in `owned`.
+        for item in choice.items where owned.contains(item) || item.wornMedal != nil {
             look.wear(item)
         }
 
@@ -1005,5 +1029,86 @@ struct FlameyLook: Equatable, Hashable, Codable {
         try c.encodeIfPresent(holiday?.rawValue, forKey: .holiday)
         try c.encode(isAnniversary, forKey: .isAnniversary)
         try c.encode(detail.rawValue, forKey: .detail)
+    }
+}
+
+// MARK: - Earned medals
+
+/// A medal the user EARNED, worn on his chest: item id `medal:<badge id>`
+/// (chest slot only, server-vetted). One drawing serves every badge — its
+/// rarity colours and icon come from the badge id alone, here, so a friend's
+/// medal, the widget and the Watch draw it without the badge list. The app's
+/// `Badge.rarity` and `iconName(for:)` read these same rules.
+struct WornMedal: Hashable {
+    static let prefix = "medal:"
+
+    enum Rarity: String, Hashable { case common, rare, legendary }
+
+    let badgeId: String
+
+    init?(itemId: String) {
+        guard itemId.hasPrefix(Self.prefix) else { return nil }
+        let id = String(itemId.dropFirst(Self.prefix.count))
+        guard !id.isEmpty, id.allSatisfy({ $0.isASCII && ($0.isLowercase || $0.isNumber || $0 == "_") }) else { return nil }
+        badgeId = id
+    }
+
+    var rarity: Rarity { Self.rarity(forBadgeId: badgeId) }
+    var icon: String { Self.icon(forBadgeId: badgeId) }
+
+    /// The first number in the id ("miles_500" → 500).
+    static func numericValue(_ id: String) -> Int {
+        id.components(separatedBy: CharacterSet.decimalDigits.inverted).compactMap { Int($0) }.first ?? 0
+    }
+
+    /// Rarity, monotonic with difficulty within each category. Mirrors
+    /// backend/scripts/badges-seed.sql tiers.
+    static func rarity(forBadgeId id: String) -> Rarity {
+        let n = numericValue(id)
+        if id.hasPrefix("consistency_") { return .common }
+        if id.hasPrefix("streak_") { return n >= 365 ? .legendary : (n >= 50 ? .rare : .common) }
+        if id.hasPrefix("miles_") { return n >= 1000 ? .legendary : (n >= 500 ? .rare : .common) }
+        if id.hasPrefix("pace_") { return n <= 6 ? .legendary : (n <= 8 ? .rare : .common) } // lower min/mi = harder
+        if id.hasPrefix("daily_") {
+            switch id {
+            case "daily_marathon", "daily_50k", "daily_ultra": return .legendary
+            case "daily_half", "daily_15", "daily_20": return .rare
+            default: return .common
+            }
+        }
+        if id.hasPrefix("challenge_") || id.hasPrefix("story_") {
+            return n >= 100 ? .legendary : (n >= 25 ? .rare : .common)
+        }
+        if id.hasPrefix("hype_") || id.hasPrefix("nudge_") {
+            return n >= 500 ? .legendary : (n >= 100 ? .rare : .common)
+        }
+        if id.hasPrefix("comp_won_") { return n >= 5 ? .legendary : .rare }
+        if id.hasPrefix("comp_started_") { return n >= 10 ? .rare : .common }
+        if id.hasPrefix("comp_entered_") || id.hasPrefix("comp_") {
+            return n >= 50 ? .legendary : (n >= 10 ? .rare : .common)
+        }
+        if id.hasPrefix("special_") { return .rare }
+        if id.hasPrefix("holiday_") { return .rare }   // comes round once a year
+        if id.hasPrefix("event_") { return .legendary } // a one-day event happens once, ever
+        return .common
+    }
+
+    /// The SF Symbol stamped on the medal.
+    static func icon(forBadgeId id: String) -> String {
+        if let holiday = HolidayKey(badgeId: id) { return holiday.medalIcon }
+        if id.hasPrefix("event_champ_5k") { return "figure.boxing" }
+        if id.hasPrefix("streak_") || id.hasPrefix("consistency_") { return "flame.fill" }
+        if id.hasPrefix("miles_") { return "figure.run" }
+        if id.hasPrefix("pace_") { return "bolt.fill" }
+        if id.hasPrefix("daily_") { return "figure.run.circle.fill" }
+        if id.hasPrefix("challenge_") { return "trophy.fill" }
+        if id.hasPrefix("story_") { return "camera.fill" }
+        if id.hasPrefix("hype_") { return "hands.clap.fill" }
+        if id.hasPrefix("nudge_") { return "hand.wave.fill" }
+        if id.hasPrefix("comp_won_") { return "crown.fill" }
+        if id.hasPrefix("comp_started_") { return "flag.checkered" }
+        if id.hasPrefix("comp_entered_") || id.hasPrefix("comp_") { return "trophy.fill" }
+        if id.hasPrefix("hidden_") || id.hasPrefix("secret_") || id.hasPrefix("special_") { return "sparkles" }
+        return "star.fill"
     }
 }
