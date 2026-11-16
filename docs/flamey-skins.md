@@ -185,7 +185,10 @@ blazing scale), and stored PRE-WIDENED by 1/0.56 so the squeeze every build
 applies lands it there. That's a data-only fix: shipped builds pick it up
 from `GET /flamey/skins`. Most trails now rise behind his left shoulder; dust
 puffs and speed lines were held within 20° of level (they only read that
-way). A new trail needs the same: fit its 0.62 layers, then widen by 1/0.56.
+way). The Comet Tail is the exception to "most shown wins": at full size
+its wide fan stood behind him as a pale wedge, so its fit is hand-picked
+(40°, scaled 0.66 along the tail and 0.36 across): a slim streak off his
+shoulder. Judge a fit by eye, not only by how much of the trail shows. A new trail needs the same: fit its 0.62 layers, then widen by 1/0.56.
 
 ### The rainbow's arch (Nov 2026)
 
