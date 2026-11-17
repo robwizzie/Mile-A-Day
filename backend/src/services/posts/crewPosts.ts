@@ -486,3 +486,83 @@ export async function sweepCrewPhotoNudges(): Promise<number> {
   }
   return sent;
 }
+
+/**
+ * Why a walker's photo CAN'T join the walk's post, for the 409 that hands
+ * them to it — so the app can say it plainly and offer the way through
+ * (send or accept a friend request) instead of a dead "Add photo" that 404s.
+ * null = it can: they're credited, or `addCrewPhoto` will credit them.
+ *
+ *   not_friends       not friends with the author, nothing pending
+ *   request_sent      they've asked the author; waiting on the author
+ *   request_received  the author asked them; accepting fixes it
+ *   removed           they removed themselves from this post
+ *   unavailable       anything else (a block either way, not on the walk) —
+ *                     deliberately vague, a block is never revealed
+ */
+export type CrewPhotoBlock =
+  | "not_friends"
+  | "request_sent"
+  | "request_received"
+  | "removed"
+  | "unavailable";
+
+export interface CrewPhotoAuthor {
+  user_id: string;
+  first_name: string | null;
+  username: string | null;
+}
+
+export async function crewPhotoBlock(
+  postId: string,
+  userId: string,
+): Promise<{ block: CrewPhotoBlock | null; author: CrewPhotoAuthor | null }> {
+  const rows = await db.query<{
+    user_id: string;
+    first_name: string | null;
+    username: string | null;
+    my_status: string | null;
+    on_walk: boolean;
+    blocked: boolean;
+    friends: boolean;
+    i_asked: boolean;
+    they_asked: boolean;
+  }>(
+    `SELECT u.user_id, u.first_name, u.username,
+	        (SELECT pc.status FROM post_coauthors pc
+	          WHERE pc.post_id = p.post_id AND pc.user_id = $2) AS my_status,
+	        EXISTS (
+	          SELECT 1 FROM buddy_session_participants bsp
+	           WHERE bsp.user_id = $2 AND bsp.status IN ('active', 'finished')
+	             AND bsp.session_id = COALESCE(p.buddy_session_id,
+	                   (SELECT pc.buddy_session_id FROM post_coauthors pc
+	                     WHERE pc.post_id = p.post_id AND pc.buddy_session_id IS NOT NULL
+	                     LIMIT 1))
+	        ) AS on_walk,
+	        EXISTS (
+	          SELECT 1 FROM user_blocks b
+	           WHERE (b.blocker_id = p.user_id AND b.blocked_id = $2)
+	              OR (b.blocker_id = $2 AND b.blocked_id = p.user_id)
+	        ) AS blocked,
+	        EXISTS (SELECT 1 FROM friendships f WHERE f.user_id = p.user_id AND f.friend_id = $2
+	                  AND f.status = 'accepted') AS friends,
+	        EXISTS (SELECT 1 FROM friendships f WHERE f.user_id = $2 AND f.friend_id = p.user_id
+	                  AND f.status = 'pending') AS i_asked,
+	        EXISTS (SELECT 1 FROM friendships f WHERE f.user_id = p.user_id AND f.friend_id = $2
+	                  AND f.status = 'pending') AS they_asked
+	   FROM posts p JOIN users u ON u.user_id = p.user_id
+	  WHERE p.post_id = $1 AND p.deleted_at IS NULL`,
+    [postId, userId],
+  );
+  const r = rows[0];
+  if (!r) return { block: "unavailable", author: null };
+  if (r.blocked) return { block: "unavailable", author: null };
+  const author = { user_id: r.user_id, first_name: r.first_name, username: r.username };
+  if (r.my_status === "accepted") return { block: null, author };
+  if (r.my_status === "declined") return { block: "removed", author };
+  if (!r.on_walk) return { block: "unavailable", author };
+  if (r.friends) return { block: null, author };
+  if (r.they_asked) return { block: "request_received", author };
+  if (r.i_asked) return { block: "request_sent", author };
+  return { block: "not_friends", author };
+}

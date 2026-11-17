@@ -8,6 +8,7 @@ import {
 } from "./postTypes.js";
 import { CREATED_POST_SELECT } from "./postSql.js";
 import { attachMultiCoauthors } from "./coauthors.js";
+import { crewPhotoBlock } from "./crewPosts.js";
 
 const db = PostgresService.getInstance();
 
@@ -363,6 +364,14 @@ export async function createPost(input: CreatePostInput): Promise<PostRow> {
       // credited by identity, never by a coauthor row — so the only honest
       // line is that this walk is already shared.
       err.mine = existingWalkPost.user_id === input.userId;
+      // ...and whether their photo can actually join it, and if not why, so
+      // the app offers the way through (a friend request) rather than an
+      // "Add photo" that 404s.
+      if (!err.mine) {
+        const { block, author } = await crewPhotoBlock(existingWalkPost.post_id, input.userId);
+        err.photoBlock = block;
+        err.author = author;
+      }
       throw err;
     }
   }

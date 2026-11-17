@@ -322,6 +322,40 @@ async function main() {
     "buddy_walk_already_posted",
   );
 
+  // ── Why a walker's photo can't join (409 photo_block + author) ────────
+  // The 409 hands a walker to "Add photo"; it must also say when that can't
+  // work and why, so the app offers the way through instead of a 404.
+  const lateTry = () =>
+    createPost({
+      userId: LATE, mediaUrl: mediaFor(LATE), caption: "again", workoutId: null,
+      statsSnapshot: { distance: 1.2 }, localDate: TODAY, shareToFeed: true,
+      shareToStory: false, isAuto: false, includeRoute: true, buddySessionId: created.id,
+    }).then(() => null, (e) => e);
+  let e = await lateTry();
+  check("a credited friend's photo can join (no block)", e?.photoBlock ?? null, null);
+  check("...and the 409 names whose post it is", e?.author?.user_id, HOST);
+  const unfriend = () =>
+    db.query(`DELETE FROM friendships WHERE (user_id = $1 AND friend_id = $2) OR (user_id = $2 AND friend_id = $1)`, [HOST, LATE]);
+  await db.query(`DELETE FROM post_coauthors WHERE post_id = $1 AND user_id = $2`, [hostPost.post_id, LATE]);
+  await unfriend();
+  check("not friends with the poster → not_friends", (await lateTry())?.photoBlock, "not_friends");
+  await db.query(`INSERT INTO friendships (user_id, friend_id, status) VALUES ($1, $2, 'pending')`, [LATE, HOST]);
+  check("...asked already → request_sent", (await lateTry())?.photoBlock, "request_sent");
+  await unfriend();
+  await db.query(`INSERT INTO friendships (user_id, friend_id, status) VALUES ($1, $2, 'pending')`, [HOST, LATE]);
+  check("...the poster asked them → request_received", (await lateTry())?.photoBlock, "request_received");
+  await unfriend();
+  for (const [a, b] of [[HOST, LATE], [LATE, HOST]]) {
+    await db.query(`INSERT INTO friendships (user_id, friend_id, status) VALUES ($1, $2, 'accepted') ON CONFLICT DO NOTHING`, [a, b]);
+  }
+  check("friends again, not yet credited → can join", (await lateTry())?.photoBlock ?? null, null);
+  await db.query(
+    `INSERT INTO post_coauthors (post_id, user_id, status, buddy_session_id) VALUES ($1, $2, 'declined', $3)`,
+    [hostPost.post_id, LATE, created.id],
+  );
+  check("removed themselves → removed", (await lateTry())?.photoBlock, "removed");
+  await db.query(`UPDATE post_coauthors SET status = 'accepted' WHERE post_id = $1 AND user_id = $2`, [hostPost.post_id, LATE]);
+
   // ── Captions ride each slide ───────────────────────────────────────────
   const ok = await addCrewPhoto(hostPost.post_id, EARLY, mediaFor(EARLY), "my leg of it");
   check("a crew photo can carry its own caption", ok, true);

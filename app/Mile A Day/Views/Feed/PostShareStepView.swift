@@ -82,6 +82,12 @@ struct PostShareStepView: View {
                     if let notice = vm.crewHandoffNotice {
                         ComposerNoticeBanner(text: notice)
                     }
+                    if let block = vm.crewPhotoBlock {
+                        CrewPhotoBlockCard(block: block, ask: vm.crewFriendAsk) {
+                            MADHaptics.tap()
+                            Task { await vm.resolveCrewPhotoBlock() }
+                        }
+                    }
                     if let error = vm.errorMessage {
                         Text(error)
                             .font(.system(size: 13, weight: .semibold, design: .rounded))

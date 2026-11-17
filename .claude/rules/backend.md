@@ -16,7 +16,7 @@ Details: docs/conventions/backend.md § Backend Conventions
 - Crew slides via `PUT /posts/:id/crew-photo`; resolve `coauthors[].route` at READ under each owner's `share_route_maps`; `lockUnearnedPhotos` blanks slides. Check: `buddy-group-post-check`.
 - `addCrewPhoto` CREDITS a walker before adding their slide (session participant `active`/`finished` + author's accepted friend + no block), insert-only so a `declined` row stays off; the 409 handoff finds the walk's post by session, not by credit. Check: `buddy-group-post-check`.
 - One post per walk through every door: guard a declared `buddy_session_id` even without `workout_id`; `linkSessionPosts`; link at `finishParticipation`. Check: `buddy-post-doors-check`.
-- `createPost` refuses a 2nd card per walk (`buddyWalkPostForWorkout`, incl. time OVERLAP) as 409 `workout_already_posted` + `reason`/`post_id`/`mine`; exclude by WORKOUT, not author.
+- `createPost` refuses a 2nd card per walk (`buddyWalkPostForWorkout`, incl. time OVERLAP) as 409 `workout_already_posted` + `reason`/`post_id`/`mine` + `photo_block`/`author` (`crewPhotoBlock`: why the photo can't join, never revealing a block); exclude by WORKOUT, not author.
 - `is_paused` (nullable, no default, unclamped) via `recordProgress`; `last_heard_seconds` is an AGE, never a timestamp. Check: `buddy-live-check`.
 - `updateParticipantSettings` moves only `joined`↔`ready`, never rewrites `active`; push the host once. Check: `buddy-ready-check`.
 - Keep `JOIN_POLICY_ALLOWS_SQL` and `assertJoinPolicyAllows` in agreement; restricted walks: `join_closed`, `invites_host_only`. Check: `buddy-join-policy-check`.

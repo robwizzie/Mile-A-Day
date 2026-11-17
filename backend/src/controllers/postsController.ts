@@ -524,6 +524,11 @@ export async function createPostController(
         // has no `post_coauthors` row — so the app must say "already shared"
         // rather than offer a handoff that would 400.
         mine: error.mine === true,
+        // Additive: why this user's photo can't join that post (null = it
+        // can) and whose post it is, so the app can name them and offer a
+        // friend request instead of a dead "Add photo". See crewPhotoBlock.
+        photo_block: error.photoBlock ?? null,
+        author: error.author ?? null,
       });
     }
     // Coauthor must be an accepted friend with no blocks either way.

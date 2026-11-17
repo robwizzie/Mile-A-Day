@@ -210,7 +210,13 @@ class APIClient {
                     // Absent on the deploy that shipped `reason` without it —
                     // false is the older behaviour (somebody else's card),
                     // which is also the far more common one.
-                    mine: detail.mine ?? false
+                    mine: detail.mine ?? false,
+                    // Why this user's photo can't join that post (nil = it
+                    // can, or an older server that doesn't say).
+                    blocked: detail.photo_block.map {
+                        BuddyWalkPhotoBlock(reason: $0, authorId: detail.author?.user_id,
+                                            authorName: detail.author?.displayName)
+                    }
                 )
             }
             throw APIError.conflict(extractErrorMessage(from: data) ?? "Conflict")
@@ -301,7 +307,7 @@ enum APIError: LocalizedError {
     /// is on a buddy walk that is already on the feed. Carries that post so
     /// the caller can offer to add a photo to it — the generic `.conflict`
     /// copy tells this user to delete a post they do not have.
-    case buddyWalkAlreadyPosted(postId: String?, mine: Bool)
+    case buddyWalkAlreadyPosted(postId: String?, mine: Bool, blocked: BuddyWalkPhotoBlock?)
     case rateLimited(String)
     /// HTTP 410 — the resource existed but is permanently gone (e.g. an expired
     /// pending notification past its same-day window). Terminal; don't retry.
@@ -377,6 +383,30 @@ private struct ConflictEnvelope: Decodable {
     /// say "already shared" rather than offer a handoff the server would
     /// refuse.
     let mine: Bool?
+    /// Why the caller's photo can't join that post; nil = it can.
+    let photo_block: String?
+    /// Whose post it is, so the app can name them.
+    let author: Author?
+
+    struct Author: Decodable {
+        let user_id: String
+        let first_name: String?
+        let username: String?
+        var displayName: String? {
+            if let f = first_name?.trimmingCharacters(in: .whitespaces), !f.isEmpty { return f }
+            if let u = username, !u.isEmpty { return "@\(u)" }
+            return nil
+        }
+    }
+}
+
+/// Why a walker's photo can't join the walk's post (server `photo_block`).
+struct BuddyWalkPhotoBlock: Equatable {
+    /// not_friends · request_sent · request_received · removed · unavailable
+    let reason: String
+    /// The post's author, when the server named them.
+    let authorId: String?
+    let authorName: String?
 }
 
 private func extractErrorMessage(from data: Data) -> String? {
