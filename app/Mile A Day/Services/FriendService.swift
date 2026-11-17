@@ -281,6 +281,30 @@ class FriendService: ObservableObject {
         }
     }
     
+    /// Ask someone to be friends by id — for screens that know a person only
+    /// from the server's word (the buddy walk composer's "Add Maddy"), not as
+    /// a `BackendUser` row. Same endpoint and body as `sendFriendRequest(to:)`.
+    static func sendFriendRequest(toUserId: String) async throws {
+        guard let me = UserDefaults.standard.string(forKey: "backendUserId") else {
+            throw FriendServiceError.notAuthenticated
+        }
+        struct Response: Decodable { let message: String? }
+        let body = try JSONSerialization.data(withJSONObject: ["fromUser": me, "toUser": toUserId])
+        _ = try await APIClient.fancyFetch(endpoint: "/friends/request", method: .POST, body: body,
+                                           responseType: Response.self)
+    }
+
+    /// Accept a request by the requester's id (see `sendFriendRequest(toUserId:)`).
+    static func acceptFriendRequest(fromUserId: String) async throws {
+        guard let me = UserDefaults.standard.string(forKey: "backendUserId") else {
+            throw FriendServiceError.notAuthenticated
+        }
+        struct Response: Decodable { let message: String? }
+        let body = try JSONSerialization.data(withJSONObject: ["fromUser": fromUserId, "toUser": me])
+        _ = try await APIClient.fancyFetch(endpoint: "/friends/accept", method: .PATCH, body: body,
+                                           responseType: Response.self)
+    }
+
     /// Get all friends
     func loadFriends() async throws {
         guard let currentUserId = getCurrentUserId() else {

@@ -186,7 +186,7 @@ final class PostDraftStore: ObservableObject {
             // the library tier's whole claim — so it posts as what it now is.
             draft.photoSource = PostPhotoSource.library.rawValue
             try await create(draft, mediaUrl: mediaUrl, dualMediaUrl: dualMediaUrl, source: .library)
-        } catch let APIError.buddyWalkAlreadyPosted(postId, mine) where !mine && postId != nil {
+        } catch let APIError.buddyWalkAlreadyPosted(postId, mine, blocked) where !mine && postId != nil && blocked == nil {
             // Someone else on the walk posted it while this sat waiting —
             // the photo joins their card as this user's slide, exactly the
             // handoff the composer makes.

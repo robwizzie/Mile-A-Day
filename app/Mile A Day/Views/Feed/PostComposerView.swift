@@ -291,6 +291,32 @@ final class PostComposerViewModel: ObservableObject {
     /// exists for was a second walker being told to "delete it first",
     /// about a post that was never hers.
     @Published var crewHandoffNotice: String?
+    /// The walk is on the feed but this photo CAN'T join that post yet, and
+    /// why (`BuddyWalkPhotoBlock`) — shown as `CrewPhotoBlockCard`, which
+    /// names the poster and offers the way through, instead of an
+    /// "Add photo" that would only answer "Resource not found".
+    @Published var crewPhotoBlock: BuddyWalkPhotoBlock?
+    /// The friend request that card sends or accepts.
+    @Published var crewFriendAsk: CrewFriendAsk = .idle
+
+    enum CrewFriendAsk: Equatable { case idle, working, sent, accepted, failed }
+
+    /// "Add Maddy as a friend" / "Accept Maddy's request", from the card.
+    func resolveCrewPhotoBlock() async {
+        guard let block = crewPhotoBlock, let authorId = block.authorId, crewFriendAsk != .working else { return }
+        crewFriendAsk = .working
+        do {
+            if block.reason == "request_received" {
+                try await FriendService.acceptFriendRequest(fromUserId: authorId)
+                crewFriendAsk = .accepted
+            } else {
+                try await FriendService.sendFriendRequest(toUserId: authorId)
+                crewFriendAsk = .sent
+            }
+        } catch {
+            crewFriendAsk = .failed
+        }
+    }
     /// Display names for `buddyCoauthorIds`, same order — set once by the
     /// wizard so the share step can SHOW the crew it's crediting instead of
     /// offering the manual co-poster picker beside an invisible roster.
@@ -1143,7 +1169,7 @@ final class PostComposerViewModel: ObservableObject {
             }
             rememberStickerChoices()
             return true
-        } catch let APIError.buddyWalkAlreadyPosted(postId, mine) {
+        } catch let APIError.buddyWalkAlreadyPosted(postId, mine, blocked) {
             // This walk is already on the feed. Whose card it is decides
             // what can be offered: somebody ELSE's and this photo still has a
             // home on it, so the composer BECOMES the add-your-photo composer
@@ -1160,6 +1186,7 @@ final class PostComposerViewModel: ObservableObject {
             // cleared by the recap's Done button); the SERVER resolves the
             // walk from the workout, so its answer is the one to trust.
             if mine {
+                crewPhotoBlock = nil
                 // Their OWN card, from another leg of the same walk. There is
                 // no coauthor row for an author, so a handoff would 400 —
                 // and there is nothing to add anyway: the walk is on the feed
@@ -1170,7 +1197,17 @@ final class PostComposerViewModel: ObservableObject {
                     "You've already shared this walk — one post per walk, and "
                     + "every leg of it is on that one. Delete it if you want to "
                     + "swap the photo."
+            } else if let blocked {
+                // The walk's post is someone else's and this photo can't go
+                // on it yet. Never hand off to an "Add photo" that would 404:
+                // say why, by name, and offer the fix (`CrewPhotoBlockCard`).
+                crewPhotoPostId = nil
+                crewHandoffNotice = nil
+                errorMessage = nil
+                crewPhotoBlock = blocked
+                crewFriendAsk = .idle
             } else if let postId, !postId.isEmpty {
+                crewPhotoBlock = nil
                 // The composer BECOMES the add-your-photo composer: the share
                 // step re-renders into its crew shape (no caption, no
                 // destination, no route toggle — the card owns all three) and
@@ -1229,6 +1266,13 @@ final class PostComposerViewModel: ObservableObject {
         } catch APIError.conflict {
             // One deliberate post per workout — a reward, not a redo.
             errorMessage = "You've already shared a post for this workout. Delete it first if you want to post a new one."
+            return false
+        } catch APIError.notFound where crewPhotoPostId != nil {
+            // The server credits a friend who walked it as they add their
+            // photo, so this is someone it can't: not the author's friend, or
+            // they removed themselves from that post. Say so; never the raw
+            // "Resource not found".
+            errorMessage = "Your photo can't join this walk's post because you're not on it."
             return false
         } catch let error where PostDraftStore.isTransient(error) {
             // No signal, or the upload died part way. The post is finished —
@@ -1319,6 +1363,108 @@ final class PostComposerViewModel: ObservableObject {
 /// photo is joining it. Deliberately NOT `MADTheme.Colors.error`: the error
 /// slot means "you have to fix something", and this is the app explaining
 /// where the picture is going.
+/// The walk is already on the feed as someone else's post, and this photo
+/// can't join it yet. Says why in plain words, names the poster, and offers
+/// the one thing that fixes it (a friend request, sent or accepted here).
+/// Once they're friends, Share again hands the photo to that post.
+struct CrewPhotoBlockCard: View {
+    let block: BuddyWalkPhotoBlock
+    let ask: PostComposerViewModel.CrewFriendAsk
+    let onAction: () -> Void
+
+    private var name: String { block.authorName ?? String(localized: "The person who posted") }
+    private var nameInSentence: String { block.authorName ?? String(localized: "the person who posted it") }
+
+    private var title: String {
+        switch block.reason {
+        case "not_friends", "request_sent", "request_received":
+            return String(localized: "Become friends with \(nameInSentence) to add your photo")
+        case "removed": return String(localized: "You're not on \(nameInSentence)'s post anymore")
+        default: return String(localized: "Your photo can't join this walk's post")
+        }
+    }
+
+    private var message: String {
+        switch (block.reason, ask) {
+        case (_, .sent), ("request_sent", _):
+            return String(localized: "Friend request sent. Once \(nameInSentence) accepts, come back here and tap Share. Your photo joins the walk's post as your own slide.")
+        case (_, .accepted):
+            return String(localized: "You're friends now. Tap Share and your photo joins the walk's post as your own slide.")
+        case ("not_friends", _):
+            return String(localized: "\(name) already posted this walk, and a walk gets one post with everyone's photos on it. Only friends can be on each other's posts, and you two aren't friends on Mile A Day yet.")
+        case ("request_received", _):
+            return String(localized: "\(name) already posted this walk and sent you a friend request. Accept it, then tap Share. Your photo joins the walk's post as your own slide.")
+        case ("removed", _):
+            return String(localized: "You removed yourself from \(nameInSentence)'s post for this walk, so your photo can't go on it.")
+        default:
+            return String(localized: "This walk is already on the feed, and your photo can't be added to that post.")
+        }
+    }
+
+    private var actionTitle: String? {
+        guard block.authorId != nil else { return nil }
+        switch (block.reason, ask) {
+        case (_, .sent), (_, .accepted), ("request_sent", _): return nil
+        case (_, .working):
+            return block.reason == "request_received" ? String(localized: "Accepting…") : String(localized: "Sending…")
+        case ("not_friends", .failed): return String(localized: "Couldn't send. Try again")
+        case ("request_received", .failed): return String(localized: "Couldn't accept. Try again")
+        case ("not_friends", _):
+            if let who = block.authorName { return String(localized: "Add \(who) as a friend") }
+            return String(localized: "Send a friend request")
+        case ("request_received", _):
+            if let who = block.authorName { return String(localized: "Accept \(who)'s request") }
+            return String(localized: "Accept their request")
+        default: return nil
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "person.2.fill")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundColor(MADTheme.Colors.walkBlue)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title)
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .foregroundColor(.white)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(message)
+                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+                        .foregroundColor(.white.opacity(0.75))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            if let actionTitle {
+                Button(action: onAction) {
+                    Text(actionTitle)
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .background(Capsule().fill(MADTheme.Colors.walkBlue))
+                }
+                .buttonStyle(.plain)
+                .disabled(ask == .working)
+            }
+        }
+        .padding(MADTheme.Spacing.sm)
+        .background(
+            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous)
+                .fill(MADTheme.Colors.walkBlue.opacity(0.12))
+                .overlay(
+                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous)
+                        .strokeBorder(MADTheme.Colors.walkBlue.opacity(0.35), lineWidth: 1)
+                )
+        )
+        .accessibilityElement(children: .contain)
+    }
+}
+
 struct ComposerNoticeBanner: View {
     let text: String
 

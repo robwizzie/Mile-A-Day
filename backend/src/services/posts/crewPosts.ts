@@ -257,6 +257,50 @@ export async function addCrewPhoto(
   /** Which corner this slide's inset was baked into; same wholesale rule. */
   dualInsetCorner: string | null = null,
 ): Promise<boolean> {
+  // You WALKED it, so your photo belongs on the walk's one post — even when
+  // the poster's app credited nobody. A deliberate photo post only credits
+  // the crew its client sends (the recap does; the photo prompt, the feed FAB
+  // and a "Post this with…? No" don't), while the one-post-per-walk guard
+  // finds the walk's post by SESSION and hands every other walker here. So a
+  // friend who walked the whole thing was sent to a card they weren't on, and
+  // this endpoint answered 404 ("Resource not found"). Tapping Add photo is
+  // the deliberate act: a participant of the post's walk (active/finished,
+  // the auto card's crew rule) who is the author's accepted friend, with no
+  // block either way, is credited here first. Insert-only: a row that
+  // exists is left alone, so someone who REMOVED themselves from the post
+  // stays off it (buddy-group-post-check), and a stranger still gets 404.
+  await db.query(
+    `WITH target AS (
+			SELECT p.post_id, p.user_id AS author_id,
+			       COALESCE(p.buddy_session_id,
+			                (SELECT pc.buddy_session_id FROM post_coauthors pc
+			                  WHERE pc.post_id = p.post_id AND pc.buddy_session_id IS NOT NULL
+			                  LIMIT 1)) AS session_id
+			  FROM posts p
+			 WHERE p.post_id = $1 AND p.deleted_at IS NULL AND p.share_to_feed
+			   AND p.user_id <> $2
+		)
+		INSERT INTO post_coauthors (post_id, user_id, status, buddy_session_id)
+		SELECT t.post_id, $2, 'accepted', t.session_id
+		  FROM target t
+		 WHERE t.session_id IS NOT NULL
+		   AND EXISTS (
+		         SELECT 1 FROM buddy_session_participants bsp
+		          WHERE bsp.session_id = t.session_id AND bsp.user_id = $2
+		            AND bsp.status IN ('active', 'finished')
+		       )
+		   AND EXISTS (
+		         SELECT 1 FROM friendships f
+		          WHERE f.user_id = t.author_id AND f.friend_id = $2 AND f.status = 'accepted'
+		       )
+		   AND NOT EXISTS (
+		         SELECT 1 FROM user_blocks b
+		          WHERE (b.blocker_id = t.author_id AND b.blocked_id = $2)
+		             OR (b.blocker_id = $2 AND b.blocked_id = t.author_id)
+		       )
+		ON CONFLICT (post_id, user_id) DO NOTHING`,
+    [postId, userId],
+  );
   const rows = await db.query<{ post_id: string }>(
     `UPDATE post_coauthors
 				SET media_url = $3, photo_added_at = NOW(), caption = $4,
@@ -441,4 +485,84 @@ export async function sweepCrewPhotoNudges(): Promise<number> {
     }
   }
   return sent;
+}
+
+/**
+ * Why a walker's photo CAN'T join the walk's post, for the 409 that hands
+ * them to it — so the app can say it plainly and offer the way through
+ * (send or accept a friend request) instead of a dead "Add photo" that 404s.
+ * null = it can: they're credited, or `addCrewPhoto` will credit them.
+ *
+ *   not_friends       not friends with the author, nothing pending
+ *   request_sent      they've asked the author; waiting on the author
+ *   request_received  the author asked them; accepting fixes it
+ *   removed           they removed themselves from this post
+ *   unavailable       anything else (a block either way, not on the walk) —
+ *                     deliberately vague, a block is never revealed
+ */
+export type CrewPhotoBlock =
+  | "not_friends"
+  | "request_sent"
+  | "request_received"
+  | "removed"
+  | "unavailable";
+
+export interface CrewPhotoAuthor {
+  user_id: string;
+  first_name: string | null;
+  username: string | null;
+}
+
+export async function crewPhotoBlock(
+  postId: string,
+  userId: string,
+): Promise<{ block: CrewPhotoBlock | null; author: CrewPhotoAuthor | null }> {
+  const rows = await db.query<{
+    user_id: string;
+    first_name: string | null;
+    username: string | null;
+    my_status: string | null;
+    on_walk: boolean;
+    blocked: boolean;
+    friends: boolean;
+    i_asked: boolean;
+    they_asked: boolean;
+  }>(
+    `SELECT u.user_id, u.first_name, u.username,
+	        (SELECT pc.status FROM post_coauthors pc
+	          WHERE pc.post_id = p.post_id AND pc.user_id = $2) AS my_status,
+	        EXISTS (
+	          SELECT 1 FROM buddy_session_participants bsp
+	           WHERE bsp.user_id = $2 AND bsp.status IN ('active', 'finished')
+	             AND bsp.session_id = COALESCE(p.buddy_session_id,
+	                   (SELECT pc.buddy_session_id FROM post_coauthors pc
+	                     WHERE pc.post_id = p.post_id AND pc.buddy_session_id IS NOT NULL
+	                     LIMIT 1))
+	        ) AS on_walk,
+	        EXISTS (
+	          SELECT 1 FROM user_blocks b
+	           WHERE (b.blocker_id = p.user_id AND b.blocked_id = $2)
+	              OR (b.blocker_id = $2 AND b.blocked_id = p.user_id)
+	        ) AS blocked,
+	        EXISTS (SELECT 1 FROM friendships f WHERE f.user_id = p.user_id AND f.friend_id = $2
+	                  AND f.status = 'accepted') AS friends,
+	        EXISTS (SELECT 1 FROM friendships f WHERE f.user_id = $2 AND f.friend_id = p.user_id
+	                  AND f.status = 'pending') AS i_asked,
+	        EXISTS (SELECT 1 FROM friendships f WHERE f.user_id = p.user_id AND f.friend_id = $2
+	                  AND f.status = 'pending') AS they_asked
+	   FROM posts p JOIN users u ON u.user_id = p.user_id
+	  WHERE p.post_id = $1 AND p.deleted_at IS NULL`,
+    [postId, userId],
+  );
+  const r = rows[0];
+  if (!r) return { block: "unavailable", author: null };
+  if (r.blocked) return { block: "unavailable", author: null };
+  const author = { user_id: r.user_id, first_name: r.first_name, username: r.username };
+  if (r.my_status === "accepted") return { block: null, author };
+  if (r.my_status === "declined") return { block: "removed", author };
+  if (!r.on_walk) return { block: "unavailable", author };
+  if (r.friends) return { block: null, author };
+  if (r.they_asked) return { block: "request_received", author };
+  if (r.i_asked) return { block: "request_sent", author };
+  return { block: "not_friends", author };
 }
