@@ -346,6 +346,47 @@ async function main() {
     [postId, SHY],
   );
 
+  // A friend who WALKED it but whom the poster's app never credited (the
+  // photo prompt, the feed FAB and "Post this with…? No" send no crew). The
+  // walk guard still hands them this post, so Add photo must credit them
+  // rather than answer 404 — the "Resource not found" a two-person walk hit.
+  const palSlide = await db.query(
+    `SELECT media_url FROM post_coauthors WHERE post_id = $1 AND user_id = $2`,
+    [postId, PAL],
+  );
+  await db.query(`DELETE FROM post_coauthors WHERE post_id = $1 AND user_id = $2`, [postId, PAL]);
+  check(
+    "a friend who walked but wasn't credited may add their photo",
+    await addCrewPhoto(postId, PAL, "/uploads/posts/grp-pal-3.jpg"),
+    true,
+  );
+  check(
+    "...and is credited on the post",
+    (await db.query(`SELECT status FROM post_coauthors WHERE post_id = $1 AND user_id = $2`, [postId, PAL]))[0]?.status,
+    "accepted",
+  );
+  // ...but walking together isn't enough on its own: the author's circle is
+  // the author's, so a walker who isn't their friend still may not.
+  await db.query(
+    `DELETE FROM friendships WHERE (user_id = $1 AND friend_id = $2) OR (user_id = $2 AND friend_id = $1)`,
+    [AUTHOR, PAL],
+  );
+  await db.query(`DELETE FROM post_coauthors WHERE post_id = $1 AND user_id = $2`, [postId, PAL]);
+  check(
+    "a walker who isn't the author's friend may not",
+    await addCrewPhoto(postId, PAL, "/uploads/posts/grp-pal-3.jpg"),
+    false,
+  );
+  // Put PAL back exactly as the rest of this check expects them.
+  for (const [a, b] of [[AUTHOR, PAL], [PAL, AUTHOR]]) {
+    await db.query(
+      `INSERT INTO friendships (user_id, friend_id, status) VALUES ($1, $2, 'accepted')
+       ON CONFLICT (user_id, friend_id) DO NOTHING`,
+      [a, b],
+    );
+  }
+  await addCrewPhoto(postId, PAL, palSlide[0]?.media_url ?? "/uploads/posts/grp-pal-2.jpg");
+
   // ── 4/5. The payload: everyone's photo, and only the routes they consented to ──
   const palEntry = await crewEntry(OUT, postId, PAL);
   check(

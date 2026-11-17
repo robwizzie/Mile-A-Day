@@ -14,6 +14,7 @@ Details: docs/conventions/backend.md § Backend Conventions
 - `sweepCrewPhotoNudges` is library-tier copy, re-checks `photoOpen`, claims `photo_nudge_sent_at` (no default); `BUDDY_GROUP_JSON` miles are derived, never stored.
 - `getBuddyHistory`: post ids via `buddySessionPostIds` behind `DIRECT_POST_ACCESS_SQL`; NULL `final_distance_miles` = "not synced". Check: `buddy-history-check`.
 - Crew slides via `PUT /posts/:id/crew-photo`; resolve `coauthors[].route` at READ under each owner's `share_route_maps`; `lockUnearnedPhotos` blanks slides. Check: `buddy-group-post-check`.
+- `addCrewPhoto` CREDITS a walker before adding their slide (session participant `active`/`finished` + author's accepted friend + no block), insert-only so a `declined` row stays off; the 409 handoff finds the walk's post by session, not by credit. Check: `buddy-group-post-check`.
 - One post per walk through every door: guard a declared `buddy_session_id` even without `workout_id`; `linkSessionPosts`; link at `finishParticipation`. Check: `buddy-post-doors-check`.
 - `createPost` refuses a 2nd card per walk (`buddyWalkPostForWorkout`, incl. time OVERLAP) as 409 `workout_already_posted` + `reason`/`post_id`/`mine`; exclude by WORKOUT, not author.
 - `is_paused` (nullable, no default, unclamped) via `recordProgress`; `last_heard_seconds` is an AGE, never a timestamp. Check: `buddy-live-check`.

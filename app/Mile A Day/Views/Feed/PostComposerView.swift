@@ -1230,6 +1230,13 @@ final class PostComposerViewModel: ObservableObject {
             // One deliberate post per workout — a reward, not a redo.
             errorMessage = "You've already shared a post for this workout. Delete it first if you want to post a new one."
             return false
+        } catch APIError.notFound where crewPhotoPostId != nil {
+            // The server credits a friend who walked it as they add their
+            // photo, so this is someone it can't: not the author's friend, or
+            // they removed themselves from that post. Say so; never the raw
+            // "Resource not found".
+            errorMessage = "Your photo can't join this walk's post because you're not on it."
+            return false
         } catch let error where PostDraftStore.isTransient(error) {
             // No signal, or the upload died part way. The post is finished —
             // the poster arranged it and tapped Share — so it is kept whole
