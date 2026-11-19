@@ -188,9 +188,12 @@ extension NotificationPreferences {
     @MainActor
     static func pushStoredAlerts() async -> Bool {
         guard TokenStore.hasTokens else { return false }
+        let sent = load()
         do {
-            _ = try await FriendService().updateNotificationSettings(load().alertPayload)
-            alertsSyncPending = false
+            _ = try await FriendService().updateNotificationSettings(sent.alertPayload)
+            // Only if nothing changed while this was in flight: a newer
+            // change is still waiting on its own send (which may fail).
+            if load().fullSignature == sent.fullSignature { alertsSyncPending = false }
             return true
         } catch {
             print("[NotifSettings] ❌ Alert settings didn't reach the server (will retry): \(error)")

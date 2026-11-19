@@ -134,9 +134,12 @@ class UserManager: ObservableObject {
         // one NaN/∞ stat (from an odd HealthKit sample) meant the account
         // record was never written again, and the next launch loaded a stale
         // or missing one. Clamp those stats first so the record always saves.
-        currentUser.clampNonFiniteStats()
+        // Clamped on a COPY: mutating the published `currentUser` here would
+        // notify every observer on every save, changed or not.
+        var toSave = currentUser
+        toSave.clampNonFiniteStats()
         do {
-            let encoded = try JSONEncoder().encode(currentUser)
+            let encoded = try JSONEncoder().encode(toSave)
             userDefaults.set(encoded, forKey: currentUserKey)
         } catch {
             print("[UserManager] ❌ Could not save the user record: \(error)")
