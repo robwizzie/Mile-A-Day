@@ -175,7 +175,7 @@ Details: docs/conventions/ios.md § Key Patterns
 - `BuddyRecapView` hangs every presentation on an always-mounted node, never inside the `isLoading`/`recap` branch; `.task` reloads spinner-free once loaded.
 - Shoes are private (never on friend profiles/posts/shares); defaults per `ShoeActivity`; pickers pass the activity.
 - Settings screens use `SettingsChrome` (`SettingsSection` sentence-case header, `SettingsRow`/`SettingsToggleRow` with a small `SettingsGlyph`, `.settingsCard()` = `DashboardCardSurface`): no icon discs, tracked caps, glass or gradients; each setting gets ONE row in the whole Settings tree (tour + version live only on `MADSettingsView`).
-- `NotificationPreferences` has two owners: `NotificationSettingsView` = alerts (`alertPayload`, `saveAlerts()`), `PrivacyHubView` = who sees what (`sharingPayload`, `saveSharing()`, debounced autosave, `lastSaved` snapshot); never send or store the other half's keys.
+- `NotificationPreferences` has two owners: `NotificationSettingsView` = alerts (`alertPayload`, `saveAlerts()`, debounced autosave, no Save button, "Saved" only once the server confirms; unconfirmed changes set `alertsSyncPending` and `retryPendingAlertSync()` resends on foreground), `PrivacyHubView` = who sees what (`sharingPayload`, `saveSharing()`, debounced autosave, `lastSaved` snapshot); never send or store the other half's keys.
 
 ## Performance
 
@@ -201,6 +201,7 @@ Details: docs/conventions/ios.md § Auth / Session
 - One Apple ID = one MAD account (signin resolves by email); tell users to use separate Apple IDs.
 - `isAuthenticated` is not proof; never persist a tokens-missing downgrade; `MADWatchBridge` withholds mismatched creds.
 - Background callers of `APIClient.fancyFetch` gate on `TokenStore.hasTokens` first.
+- Sign out on the Apple credential ONLY for `.revoked` (`AppleSignInManager.isCredentialValid`): errors and `.notFound` fail open; deletion uses `hasActiveCredential`. A sign-in clears `restoreFailed`; `saveUserData` clamps non-finite stats (`clampNonFiniteStats`) so the record always saves.
 - `UserManager.deleteAccount` sends a fresh Apple `authorization_code`; only `AppleSignInError.cancelled` throws, and every caller must offer `skippingAppleConfirmation: true`. Never let the Apple sheet block deletion.
 
 ## Do NOT

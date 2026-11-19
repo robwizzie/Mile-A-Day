@@ -42,22 +42,49 @@ class AppleSignInManager: NSObject, ObservableObject {
     }
 
     /// Checks whether the Apple ID credential for the given user is still valid.
-    /// Returns `false` if the user revoked Sign in with Apple in Settings (or
-    /// transferred to a new device and didn't re-auth) so the caller can sign
-    /// them out. Returns `true` for `.authorized` and also for `.transferred`
-    /// (a non-fatal state). Network errors return `true` (fail open — we don't
-    /// want to sign users out because they're offline at launch).
+    /// Returns `false` ONLY when Apple says the credential was REVOKED (the
+    /// user chose Stop Using Apple ID in Settings) — the case Sign in with
+    /// Apple apps must honour by signing out. Everything else is `true`.
+    ///
+    /// It used to sign out on `.notFound` too, and ignored the error: when the
+    /// lookup FAILS, Apple hands back `.notFound` with the error, so any Apple
+    /// ID whose lookup errored or came back not-found was signed out on EVERY
+    /// foreground — log in, lock the phone, unlock: logged out; relaunch:
+    /// logged out. It hit one person and nobody else, because it depends on
+    /// the Apple ID. `.notFound` alone says nothing about OUR session (the
+    /// tokens are; the server already checked the Apple identity at sign-in),
+    /// so it fails open like an error does.
     static func isCredentialValid(forUserID userID: String) async -> Bool {
         await withCheckedContinuation { continuation in
-            ASAuthorizationAppleIDProvider().getCredentialState(forUserID: userID) { state, _ in
+            ASAuthorizationAppleIDProvider().getCredentialState(forUserID: userID) { state, error in
+                if let error {
+                    print("[AppleSignIn] credential check failed (keeping session): \(error.localizedDescription)")
+                    continuation.resume(returning: true)
+                    return
+                }
                 switch state {
+                case .revoked:
+                    continuation.resume(returning: false)
+                case .notFound:
+                    print("[AppleSignIn] credential state .notFound (keeping session)")
+                    continuation.resume(returning: true)
                 case .authorized, .transferred:
                     continuation.resume(returning: true)
-                case .revoked, .notFound:
-                    continuation.resume(returning: false)
                 @unknown default:
                     continuation.resume(returning: true)
                 }
+            }
+        }
+    }
+
+    /// Whether this Apple id has a LIVE Sign in with Apple link on this device
+    /// (`.authorized`/`.transferred`). For account deletion only: with no link
+    /// there is nothing to revoke, and prompting would offer to create a new
+    /// one. Never use it to decide a sign-out — see `isCredentialValid`.
+    static func hasActiveCredential(forUserID userID: String) async -> Bool {
+        await withCheckedContinuation { continuation in
+            ASAuthorizationAppleIDProvider().getCredentialState(forUserID: userID) { state, _ in
+                continuation.resume(returning: state == .authorized || state == .transferred)
             }
         }
     }

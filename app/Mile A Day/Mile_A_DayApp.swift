@@ -62,6 +62,10 @@ struct Mile_A_DayApp: App {
                             await MADNotificationService.shared.requestAuthorization()
                             MADNotificationService.shared.registerForRemoteNotifications()
                             await MADNotificationService.shared.syncDailyReminderPrefsToBackend()
+                            // Alert switches the server never confirmed (a
+                            // failed or interrupted save) go now: the server
+                            // decides which pushes are sent.
+                            await NotificationPreferences.retryPendingAlertSync()
                             await DailyStepsSyncService.shared.syncNow(force: true)
                             // Streak-tokens enrollment stamp (idempotent; covers
                             // users who authed on an older build).

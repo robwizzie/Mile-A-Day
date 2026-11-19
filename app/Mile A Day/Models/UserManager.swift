@@ -130,8 +130,19 @@ class UserManager: ObservableObject {
     
     // Save user data
     func saveUserData() {
-        if let encoded = try? JSONEncoder().encode(currentUser) {
+        // JSONEncoder THROWS on a non-finite Double, and a `try?` swallowed it:
+        // one NaN/∞ stat (from an odd HealthKit sample) meant the account
+        // record was never written again, and the next launch loaded a stale
+        // or missing one. Clamp those stats first so the record always saves.
+        // Clamped on a COPY: mutating the published `currentUser` here would
+        // notify every observer on every save, changed or not.
+        var toSave = currentUser
+        toSave.clampNonFiniteStats()
+        do {
+            let encoded = try JSONEncoder().encode(toSave)
             userDefaults.set(encoded, forKey: currentUserKey)
+        } catch {
+            print("[UserManager] ❌ Could not save the user record: \(error)")
         }
         
         if let encoded = try? JSONEncoder().encode(friends) {
@@ -212,7 +223,13 @@ class UserManager: ObservableObject {
 
         // Store backend user ID in UserDefaults for FriendService
         UserDefaults.standard.set(backendResponse.user.user_id, forKey: "backendUserId")
-        
+
+        // A fresh sign-in replaces whatever record failed to load at launch.
+        // Left set, `SessionIdentity.hasLostLocalIdentity` stayed true for the
+        // rest of the process, so the very next foreground signed this
+        // brand-new session out again.
+        restoreFailed = false
+
         // Save all data
         saveUserData()
     }
@@ -346,7 +363,7 @@ class UserManager: ObservableObject {
     @MainActor
     private func appleCodeForDeletion() async throws -> String? {
         let appleId = currentUser.appleId
-        if let appleId, !(await AppleSignInManager.isCredentialValid(forUserID: appleId)) {
+        if let appleId, !(await AppleSignInManager.hasActiveCredential(forUserID: appleId)) {
             return nil
         }
         do {

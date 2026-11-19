@@ -50,6 +50,17 @@ struct User: Identifiable, Codable {
         case guest
     }
     
+    /// Zeroes any stat that isn't a finite number. `JSONEncoder` refuses NaN
+    /// and infinity, so one bad value would stop the whole user record from
+    /// saving (`UserManager.saveUserData`).
+    mutating func clampNonFiniteStats() {
+        if !totalMiles.isFinite { totalMiles = 0 }
+        if let b = backendTotalMiles, !b.isFinite { backendTotalMiles = nil }
+        if !fastestMilePace.isFinite { fastestMilePace = 0 }
+        if !mostMilesInOneDay.isFinite { mostMilesInOneDay = 0 }
+        if !goalMiles.isFinite { goalMiles = 1.0 }
+    }
+
     // Check if user has a username set
     var hasUsername: Bool {
         return username != nil && !username!.isEmpty

@@ -40,6 +40,9 @@ struct NotificationSettingsView: View {
     @State private var isLoadingFriendSettings = false
     @State private var showFriendSettings = false
     @State private var savedFeedback = false
+    /// The last save failed to reach the server (it keeps retrying).
+    @State private var saveFailed = false
+    @State private var saveTask: Task<Void, Never>?
 
     // Convert stored hour into Date for DatePicker and vice-versa
     private var reminderTimeBinding: Binding<Date> {
@@ -171,17 +174,26 @@ struct NotificationSettingsView: View {
         .navigationTitle("Notifications")
         .navigationBarTitleDisplayMode(.large)
         .toolbarColorScheme(.dark, for: .navigationBar)
-        .toolbar {
-            ToolbarItem(placement: .confirmationAction) {
-                Button("Save") {
-                    saveAndApply()
-                }
-                .foregroundColor(MADTheme.Colors.madRed)
-                .fontWeight(.semibold)
-            }
-        }
+        // Saves as you change it — there is no Save button any more. With one,
+        // switching everything off and tapping Back kept nothing, silently,
+        // and the friend's-mile pushes kept coming.
+        .onChange(of: prefs.fullSignature) { _, _ in scheduleSave() }
+        .onDisappear { flushPendingSave() }
         .overlay(alignment: .bottom) {
-            if savedFeedback {
+            if saveFailed {
+                HStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 13))
+                    Text("Couldn't save to your account. Retrying…")
+                        .font(.system(size: 13, weight: .medium, design: .rounded))
+                }
+                .foregroundColor(.orange)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .background(Capsule().fill(Color.orange.opacity(0.15)))
+                .padding(.bottom, MADTheme.Spacing.xl)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            } else if savedFeedback {
                 HStack(spacing: 6) {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.system(size: 13))
@@ -197,6 +209,9 @@ struct NotificationSettingsView: View {
             }
         }
         .task {
+            // A change from an earlier visit that never reached the server
+            // goes first, before anything is read back over it.
+            await NotificationPreferences.retryPendingAlertSync()
             await friendService.refreshAllData()
             await loadFriendSettingsAsync()
             await loadServerSettings()
@@ -365,31 +380,52 @@ struct NotificationSettingsView: View {
 
     // MARK: - Actions
 
+    /// Stores at once; sends to the server after a short pause so a run of
+    /// taps is one request.
+    private func scheduleSave() {
+        prefs.saveAlerts()
+        // The daily reminder is server-sent now; clear a local one an older
+        // version may have left scheduled.
+        UNUserNotificationCenter.current().removePendingNotificationRequests(
+            withIdentifiers: [MADNotificationService.Identifier.dailyReminder])
+        NotificationPreferences.alertsSyncPending = true
+        saveTask?.cancel()
+        saveTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 700_000_000)
+            guard !Task.isCancelled else { return }
+            await pushAlerts()
+        }
+    }
+
+    /// Leaving sends a change still waiting on the pause, rather than dropping it.
+    private func flushPendingSave() {
+        guard NotificationPreferences.alertsSyncPending else { return }
+        saveTask?.cancel()
+        Task { @MainActor in _ = await NotificationPreferences.pushStoredAlerts() }
+    }
+
+    /// "Saved" only once the SERVER has it — it decides which pushes go out.
+    @MainActor
+    private func pushAlerts() async {
+        let ok = await NotificationPreferences.pushStoredAlerts()
+        withAnimation(.easeInOut(duration: 0.2)) {
+            saveFailed = !ok
+            savedFeedback = ok
+        }
+        if ok {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                withAnimation(.easeInOut(duration: 0.2)) { savedFeedback = false }
+            }
+        }
+    }
+
+    /// The competition sub-page's own Save: send now.
     private func saveAndApply() {
         MADHaptics.action()
         prefs.saveAlerts()
-        // Daily reminder is now backend-driven (server cron + APNs push). Clear
-        // any legacy local-notification still pending from older app versions —
-        // the backend respects `daily_reminder_enabled` and `daily_reminder_hour`
-        // which are synced below as part of the prefs payload.
-        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [MADNotificationService.Identifier.dailyReminder])
-
-        // Sync the ALERT keys to the backend so push filtering works. The
-        // privacy keys are Privacy's to send (`sharingPayload`).
-        let saved = prefs
-        Task {
-            do {
-                _ = try await friendService.updateNotificationSettings(saved.alertPayload)
-            } catch {
-                print("[NotifSettings] ❌ Failed to sync preferences to backend: \(error)")
-            }
-        }
-
-        // Show feedback
-        withAnimation(.easeInOut(duration: 0.2)) { savedFeedback = true }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-            withAnimation(.easeInOut(duration: 0.2)) { savedFeedback = false }
-        }
+        NotificationPreferences.alertsSyncPending = true
+        saveTask?.cancel()
+        saveTask = Task { @MainActor in await pushAlerts() }
     }
 
     /// Pull the settings the SERVER enforces (buddy invites gate a SQL query,
