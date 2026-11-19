@@ -175,7 +175,7 @@ Details: docs/conventions/ios.md § Key Patterns
 - `BuddyRecapView` hangs every presentation on an always-mounted node, never inside the `isLoading`/`recap` branch; `.task` reloads spinner-free once loaded.
 - Shoes are private (never on friend profiles/posts/shares); defaults per `ShoeActivity`; pickers pass the activity.
 - Settings screens use `SettingsChrome` (`SettingsSection` sentence-case header, `SettingsRow`/`SettingsToggleRow` with a small `SettingsGlyph`, `.settingsCard()` = `DashboardCardSurface`): no icon discs, tracked caps, glass or gradients; each setting gets ONE row in the whole Settings tree (tour + version live only on `MADSettingsView`).
-- `NotificationPreferences` has two owners: `NotificationSettingsView` = alerts (`alertPayload`, `saveAlerts()`), `PrivacyHubView` = who sees what (`sharingPayload`, `saveSharing()`, debounced autosave, `lastSaved` snapshot); never send or store the other half's keys.
+- `NotificationPreferences` has two owners: `NotificationSettingsView` = alerts (`alertPayload`, `saveAlerts()`, debounced autosave, no Save button, "Saved" only once the server confirms; unconfirmed changes set `alertsSyncPending` and `retryPendingAlertSync()` resends on foreground), `PrivacyHubView` = who sees what (`sharingPayload`, `saveSharing()`, debounced autosave, `lastSaved` snapshot); never send or store the other half's keys.
 
 ## Performance
 

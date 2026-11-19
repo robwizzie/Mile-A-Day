@@ -159,3 +159,49 @@ extension NotificationPreferences {
         return changed
     }
 }
+
+// MARK: - Alerts reach the server (or keep trying)
+
+extension NotificationPreferences {
+    /// Every field, comparable — the screen saves on any change, including
+    /// phone-only switches that never go to the server.
+    var fullSignature: String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        guard let data = try? encoder.encode(self) else { return "" }
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    /// The stored alert switches differ from what the server last CONFIRMED.
+    /// Persisted, because the server is what decides whether a push is sent:
+    /// a change that only reached this phone hides alerts while the app is
+    /// open (`MADNotificationService` filters those locally) and nothing else —
+    /// everything off on screen, "Patty got their mile in!" on the lock screen.
+    static let alertsSyncPendingKey = "notificationAlertsSyncPendingV1"
+
+    static var alertsSyncPending: Bool {
+        get { UserDefaults.standard.bool(forKey: alertsSyncPendingKey) }
+        set { UserDefaults.standard.set(newValue, forKey: alertsSyncPendingKey) }
+    }
+
+    /// Sends the STORED alert switches. True once the server has them.
+    @MainActor
+    static func pushStoredAlerts() async -> Bool {
+        guard TokenStore.hasTokens else { return false }
+        do {
+            _ = try await FriendService().updateNotificationSettings(load().alertPayload)
+            alertsSyncPending = false
+            return true
+        } catch {
+            print("[NotifSettings] ❌ Alert settings didn't reach the server (will retry): \(error)")
+            return false
+        }
+    }
+
+    /// Retries a change that never reached the server (called on foreground).
+    @MainActor
+    static func retryPendingAlertSync() async {
+        guard alertsSyncPending else { return }
+        _ = await pushStoredAlerts()
+    }
+}
