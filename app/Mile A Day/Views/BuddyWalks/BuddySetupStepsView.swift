@@ -34,6 +34,10 @@ struct BuddySetupStepsView: View {
     @State private var goal: Double = BuddyMode.together.defaultGoal
     @State private var isRun = false
     @State private var selected: Set<String> = []
+    /// The friend list's search and order (`BuddyFriendPicker.swift`). The
+    /// order is remembered; the search starts empty every time.
+    @State private var friendSearch = ""
+    @AppStorage(BuddyPickerSort.storageKey) private var pickerSortRaw = BuddyPickerSort.best.rawValue
     @State private var isCreating = false
     /// Book the walk for later instead of starting it from the lobby. Off by
     /// default — starting now is overwhelmingly the common case.
@@ -222,6 +226,11 @@ struct BuddySetupStepsView: View {
         BuddySuggestion.ranked(buddy: buddy, walkAgainUserId: walkAgainUserId)
     }
 
+    /// Two or more friends deciding or out right now: offer them all at once.
+    private var groupSuggestion: BuddyGroupSuggestion? {
+        BuddyGroupSuggestion.around(buddy: buddy)
+    }
+
     private var stepGlyph: WizardGlyph {
         switch step {
         case .find: return .symbol(isSearching ? "dot.radiowaves.left.and.right" : "figure.2")
@@ -239,6 +248,7 @@ struct BuddySetupStepsView: View {
         switch step {
         case .find:
             if isSearching { return "Finding Your Buddy" }
+            if groupSuggestion != nil { return "Everyone's Around" }
             return suggestions.isEmpty ? "Walk With a Friend" : "Walk Together?"
         case .who: return "Who's Coming?"
         case .activity: return "Choose Activity Type"
@@ -272,16 +282,24 @@ struct BuddySetupStepsView: View {
                 suggestions: suggestions,
                 actingId: actingSuggestionId,
                 onAct: act(on:),
-                onChooseOthers: { advance(to: .who) }
+                onChooseOthers: { advance(to: .who) },
+                group: groupSuggestion,
+                onActGroup: act(onGroup:)
             )
 
         case .who:
-            lookingNowSection
-            startingNowSection
-            invitesSection
-            partnersSection
-            friendSection
-            routinesSection
+            if friendSearch.isEmpty {
+                lookingNowSection
+                startingNowSection
+                invitesSection
+                partnersSection
+                friendSection
+                routinesSection
+            } else {
+                // Searching: just the matches, so a friend never shows twice
+                // (once in a section above, once in the results).
+                friendSection
+            }
 
         case .activity:
             WizardOptionCard(
@@ -412,6 +430,33 @@ struct BuddySetupStepsView: View {
         }
     }
 
+    /// The group card's one tap: a Just Together lobby inviting all of them.
+    /// Anyone the server can't invite is dropped silently there and named in
+    /// the lobby (`droppedInviteeNames`), as for any invite.
+    private func act(onGroup group: BuddyGroupSuggestion) {
+        guard actingSuggestionId == nil else { return }
+        actingSuggestionId = BuddyFindContent.groupActingId
+        MADHaptics.action()
+        Task {
+            do {
+                let state = try await buddy.createSession(
+                    mode: .together,
+                    goalValue: nil,
+                    activityType: group.activityType ?? activityType,
+                    inviteUserIds: group.people.map(\.userId),
+                    origin: .invite
+                )
+                MADHaptics.success()
+                onCreated(state)
+            } catch {
+                MADHaptics.error()
+                buddy.errorMessage =
+                    (error as? LocalizedError)?.errorDescription ?? "Couldn't start that walk."
+            }
+            actingSuggestionId = nil
+        }
+    }
+
     /// Friends whose buddy setup is open right now, pickable like any friend
     /// — at the top of the list, because they're the ones deciding with you.
     private var lookingNowCandidates: [BuddyCandidate] {
@@ -427,7 +472,7 @@ struct BuddySetupStepsView: View {
                 VStack(spacing: 0) {
                     ForEach(Array(lookingNowCandidates.enumerated()), id: \.element.id) { index, candidate in
                         if index > 0 { Divider().background(Color.white.opacity(0.12)) }
-                        friendRow(candidate)
+                        friendRow(candidate, status: String(localized: "Looking for a buddy right now"), live: true)
                     }
                 }
                 .background(panel())
@@ -1027,33 +1072,139 @@ struct BuddySetupStepsView: View {
         return buddy.candidates.filter { !looking.contains($0.userId) }
     }
 
+    private var pickerSort: BuddyPickerSort {
+        BuddyPickerSort(rawValue: pickerSortRaw) ?? .best
+    }
+
+    /// Searching looks through EVERYONE, "Looking right now" included: a
+    /// search that can't find a friend because they're listed higher up reads
+    /// as them missing.
+    private var pickerEntries: [BuddyPickerEntry] {
+        let searching = !friendSearch.trimmingCharacters(in: .whitespaces).isEmpty
+        return BuddyPickerEntry.entries(
+            searching ? buddy.candidates : otherCandidates,
+            buddy: buddy, search: friendSearch, sort: pickerSort)
+    }
+
+    /// Search and sort earn their space once the list is long enough to hunt
+    /// through.
+    private var showsPickerControls: Bool { buddy.candidates.count > 5 }
+
     @ViewBuilder
     private var friendSection: some View {
         // Everyone pickable is already in "Looking right now": no second,
         // empty list under it.
-        if buddy.candidates.isEmpty || !otherCandidates.isEmpty {
+        if buddy.candidates.isEmpty || !otherCandidates.isEmpty || !friendSearch.isEmpty {
             VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
-                HStack {
-                    sectionTitle("Who's coming?")
-                    Spacer()
-
-                }
+                sectionTitle("Who's coming?")
 
                 if buddy.candidates.isEmpty {
                     emptyFriendsCard
                 } else {
-                    VStack(spacing: 0) {
-                        ForEach(Array(otherCandidates.enumerated()), id: \.element.id) { index, candidate in
-                            if index > 0 {
-                                Divider().background(Color.white.opacity(0.12))
-                            }
-                            friendRow(candidate)
-                        }
+                    if showsPickerControls {
+                        pickerSearchField
+                        pickerSortChips
                     }
-                    .background(panel())
+                    pickerList
                 }
             }
         }
+    }
+
+    @ViewBuilder
+    private var pickerList: some View {
+        let entries = pickerEntries
+        // Best match keeps friends who haven't been active lately out of the
+        // way, under their own label, rather than hiding them.
+        let splitQuiet = pickerSort == .best && friendSearch.isEmpty
+        let active = splitQuiet ? entries.filter { !$0.isQuiet } : entries
+        let quiet = splitQuiet ? entries.filter(\.isQuiet) : []
+        if entries.isEmpty {
+            Text(String(localized: "No friends match \u{201C}\(friendSearch)\u{201D}"))
+                .font(MADTheme.Typography.caption)
+                .foregroundStyle(Color.white.opacity(0.65))
+                .frame(maxWidth: .infinity)
+                .padding(MADTheme.Spacing.lg)
+                .background(panel())
+        } else {
+            VStack(spacing: 0) {
+                ForEach(Array(active.enumerated()), id: \.element.id) { index, entry in
+                    if index > 0 { Divider().background(Color.white.opacity(0.12)) }
+                    friendRow(entry.candidate, status: entry.statusLine, live: entry.isLive)
+                }
+                if !quiet.isEmpty {
+                    Text("Not active lately")
+                        .font(MADTheme.Typography.caption)
+                        .foregroundStyle(Color.white.opacity(0.55))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, MADTheme.Spacing.md)
+                        .padding(.top, active.isEmpty ? MADTheme.Spacing.sm : MADTheme.Spacing.md)
+                        .padding(.bottom, 4)
+                    ForEach(Array(quiet.enumerated()), id: \.element.id) { index, entry in
+                        if index > 0 { Divider().background(Color.white.opacity(0.12)) }
+                        friendRow(entry.candidate, status: entry.statusLine, live: false)
+                    }
+                }
+            }
+            .background(panel())
+        }
+    }
+
+    private var pickerSearchField: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(Color.white.opacity(0.6))
+                .accessibilityHidden(true)
+            TextField(
+                "",
+                text: $friendSearch,
+                prompt: Text("Search friends").foregroundColor(Color.white.opacity(0.5))
+            )
+            .font(MADTheme.Typography.body)
+            .foregroundStyle(Color.white)
+            .tint(accent)
+            .textInputAutocapitalization(.never)
+            .autocorrectionDisabled()
+            .submitLabel(.search)
+            if !friendSearch.isEmpty {
+                Button {
+                    friendSearch = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(Color.white.opacity(0.6))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Clear search")
+            }
+        }
+        .padding(.horizontal, 12)
+        .frame(minHeight: 44)
+        .background(panel())
+    }
+
+    private var pickerSortChips: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(BuddyPickerSort.allCases) { option in
+                    let isOn = option == pickerSort
+                    Button {
+                        MADHaptics.tap()
+                        withAnimation(MADTheme.Animation.quick) { pickerSortRaw = option.rawValue }
+                    } label: {
+                        Text(option.title)
+                            .font(MADTheme.Typography.smallBold)
+                            .lineLimit(1)
+                            .padding(.horizontal, 12)
+                            .frame(minHeight: 34)
+                            .foregroundStyle(isOn ? WizardPalette.onAccent : Color.white)
+                            .background(Capsule().fill(isOn ? accent : Color.white.opacity(0.10)))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(isOn ? .isSelected : [])
+                }
+            }
+        }
+        .accessibilityLabel("Sort friends")
     }
 
     /// The candidate list is filtered to friends whose build has Buddy Walks and
@@ -1084,7 +1235,12 @@ struct BuddySetupStepsView: View {
         .background(panel())
     }
 
-    private func friendRow(_ candidate: BuddyCandidate) -> some View {
+    /// - Parameters:
+    ///   - status: One line of "why them" under the name (`BuddyPickerEntry`).
+    ///   - live: Out or looking right now: a ring around the face.
+    private func friendRow(
+        _ candidate: BuddyCandidate, status: String? = nil, live: Bool = false
+    ) -> some View {
         let isOn = selected.contains(candidate.userId)
         return Button {
             MADHaptics.tap()
@@ -1098,10 +1254,25 @@ struct BuddySetupStepsView: View {
                     imageURL: candidate.profileImageUrl,
                     size: 40
                 )
-                Text(candidate.displayName)
-                    .font(MADTheme.Typography.body)
-                    .foregroundStyle(Color.white)
-                Spacer()
+                .overlay(
+                    Circle()
+                        .strokeBorder(Color.green, lineWidth: 2)
+                        .padding(-3)
+                        .opacity(live ? 1 : 0)
+                )
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(candidate.displayName)
+                        .font(MADTheme.Typography.body)
+                        .foregroundStyle(Color.white)
+                        .lineLimit(1)
+                    if let status {
+                        Text(status)
+                            .font(MADTheme.Typography.caption)
+                            .foregroundStyle(live ? Color.green : Color.white.opacity(0.6))
+                            .lineLimit(2)
+                    }
+                }
+                Spacer(minLength: MADTheme.Spacing.sm)
                 Image(systemName: isOn ? "checkmark.circle.fill" : "circle")
                     .font(.system(size: 22))
                     .foregroundStyle(isOn ? accent : Color.white.opacity(0.3))

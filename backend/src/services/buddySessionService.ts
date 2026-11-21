@@ -22,7 +22,9 @@ import {
   BUDDY_MAX_PARTICIPANTS,
   BUDDY_MAX_SPEED_MPS,
   BUDDY_START_COUNTDOWN_SECONDS,
+  BUDDY_NOT_RECORDING_GRACE_SECONDS,
   BUDDY_STALE_PROGRESS_SECONDS,
+  BUDDY_WENT_QUIET_SECONDS,
   METERS_PER_MILE,
   type BuddyActivityType,
   type BuddyEventKind,
@@ -44,7 +46,12 @@ import {
   type BuddySessionPost,
   buddySessionPostIds,
 } from "./postService.js";
-import { userOffsetMinutesOrNullSql } from "./dailyResetTime.js";
+import {
+  userOffsetMinutesOrNullSql,
+  userOffsetMinutesSql,
+} from "./dailyResetTime.js";
+import { VIEWER_MAY_SEE_WORKOUT_CONTENT_SQL } from "./visibilityService.js";
+import { countedWorkoutSql } from "./mileTime.js";
 
 const db = PostgresService.getInstance();
 
@@ -2295,10 +2302,120 @@ export async function recordProgress(
 
   await bumpVersion(sessionId);
   await finalizeIfDue(sessionId);
+  // Somebody on this walk IS recording, so this is the moment to notice who
+  // isn't. Not awaited: the reporter's roster shouldn't wait on a push.
+  void alertSilentWalkers(sessionId);
 
   const session = await getSessionRow(sessionId);
   if (!session) throw new BadRequestError("session_not_found");
   return buildState(session);
+}
+
+/**
+ * Tell a walker their own phone isn't recording the walk they're on.
+ *
+ * Two silences, both of which used to go unnoticed until the walk was over:
+ *
+ *  - NEVER REPORTED. The tracker only starts when the lobby is on screen at
+ *    the moment the countdown ends; a guest whose phone was locked in a
+ *    pocket was `active` on the roster and recording nothing. They were sent
+ *    "Buddy Walk started — get moving!", which reads like confirmation, not
+ *    like a thing to act on.
+ *  - WENT QUIET. They were reporting, then stopped for
+ *    `BUDDY_WENT_QUIET_SECONDS` (iOS ended the app, the tracker was closed).
+ *    Opening the app re-adopts the workout, so the push is the way back.
+ *
+ * Claimed on `tracking_alert_sent_at` inside the UPDATE itself, so concurrent
+ * reports from the rest of the crew can't double-send. A walker who recovers
+ * (reports again) and then goes quiet again is re-armed by the
+ * `tracking_alert_sent_at < last_progress_at` arm — once per silence.
+ *
+ * Rides the `buddy_started` type with an additive `kind`: every shipped build
+ * already routes that type to the walk (→ the lobby → the tracker), so the
+ * tap does the right thing on old clients too. Never throws.
+ */
+export async function alertSilentWalkers(sessionId: string): Promise<number> {
+  try {
+    const claimed = await db.query<{ user_id: string; never_reported: boolean }>(
+      `UPDATE buddy_session_participants p
+          SET tracking_alert_sent_at = NOW()
+         FROM buddy_sessions s
+        WHERE p.session_id = $1 AND s.id = p.session_id
+          AND s.status = 'active' AND s.started_at IS NOT NULL
+          -- An old walk nobody closed is the abandon sweep's, not ours.
+          AND s.started_at > NOW() - INTERVAL '3 hours'
+          AND p.status = 'active'
+          AND (
+            (p.last_progress_at IS NULL
+              AND p.tracking_alert_sent_at IS NULL
+              -- From when THEY were on it: a mid-walk joiner lands 'active'
+              -- with no report yet, and the walk's own start is long past.
+              AND GREATEST(s.started_at, COALESCE(p.joined_at, s.started_at))
+                    < NOW() - ($2 || ' seconds')::interval)
+            OR (p.last_progress_at IS NOT NULL
+              AND p.last_progress_at < NOW() - ($3 || ' seconds')::interval
+              AND (p.tracking_alert_sent_at IS NULL
+                   OR p.tracking_alert_sent_at < p.last_progress_at))
+          )
+        RETURNING p.user_id, (p.last_progress_at IS NULL) AS never_reported`,
+      [
+        sessionId,
+        String(BUDDY_NOT_RECORDING_GRACE_SECONDS),
+        String(BUDDY_WENT_QUIET_SECONDS),
+      ],
+    );
+    if (claimed.length === 0) return 0;
+
+    const allowed = new Set(
+      await allowedRecipients(
+        claimed.map((r) => r.user_id),
+        null,
+        "buddy",
+      ),
+    );
+    let sent = 0;
+    for (const row of claimed) {
+      if (!allowed.has(row.user_id)) continue;
+      const never = row.never_reported === true;
+      await sendPush(row.user_id, {
+        title: never
+          ? "Your phone isn't recording your buddy walk"
+          : "Your buddy walk stopped recording",
+        body: never
+          ? "The walk has started, but Mile A Day isn't tracking you yet. Tap to start recording."
+          : "We haven't heard from your phone in a few minutes. Tap to pick your walk back up.",
+        type: "buddy_started",
+        data: {
+          session_id: sessionId,
+          kind: never ? "not_recording" : "went_quiet",
+        },
+      });
+      sent += 1;
+    }
+    return sent;
+  } catch (err) {
+    void logError("buddy", "failed to alert silent buddy walkers", {
+      context: { sessionId, error: String(err) },
+    });
+    return 0;
+  }
+}
+
+/**
+ * Backstop for `alertSilentWalkers`, from the cron: a walk where NOBODY is
+ * reporting has no progress call to notice it on.
+ */
+export async function alertSilentWalkersEverywhere(): Promise<number> {
+  const live = await db.query<{ id: string }>(
+    `SELECT id FROM buddy_sessions
+      WHERE status = 'active' AND started_at IS NOT NULL
+        AND started_at > NOW() - INTERVAL '3 hours'
+        AND started_at < NOW() - ($1 || ' seconds')::interval`,
+    [String(BUDDY_NOT_RECORDING_GRACE_SECONDS)],
+  );
+  let sent = 0;
+  for (const row of live) sent += await alertSilentWalkers(row.id);
+  return sent;
 }
 
 // ─── Finish & finalize ──────────────────────────────────────────────────
@@ -2782,6 +2899,24 @@ async function eligibleInvitees(
  * Friends eligible to be invited: accepted, unblocked both ways, on a build
  * that has the buddy screens, and not opted out.
  */
+/**
+ * Friends the caller can invite, plus what helps them pick.
+ *
+ * The picker was a bare list of names in streak order: nothing said who you
+ * actually walk with or who still uses the app, so the friend who installed it
+ * once in March sat beside the one you walk with every Tuesday. Two ADDITIVE
+ * fields (older clients decode by name and ignore them):
+ *
+ *  - `walks_together` / `last_walk_together`: buddy walks you BOTH finished,
+ *    the same rule as `getBuddyPartners` (completed session, the caller's
+ *    copy not hidden), so the picker and the partners card never disagree.
+ *  - `active_days_ago`: whole days between their own local today and their
+ *    latest counted workout, 0 = today. COARSE on purpose (a day count, never
+ *    a time) and served only where the caller may see that friend's workouts
+ *    (`VIEWER_MAY_SEE_WORKOUT_CONTENT_SQL`, so 'private' reads NULL, the same
+ *    as never). Capped at 60: past two months the number says nothing more
+ *    than "quiet".
+ */
 export async function getInviteCandidates(userId: string): Promise<
   Array<{
     user_id: string;
@@ -2790,13 +2925,53 @@ export async function getInviteCandidates(userId: string): Promise<
     last_name: string | null;
     profile_image_url: string | null;
     current_streak: number | null;
+    walks_together: number;
+    last_walk_together: string | null;
+    active_days_ago: number | null;
   }>
 > {
-  return db.query(
+  const rows = await db.query<{
+    user_id: string;
+    username: string | null;
+    first_name: string | null;
+    last_name: string | null;
+    profile_image_url: string | null;
+    current_streak: number | null;
+    walks_together: number | string | null;
+    last_walk_together: string | null;
+    active_days_ago: number | string | null;
+  }>(
     `SELECT u.user_id, u.username, u.first_name, u.last_name,
-            u.profile_image_url, u.current_streak
+            u.profile_image_url, u.current_streak,
+            COALESCE(together.walks, 0)::int AS walks_together,
+            together.last_walk AS last_walk_together,
+            CASE
+              WHEN last_w.local_date IS NULL THEN NULL
+              WHEN NOT ${VIEWER_MAY_SEE_WORKOUT_CONTENT_SQL("u.user_id", "$1")} THEN NULL
+              ELSE LEAST(60, GREATEST(0,
+                     ((NOW() AT TIME ZONE 'UTC')
+                        + (${userOffsetMinutesSql("u.user_id")} || ' minutes')::interval)::date
+                     - last_w.local_date))::int
+            END AS active_days_ago
        FROM friendships f
        JOIN users u ON u.user_id = f.friend_id
+       LEFT JOIN LATERAL (
+         SELECT MAX(w.local_date) AS local_date
+           FROM workouts w
+          WHERE w.user_id = u.user_id AND ${countedWorkoutSql("w")}
+       ) last_w ON true
+       LEFT JOIN LATERAL (
+         SELECT COUNT(*)::int AS walks,
+                to_char(MAX(s.local_date), 'YYYY-MM-DD') AS last_walk
+           FROM buddy_session_participants me
+           JOIN buddy_sessions s ON s.id = me.session_id
+           JOIN buddy_session_participants them
+             ON them.session_id = me.session_id AND them.user_id = u.user_id
+          WHERE me.user_id = $1
+            AND me.status = 'finished' AND me.hidden_at IS NULL
+            AND them.status = 'finished'
+            AND s.status = 'completed'
+       ) together ON true
       WHERE f.user_id = $1
         AND f.status = 'accepted'
         AND u.buddy_enrolled_at IS NOT NULL
@@ -2809,6 +2984,20 @@ export async function getInviteCandidates(userId: string): Promise<
       ORDER BY u.current_streak DESC NULLS LAST, u.username ASC`,
     [userId],
   );
+  return rows.map((r) => ({
+    user_id: r.user_id,
+    username: r.username,
+    first_name: r.first_name,
+    last_name: r.last_name,
+    profile_image_url: r.profile_image_url,
+    current_streak: r.current_streak,
+    walks_together: Number(r.walks_together) || 0,
+    last_walk_together: r.last_walk_together,
+    active_days_ago:
+      r.active_days_ago === null || r.active_days_ago === undefined
+        ? null
+        : Number(r.active_days_ago),
+  }));
 }
 
 /**

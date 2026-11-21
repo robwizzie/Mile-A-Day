@@ -58,8 +58,12 @@ struct BuddyWalkPill: View {
 
     private var isLive: Bool { buddy.canReenterLiveSession }
 
+    /// Your own walk and invites moved to `BuddyAttentionBanner`, which
+    /// shows on every tab (they were easy to miss down here, on Home only).
+    /// The pill keeps the one thing that isn't asking you anything: a friend
+    /// you could go and join.
     private var hasSomethingToShow: Bool {
-        isLive || inviteCount > 0 || joinableCount > 0
+        !isLive && inviteCount == 0 && joinableCount > 0
     }
 
     var body: some View {

@@ -2578,7 +2578,21 @@ struct WorkoutTrackingView: View {
         armedGhostSessionId = ""
         UserDefaults.standard.removeObject(forKey: BuddyGhostArming.legacyArmedKey)
         isTracking = true
-        startWorkout()
+        // Handed off LATE — the phone was locked through the countdown and
+        // this is the walker opening the app a few minutes in: credit the
+        // steps the pedometer already counted since the shared start rather
+        // than starting from 0.00 (`BuddyLateStart`). Synchronous, and nil,
+        // for an on-time start.
+        let sessionStart = buddyService.session.flatMap {
+            $0.id == effectiveBuddySessionId ? $0.startedAtDate : nil
+        }
+        BuddyLateStart.resolve(sessionStartedAt: sessionStart) { seed in
+            // The query can take a moment; don't start under a stop or a
+            // back-out the user asked for meanwhile (`isTracking` was set
+            // just above; `startWorkout`'s lock refuses a second workout).
+            guard !isStopping, isTracking else { return }
+            startWorkout(lateStart: seed)
+        }
         return true
     }
 
@@ -2856,7 +2870,10 @@ struct WorkoutTrackingView: View {
         }
     }
 
-    private func startWorkout() {
+    /// - Parameter lateStart: A buddy walk joined late (`BuddyLateStart`):
+    ///   the workout starts at the walk's shared start with the pedometer's
+    ///   distance since then already on it.
+    private func startWorkout(lateStart: BuddyLateStart.Seed? = nil) {
         // Acquire workout lock to enforce single workout at a time
         guard InProgressWorkoutStore.acquireLock() else {
             endWorkoutErrorMessage = "Another Mile A Day workout is already active. Please finish or cancel that workout first."
@@ -2874,7 +2891,21 @@ struct WorkoutTrackingView: View {
                 && WorkoutLocationManager.canFeedTreadmill(locationType: selectedLocationType)
             ? TreadmillLink.shared.consoleSeed()
             : nil
-        workoutStartDate = treadmillSeed?.startDate ?? Date()
+        workoutStartDate = treadmillSeed?.startDate ?? lateStart?.startDate ?? Date()
+        let seededMiles = lateStart?.miles ?? 0
+        if let lateStart {
+            print("[WorkoutTracking] Late buddy start: crediting \(lateStart.miles) mi since \(lateStart.startDate)")
+            // Say so: the walker opened the app expecting 0.00 (or, worse,
+            // didn't know it hadn't been counting) and sees a number instead.
+            // After the hand-off's own animation, so the toast isn't lost
+            // under the wizard leaving.
+            let credited = lateStart.miles.distanceFormatted
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                showImportToast(
+                    String(localized: "Added \(credited) you walked before your phone started recording"),
+                    ok: true)
+            }
+        }
 
         // Resolve the ghost the user armed on the location step (resolved
         // once, so a best set MID-session doesn't morph the target).
@@ -2940,7 +2971,7 @@ struct WorkoutTrackingView: View {
             startTime: workoutStartDate!,
             elapsedTime: 0,
             pausedTime: 0,
-            currentDistance: 0,
+            currentDistance: seededMiles,
             startingDistance: startingDistance,
             totalDailyDistance: totalDailyDistance,
             goalDistance: goalDistance,
@@ -2960,11 +2991,13 @@ struct WorkoutTrackingView: View {
         // What Start My Mile pre-answers next time.
         TrackerLaunchPreference.record(selectedActivityType)
 
-        // Start location/pedometer tracking (fresh workout, initialDistance = 0)
+        // Start location/pedometer tracking (fresh workout: from 0, or from a
+        // late buddy start's back-filled miles)
         locationManager.startTracking(
             locationType: selectedLocationType,
-            initialDistance: 0,
-            treadmillSeed: treadmillSeed
+            initialDistance: seededMiles,
+            treadmillSeed: treadmillSeed,
+            lateStart: lateStart
         )
 
         // Start Live Activity

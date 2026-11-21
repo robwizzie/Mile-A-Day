@@ -331,6 +331,15 @@ struct BuddyParticipant: Codable, Identifiable, Equatable {
     /// friend dropped out a moment ago or twenty minutes back, and a ticking
     /// seconds counter on a roster tile invites a precision the underlying
     /// 90-second window doesn't have.
+    /// On the walk, past the stale window, and never heard from ONCE: their
+    /// phone didn't start recording (locked through the countdown, so the
+    /// lobby never handed off). Distinct from out of range, which is a walker
+    /// who WAS reporting. The server serves the age for every reporter, so a
+    /// nil age on a stale active walker means exactly this.
+    var neverRecorded: Bool {
+        status == .active && isStale && lastHeardSeconds == nil
+    }
+
     var lastHeardAgo: String? {
         guard let seconds = lastHeardSeconds else { return nil }
         if seconds < 60 { return "just now" }
@@ -561,6 +570,14 @@ struct BuddyCandidate: Codable, Identifiable, Equatable {
     let lastName: String?
     let profileImageUrl: String?
     let currentStreak: Int?
+    /// Buddy walks you both finished (the partners rule). Optional: absent
+    /// from a server that predates it.
+    let walksTogether: Int?
+    /// `YYYY-MM-DD` of the last of those.
+    let lastWalkTogetherRaw: String?
+    /// Whole days since their latest workout, 0 = today, capped at 60. Nil
+    /// when they've never logged one OR their workouts are private to you.
+    let activeDaysAgo: Int?
 
     var id: String { userId }
 
@@ -577,6 +594,9 @@ struct BuddyCandidate: Codable, Identifiable, Equatable {
         case lastName = "last_name"
         case profileImageUrl = "profile_image_url"
         case currentStreak = "current_streak"
+        case walksTogether = "walks_together"
+        case lastWalkTogetherRaw = "last_walk_together"
+        case activeDaysAgo = "active_days_ago"
     }
 }
 

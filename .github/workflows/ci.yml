@@ -136,6 +136,14 @@ jobs:
       # would wipe other people's miles) and the per-viewer history hide.
       - name: Buddy live join/leave/cancel/hide check
         run: node scripts/buddy-live-check.mjs
+      # A walker whose phone never started (or stopped) recording is told so,
+      # once per silence; the reporting walker and finished walkers never are.
+      - name: Buddy not-recording alert check
+        run: node scripts/buddy-tracking-alert-check.mjs
+      # The buddy picker's "walks together" and "active N days ago": the
+      # partners rule, counted workouts only, and private workouts stay null.
+      - name: Buddy invite candidates check
+        run: node scripts/buddy-candidates-check.mjs
       # Live routes are the one place a position leaves the phone mid-walk. A
       # hole here is a privacy bug nobody sees, so every door is pinned: the
       # opt-in, reciprocity, blocks, stealth, maps-off, and deletion on finish.

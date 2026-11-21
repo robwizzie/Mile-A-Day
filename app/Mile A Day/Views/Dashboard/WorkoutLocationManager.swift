@@ -502,11 +502,16 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
     ///     (`TreadmillLink.consoleSeed`): the clock starts at its `startDate`
     ///     and the distance at its miles. The caller's own start time must use
     ///     the same `startDate`.
+    ///   - lateStart: A buddy walk this phone joined late (`BuddyLateStart`):
+    ///     the clock and moving time start at the walk's shared start. Its
+    ///     miles arrive as `initialDistance`; the caller's start time must use
+    ///     the same `startDate`.
     func startTracking(
         locationType: HKWorkoutSessionLocationType = .outdoor,
         initialDistance: Double = 0.0,
         pauseIntervals: [WorkoutPauseInterval] = [],
-        treadmillSeed: TreadmillConsoleSeed? = nil
+        treadmillSeed: TreadmillConsoleSeed? = nil,
+        lateStart: BuddyLateStart.Seed? = nil
     ) {
         // Prevent double-start
         guard !isTracking else { return }
@@ -522,10 +527,13 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
         lastMotionPollAt = .distantPast
         pedometerErrored = false
         trackingStartedAt = Date()
-        clockStartedAt = treadmillSeed?.startDate
+        clockStartedAt = treadmillSeed?.startDate ?? lateStart?.startDate
         treadmillEndedWorkout = false
         pausedByTreadmill = false
-        movingSeconds = 0
+        // A late buddy start's back-filled miles were walked over the whole
+        // span since the shared start; without the matching seconds the pace
+        // would read as if they'd covered them in an instant.
+        movingSeconds = lateStart.map { max(0, Date().timeIntervalSince($0.startDate)) } ?? 0
         movingCreditedThrough = nil
         effortCurve = [(0, initialDistance)]
         lastEffortSample = (0, initialDistance)
