@@ -331,6 +331,15 @@ struct BuddyParticipant: Codable, Identifiable, Equatable {
     /// friend dropped out a moment ago or twenty minutes back, and a ticking
     /// seconds counter on a roster tile invites a precision the underlying
     /// 90-second window doesn't have.
+    /// On the walk, past the stale window, and never heard from ONCE: their
+    /// phone didn't start recording (locked through the countdown, so the
+    /// lobby never handed off). Distinct from out of range, which is a walker
+    /// who WAS reporting. The server serves the age for every reporter, so a
+    /// nil age on a stale active walker means exactly this.
+    var neverRecorded: Bool {
+        status == .active && isStale && lastHeardSeconds == nil
+    }
+
     var lastHeardAgo: String? {
         guard let seconds = lastHeardSeconds else { return nil }
         if seconds < 60 { return "just now" }

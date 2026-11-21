@@ -22,7 +22,9 @@ import {
   BUDDY_MAX_PARTICIPANTS,
   BUDDY_MAX_SPEED_MPS,
   BUDDY_START_COUNTDOWN_SECONDS,
+  BUDDY_NOT_RECORDING_GRACE_SECONDS,
   BUDDY_STALE_PROGRESS_SECONDS,
+  BUDDY_WENT_QUIET_SECONDS,
   METERS_PER_MILE,
   type BuddyActivityType,
   type BuddyEventKind,
@@ -2295,10 +2297,120 @@ export async function recordProgress(
 
   await bumpVersion(sessionId);
   await finalizeIfDue(sessionId);
+  // Somebody on this walk IS recording, so this is the moment to notice who
+  // isn't. Not awaited: the reporter's roster shouldn't wait on a push.
+  void alertSilentWalkers(sessionId);
 
   const session = await getSessionRow(sessionId);
   if (!session) throw new BadRequestError("session_not_found");
   return buildState(session);
+}
+
+/**
+ * Tell a walker their own phone isn't recording the walk they're on.
+ *
+ * Two silences, both of which used to go unnoticed until the walk was over:
+ *
+ *  - NEVER REPORTED. The tracker only starts when the lobby is on screen at
+ *    the moment the countdown ends; a guest whose phone was locked in a
+ *    pocket was `active` on the roster and recording nothing. They were sent
+ *    "Buddy Walk started — get moving!", which reads like confirmation, not
+ *    like a thing to act on.
+ *  - WENT QUIET. They were reporting, then stopped for
+ *    `BUDDY_WENT_QUIET_SECONDS` (iOS ended the app, the tracker was closed).
+ *    Opening the app re-adopts the workout, so the push is the way back.
+ *
+ * Claimed on `tracking_alert_sent_at` inside the UPDATE itself, so concurrent
+ * reports from the rest of the crew can't double-send. A walker who recovers
+ * (reports again) and then goes quiet again is re-armed by the
+ * `tracking_alert_sent_at < last_progress_at` arm — once per silence.
+ *
+ * Rides the `buddy_started` type with an additive `kind`: every shipped build
+ * already routes that type to the walk (→ the lobby → the tracker), so the
+ * tap does the right thing on old clients too. Never throws.
+ */
+export async function alertSilentWalkers(sessionId: string): Promise<number> {
+  try {
+    const claimed = await db.query<{ user_id: string; never_reported: boolean }>(
+      `UPDATE buddy_session_participants p
+          SET tracking_alert_sent_at = NOW()
+         FROM buddy_sessions s
+        WHERE p.session_id = $1 AND s.id = p.session_id
+          AND s.status = 'active' AND s.started_at IS NOT NULL
+          -- An old walk nobody closed is the abandon sweep's, not ours.
+          AND s.started_at > NOW() - INTERVAL '3 hours'
+          AND p.status = 'active'
+          AND (
+            (p.last_progress_at IS NULL
+              AND p.tracking_alert_sent_at IS NULL
+              -- From when THEY were on it: a mid-walk joiner lands 'active'
+              -- with no report yet, and the walk's own start is long past.
+              AND GREATEST(s.started_at, COALESCE(p.joined_at, s.started_at))
+                    < NOW() - ($2 || ' seconds')::interval)
+            OR (p.last_progress_at IS NOT NULL
+              AND p.last_progress_at < NOW() - ($3 || ' seconds')::interval
+              AND (p.tracking_alert_sent_at IS NULL
+                   OR p.tracking_alert_sent_at < p.last_progress_at))
+          )
+        RETURNING p.user_id, (p.last_progress_at IS NULL) AS never_reported`,
+      [
+        sessionId,
+        String(BUDDY_NOT_RECORDING_GRACE_SECONDS),
+        String(BUDDY_WENT_QUIET_SECONDS),
+      ],
+    );
+    if (claimed.length === 0) return 0;
+
+    const allowed = new Set(
+      await allowedRecipients(
+        claimed.map((r) => r.user_id),
+        null,
+        "buddy",
+      ),
+    );
+    let sent = 0;
+    for (const row of claimed) {
+      if (!allowed.has(row.user_id)) continue;
+      const never = row.never_reported === true;
+      await sendPush(row.user_id, {
+        title: never
+          ? "Your phone isn't recording your buddy walk"
+          : "Your buddy walk stopped recording",
+        body: never
+          ? "The walk has started, but Mile A Day isn't tracking you yet. Tap to start recording."
+          : "We haven't heard from your phone in a few minutes. Tap to pick your walk back up.",
+        type: "buddy_started",
+        data: {
+          session_id: sessionId,
+          kind: never ? "not_recording" : "went_quiet",
+        },
+      });
+      sent += 1;
+    }
+    return sent;
+  } catch (err) {
+    void logError("buddy", "failed to alert silent buddy walkers", {
+      context: { sessionId, error: String(err) },
+    });
+    return 0;
+  }
+}
+
+/**
+ * Backstop for `alertSilentWalkers`, from the cron: a walk where NOBODY is
+ * reporting has no progress call to notice it on.
+ */
+export async function alertSilentWalkersEverywhere(): Promise<number> {
+  const live = await db.query<{ id: string }>(
+    `SELECT id FROM buddy_sessions
+      WHERE status = 'active' AND started_at IS NOT NULL
+        AND started_at > NOW() - INTERVAL '3 hours'
+        AND started_at < NOW() - ($1 || ' seconds')::interval`,
+    [String(BUDDY_NOT_RECORDING_GRACE_SECONDS)],
+  );
+  let sent = 0;
+  for (const row of live) sent += await alertSilentWalkers(row.id);
+  return sent;
 }
 
 // ─── Finish & finalize ──────────────────────────────────────────────────

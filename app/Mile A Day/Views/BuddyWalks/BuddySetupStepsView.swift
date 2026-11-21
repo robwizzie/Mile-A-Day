@@ -222,6 +222,11 @@ struct BuddySetupStepsView: View {
         BuddySuggestion.ranked(buddy: buddy, walkAgainUserId: walkAgainUserId)
     }
 
+    /// Two or more friends deciding or out right now: offer them all at once.
+    private var groupSuggestion: BuddyGroupSuggestion? {
+        BuddyGroupSuggestion.around(buddy: buddy)
+    }
+
     private var stepGlyph: WizardGlyph {
         switch step {
         case .find: return .symbol(isSearching ? "dot.radiowaves.left.and.right" : "figure.2")
@@ -239,6 +244,7 @@ struct BuddySetupStepsView: View {
         switch step {
         case .find:
             if isSearching { return "Finding Your Buddy" }
+            if groupSuggestion != nil { return "Everyone's Around" }
             return suggestions.isEmpty ? "Walk With a Friend" : "Walk Together?"
         case .who: return "Who's Coming?"
         case .activity: return "Choose Activity Type"
@@ -272,7 +278,9 @@ struct BuddySetupStepsView: View {
                 suggestions: suggestions,
                 actingId: actingSuggestionId,
                 onAct: act(on:),
-                onChooseOthers: { advance(to: .who) }
+                onChooseOthers: { advance(to: .who) },
+                group: groupSuggestion,
+                onActGroup: act(onGroup:)
             )
 
         case .who:
@@ -403,6 +411,33 @@ struct BuddySetupStepsView: View {
                     onCreated(state)
                 }
                 MADHaptics.success()
+            } catch {
+                MADHaptics.error()
+                buddy.errorMessage =
+                    (error as? LocalizedError)?.errorDescription ?? "Couldn't start that walk."
+            }
+            actingSuggestionId = nil
+        }
+    }
+
+    /// The group card's one tap: a Just Together lobby inviting all of them.
+    /// Anyone the server can't invite is dropped silently there and named in
+    /// the lobby (`droppedInviteeNames`), as for any invite.
+    private func act(onGroup group: BuddyGroupSuggestion) {
+        guard actingSuggestionId == nil else { return }
+        actingSuggestionId = BuddyFindContent.groupActingId
+        MADHaptics.action()
+        Task {
+            do {
+                let state = try await buddy.createSession(
+                    mode: .together,
+                    goalValue: nil,
+                    activityType: group.activityType ?? activityType,
+                    inviteUserIds: group.people.map(\.userId),
+                    origin: .invite
+                )
+                MADHaptics.success()
+                onCreated(state)
             } catch {
                 MADHaptics.error()
                 buddy.errorMessage =

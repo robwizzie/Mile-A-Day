@@ -94,6 +94,18 @@ struct MainTabView: View {
 
     /// The root's bottom safe-area inset (0 on home-button phones).
     @State private var bottomSafeInset: CGFloat = 34
+    /// `BuddyAttentionBanner`'s height (0 while it shows nothing), so the
+    /// sync banner can sit above it instead of on it.
+    @State private var buddyBannerHeight: CGFloat = 0
+
+    /// The sync banner floats above whichever banner is under it.
+    private var syncBannerBottomPadding: CGFloat {
+        if isTracking && selectedTab != 0 && activeWorkoutForBanner != nil {
+            return bottomBarClearance + 70
+        }
+        if buddyBannerHeight > 1 { return bottomBarClearance + buddyBannerHeight + 8 }
+        return bottomBarClearance
+    }
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -458,9 +470,23 @@ struct MainTabView: View {
                 // across both it read as a bar through the middle of Home.
                 .frame(maxWidth: duoSpread ? 440 : nil)
                 .frame(maxWidth: .infinity, alignment: duoSpread ? .leading : .center)
-                .padding(.bottom, isTracking && selectedTab != 0 && activeWorkoutForBanner != nil
-                    ? bottomBarClearance + 70 : bottomBarClearance)
+                .padding(.bottom, syncBannerBottomPadding)
                 .ignoresSafeArea(.keyboard, edges: .bottom)
+
+            // A buddy walk that needs you — not recording, a lobby, an invite —
+            // on every tab, above the bar. Hides itself while this phone is
+            // recording, so it never stacks with the workout banner below.
+            BuddyAttentionBanner(isTracking: isTracking) {
+                selectedTab = 0
+            }
+            .frame(maxWidth: duoSpread ? 440 : nil)
+            .frame(maxWidth: .infinity, alignment: duoSpread ? .leading : .center)
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: {
+                buddyBannerHeight = $0
+            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, bottomBarClearance)
+            .ignoresSafeArea(.keyboard, edges: .bottom)
 
             // Floating in-app workout banner — sits ABOVE the tab bar instead of
             // over it. (safeAreaInset on a TabView renders on top of the bar, so

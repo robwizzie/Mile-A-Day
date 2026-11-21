@@ -118,6 +118,78 @@ struct BuddySuggestion: Identifiable {
     }
 }
 
+/// "Walk with everyone around": one lobby inviting every friend who is
+/// deciding right now or already out on their own.
+///
+/// The single-friend hero made a group walk N taps through the picker even
+/// when the app could see the whole group: three friends with setup open at
+/// once is exactly the "let's all go" moment, and the find step used to offer
+/// only the first of them. Same signals as `BuddySuggestion.ranked` (friends
+/// only, `share_live_presence`, no location), just not cut to one.
+///
+/// Friends in a room of their own aren't swept in — that walk exists, and
+/// joining it is the hero's job — and neither is someone who invited you.
+struct BuddyGroupSuggestion {
+    struct Person: Identifiable {
+        let userId: String
+        let name: String
+        let imageURL: String?
+        var id: String { userId }
+    }
+
+    let people: [Person]
+    /// Running when every one of them said running; walking otherwise.
+    let activityType: String?
+
+    /// Below this it's the single-friend hero's job.
+    static let minimum = 2
+    /// The server's `BUDDY_MAX_PARTICIPANTS` (8) less the host.
+    static let maximumInvitees = 7
+
+    @MainActor
+    static func around(buddy: BuddySessionService) -> BuddyGroupSuggestion? {
+        let me = buddy.currentUserId
+        var seen = Set<String>()
+        var people: [Person] = []
+        var activities: [String] = []
+        func add(_ person: Person, activity: String?) {
+            guard person.userId != me, !seen.contains(person.userId),
+                  people.count < maximumInvitees else { return }
+            seen.insert(person.userId)
+            people.append(person)
+            if let activity { activities.append(activity) }
+        }
+        // Whoever invited you is answered by joining THEIR walk.
+        for invite in buddy.invites {
+            for p in invite.participants where invite.isHost(p.userId) { seen.insert(p.userId) }
+        }
+        for friend in buddy.lookingFriends {
+            add(Person(userId: friend.userId, name: friend.displayName, imageURL: friend.profileImageUrl),
+                activity: friend.activityType)
+        }
+        for friend in buddy.friendsOutNow where !friend.hasJoinableRoom {
+            add(Person(userId: friend.userId, name: friend.displayName, imageURL: friend.profileImageUrl),
+                activity: friend.isRunning ? "running" : "walking")
+        }
+        guard people.count >= minimum else { return nil }
+        let allRunning = !activities.isEmpty && activities.count == people.count
+            && activities.allSatisfy { $0 == "running" }
+        return BuddyGroupSuggestion(people: people, activityType: allRunning ? "running" : nil)
+    }
+
+    /// "Alex, Sam and 2 others".
+    var namesLine: String {
+        let names = people.map(\.name)
+        switch names.count {
+        case 0: return ""
+        case 1: return names[0]
+        case 2: return String(localized: "\(names[0]) and \(names[1])")
+        case 3: return String(localized: "\(names[0]), \(names[1]) and \(names[2])")
+        default: return String(localized: "\(names[0]), \(names[1]) and \(names.count - 2) others")
+        }
+    }
+}
+
 /// The find step's content: searching, then the suggestion.
 struct BuddyFindContent: View {
     let isSearching: Bool
@@ -126,6 +198,12 @@ struct BuddyFindContent: View {
     let actingId: String?
     let onAct: (BuddySuggestion) -> Void
     let onChooseOthers: () -> Void
+    /// Everyone around at once, when there are two or more.
+    var group: BuddyGroupSuggestion? = nil
+    var onActGroup: (BuddyGroupSuggestion) -> Void = { _ in }
+
+    /// `actingId` while the group invite is in flight.
+    static let groupActingId = "__everyone__"
 
     var body: some View {
         Group {
@@ -139,6 +217,15 @@ struct BuddyFindContent: View {
                 }
                 .frame(maxWidth: .infinity)
                 .transition(.opacity)
+            } else if let group {
+                // The whole group is around: lead with going together, and
+                // keep the one-at-a-time list under it.
+                VStack(spacing: 20) {
+                    groupHero(group)
+                    if !suggestions.isEmpty { more(suggestions) }
+                    chooseOthersButton(title: "Choose who's coming")
+                }
+                .transition(.opacity.combined(with: .scale(scale: 0.96)))
             } else if let top = suggestions.first {
                 VStack(spacing: 20) {
                     hero(top)
@@ -181,6 +268,59 @@ struct BuddyFindContent: View {
                 isEnabled: actingId == nil
             ) { onAct(s) }
             Text(heroCaption(for: s))
+                .font(MADTheme.Typography.caption)
+                .foregroundStyle(Color.white.opacity(0.55))
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity)
+        .background(panel(24))
+        .accessibilityElement(children: .contain)
+    }
+
+    // MARK: Group hero
+
+    private func groupHero(_ group: BuddyGroupSuggestion) -> some View {
+        let busy = actingId == Self.groupActingId
+        return VStack(spacing: 14) {
+            // Overlapping faces, up to four, then "+N".
+            HStack(spacing: -16) {
+                ForEach(group.people.prefix(4)) { person in
+                    AvatarView(name: person.name, imageURL: person.imageURL, size: 60)
+                        .overlay(Circle().strokeBorder(Color.white.opacity(0.85), lineWidth: 2))
+                }
+                if group.people.count > 4 {
+                    Text("+\(group.people.count - 4)")
+                        .madFont(size: 16, weight: .bold, design: .rounded)
+                        .foregroundStyle(Color.white)
+                        .frame(width: 60, height: 60)
+                        .background(Circle().fill(Color.white.opacity(0.2)))
+                        .overlay(Circle().strokeBorder(Color.white.opacity(0.85), lineWidth: 2))
+                }
+            }
+            .frame(height: 72)
+            .accessibilityHidden(true)
+            VStack(spacing: 4) {
+                Text("Walk with everyone around")
+                    .madFont(size: 24, weight: .bold, design: .rounded, maxScale: 1.3)
+                    .foregroundStyle(Color.white)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.7)
+                Text(String(localized: "\(group.namesLine) are looking for a buddy or out right now"))
+                    .font(MADTheme.Typography.caption)
+                    .foregroundStyle(Color.white.opacity(0.75))
+                    .multilineTextAlignment(.center)
+                    .lineLimit(3)
+            }
+            WizardPrimaryButton(
+                title: busy ? "Starting…" : String(localized: "Invite all \(group.people.count)"),
+                icon: "person.3.fill",
+                isBusy: busy,
+                isEnabled: actingId == nil
+            ) { onActGroup(group) }
+            Text("Makes one lobby and invites all of them. Change the plan there before anyone starts.")
                 .font(MADTheme.Typography.caption)
                 .foregroundStyle(Color.white.opacity(0.55))
                 .multilineTextAlignment(.center)

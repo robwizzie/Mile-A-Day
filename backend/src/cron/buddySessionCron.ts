@@ -1,6 +1,7 @@
 import cron from "node-cron";
 import { buddySessionsEnabled } from "../services/buddyFeatures.js";
 import {
+  alertSilentWalkersEverywhere,
   promoteDueScheduledSessions,
   sweepAbandonedSessions,
 } from "../services/buddySessionService.js";
@@ -50,6 +51,14 @@ export function startBuddySessionCron(): void {
       const swept = await sweepAbandonedSessions();
       if (swept > 0) {
         console.log(`[CRON] Swept ${swept} abandoned buddy session(s).`);
+      }
+    });
+    // A walk where nobody's phone is reporting has no progress call to
+    // notice the silence on (`alertSilentWalkers` rides those).
+    await runJob("buddy.silent_walkers", async () => {
+      const alerted = await alertSilentWalkersEverywhere();
+      if (alerted > 0) {
+        console.log(`[CRON] Told ${alerted} buddy walker(s) their phone isn't recording.`);
       }
     });
     // "3 of you were out, 1 photo so far" — an hour after the walk, for

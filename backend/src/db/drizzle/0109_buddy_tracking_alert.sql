@@ -1,0 +1,1 @@
+ALTER TABLE "buddy_session_participants" ADD COLUMN "tracking_alert_sent_at" timestamp with time zone;

@@ -101,6 +101,23 @@ struct BuddyRosterStrip: View {
                 .padding(.vertical, 4)
             }
 
+            // A friend on the walk whose phone never started recording. The
+            // tile alone ("not recording", greyed) was easy to read as a weak
+            // signal; this says what it means and what fixes it. The server
+            // also pushes them (`alertSilentWalkers`).
+            if let line = notRecordingLine {
+                HStack(alignment: .top, spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(MADTheme.Colors.warning)
+                        .accessibilityHidden(true)
+                    Text(line)
+                        .madBodyLines(3)
+                }
+                .font(MADTheme.Typography.smallBold)
+                .foregroundStyle(MADTheme.Colors.madWhite)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
             // Somebody at the door. A friend of one of us asked in; the host
             // or that friend answers, right here, without leaving the walk.
             ForEach(session.pendingJoinRequests) { request in
@@ -253,6 +270,18 @@ struct BuddyRosterStrip: View {
     /// Invited, not yet walking. Never me: I'm on the walk this strip draws.
     private var pendingInvitees: [BuddyParticipant] {
         session.participants.filter { $0.status == .invited && $0.userId != currentUserId }
+    }
+
+    /// The strip's notice for friends whose phones never started recording.
+    private var notRecordingLine: String? {
+        let silent = session.participants.filter {
+            $0.userId != currentUserId && $0.neverRecorded
+        }
+        guard let first = silent.first else { return nil }
+        if silent.count == 1 {
+            return String(localized: "\(first.displayName)'s phone isn't recording this walk yet. Ask them to open Mile A Day.")
+        }
+        return String(localized: "\(silent.count) phones aren't recording this walk yet. Ask them to open Mile A Day.")
     }
 
     /// Own card first, then by distance. Seeing yourself in a stable position
@@ -499,6 +528,7 @@ private struct BuddyRosterAvatar: View {
     /// tile still names the state rather than dating it.
     private var staleAgeLine: String? {
         guard isStale else { return nil }
+        if participant.neverRecorded { return String(localized: "not recording") }
         return participant.lastHeardAgo ?? "no signal"
     }
 
@@ -507,6 +537,9 @@ private struct BuddyRosterAvatar: View {
         // Spoken, not abbreviated: VoiceOver reads "mi" as a word, not as
         // "miles". Still the reader's own unit.
         let miles = "\(participant.distanceMiles.distanceText) \(DistanceUnits.current.plural)"
+        if isStale, participant.neverRecorded {
+            return "\(who), phone not recording yet"
+        }
         if isStale {
             // The number belongs in here too. "Out of range" alone told a
             // VoiceOver user strictly less than the screen showed everyone

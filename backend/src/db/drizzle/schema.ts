@@ -2697,6 +2697,14 @@ export const buddySessionParticipants = pgTable(
       withTimezone: true,
       mode: "string",
     }),
+    // When this walker was last pushed "your phone isn't recording this walk"
+    // (`alertSilentWalkers`): never reported once the walk started, or went
+    // quiet mid-walk. The claim column, so the push fires once per silence.
+    // Nullable, no default: a row that was never alerted has none.
+    trackingAlertSentAt: timestamp("tracking_alert_sent_at", {
+      withTimezone: true,
+      mode: "string",
+    }),
   },
   (table) => [
     index("idx_buddy_participants_user_status").using(
@@ -3460,7 +3468,10 @@ export const displayMessages = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
       .defaultNow()
       .notNull(),
-    expiresAt: timestamp("expires_at", { withTimezone: true, mode: "string" }).notNull(),
+    expiresAt: timestamp("expires_at", {
+      withTimezone: true,
+      mode: "string",
+    }).notNull(),
   },
   (table) => [
     index("idx_display_messages_to").using(
@@ -3556,7 +3567,10 @@ export const deskDoodles = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
       .defaultNow()
       .notNull(),
-    expiresAt: timestamp("expires_at", { withTimezone: true, mode: "string" }).notNull(),
+    expiresAt: timestamp("expires_at", {
+      withTimezone: true,
+      mode: "string",
+    }).notNull(),
   },
   (table) => [
     index("idx_desk_doodles_to").using(
@@ -3779,7 +3793,9 @@ export const deskPushSubscriptions = pgTable(
     auth: varchar({ length: 64 }).notNull(),
     kinds: text().array().notNull(),
     failures: integer().default(0).notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).defaultNow().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
     lastOkAt: timestamp("last_ok_at", { withTimezone: true, mode: "string" }),
   },
   (table) => [
@@ -3798,7 +3814,9 @@ export const deskPushSubscriptions = pgTable(
 export const deskPushState = pgTable("desk_push_state", {
   key: varchar({ length: 128 }).primaryKey().notNull(),
   value: text().notNull(),
-  updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" })
+    .defaultNow()
+    .notNull(),
 });
 
 // Desk notifications whose event has no table of its own (App Store reviews,
@@ -3860,7 +3878,10 @@ export const mcpOauthRequests = pgTable("mcp_oauth_requests", {
   scope: text().notNull(),
   resource: text().notNull(),
   nonce: text().notNull(),
-  expiresAt: timestamp("expires_at", { withTimezone: true, mode: "string" }).notNull(),
+  expiresAt: timestamp("expires_at", {
+    withTimezone: true,
+    mode: "string",
+  }).notNull(),
 }).enableRLS();
 
 /// Authorization codes: hashed, single use, two minutes.
@@ -3872,7 +3893,10 @@ export const mcpOauthCodes = pgTable("mcp_oauth_codes", {
   codeChallenge: text("code_challenge").notNull(),
   scope: text().notNull(),
   resource: text().notNull(),
-  expiresAt: timestamp("expires_at", { withTimezone: true, mode: "string" }).notNull(),
+  expiresAt: timestamp("expires_at", {
+    withTimezone: true,
+    mode: "string",
+  }).notNull(),
 }).enableRLS();
 
 /// One completed sign-in. Every token hangs off a grant; revoking the grant
@@ -3888,9 +3912,15 @@ export const mcpOauthGrants = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
       .defaultNow()
       .notNull(),
-    expiresAt: timestamp("expires_at", { withTimezone: true, mode: "string" }).notNull(),
+    expiresAt: timestamp("expires_at", {
+      withTimezone: true,
+      mode: "string",
+    }).notNull(),
     revokedAt: timestamp("revoked_at", { withTimezone: true, mode: "string" }),
-    lastUsedAt: timestamp("last_used_at", { withTimezone: true, mode: "string" }),
+    lastUsedAt: timestamp("last_used_at", {
+      withTimezone: true,
+      mode: "string",
+    }),
   },
   (table) => [
     foreignKey({
@@ -3908,7 +3938,10 @@ export const mcpOauthTokens = pgTable(
     tokenHash: text("token_hash").primaryKey().notNull(),
     grantId: uuid("grant_id").notNull(),
     kind: text().notNull(),
-    expiresAt: timestamp("expires_at", { withTimezone: true, mode: "string" }).notNull(),
+    expiresAt: timestamp("expires_at", {
+      withTimezone: true,
+      mode: "string",
+    }).notNull(),
     // Refresh tokens rotate: set when this one was exchanged. Presenting it
     // again after a short grace period revokes the whole grant.
     usedAt: timestamp("used_at", { withTimezone: true, mode: "string" }),
@@ -3950,7 +3983,10 @@ export const mcpAuditLog = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
       .defaultNow()
       .notNull(),
-    finishedAt: timestamp("finished_at", { withTimezone: true, mode: "string" }),
+    finishedAt: timestamp("finished_at", {
+      withTimezone: true,
+      mode: "string",
+    }),
   },
   (table) => [index("idx_mcp_audit_log_created").on(table.createdAt.desc())],
 ).enableRLS();
@@ -3975,7 +4011,10 @@ export const plusPurchases = pgTable(
     ownership: text().notNull(),
     // Apple's environment: Production | Sandbox
     environment: text().notNull(),
-    purchasedAt: timestamp("purchased_at", { withTimezone: true, mode: "string" }).notNull(),
+    purchasedAt: timestamp("purchased_at", {
+      withTimezone: true,
+      mode: "string",
+    }).notNull(),
     // NULL = never expires (lifetime).
     expiresAt: timestamp("expires_at", { withTimezone: true, mode: "string" }),
     revokedAt: timestamp("revoked_at", { withTimezone: true, mode: "string" }),
@@ -4014,9 +4053,18 @@ export const plusGifts = pgTable(
       .defaultNow()
       .notNull(),
     redeemedBy: text("redeemed_by"),
-    redeemedAt: timestamp("redeemed_at", { withTimezone: true, mode: "string" }),
-    grantStartsAt: timestamp("grant_starts_at", { withTimezone: true, mode: "string" }),
-    grantEndsAt: timestamp("grant_ends_at", { withTimezone: true, mode: "string" }),
+    redeemedAt: timestamp("redeemed_at", {
+      withTimezone: true,
+      mode: "string",
+    }),
+    grantStartsAt: timestamp("grant_starts_at", {
+      withTimezone: true,
+      mode: "string",
+    }),
+    grantEndsAt: timestamp("grant_ends_at", {
+      withTimezone: true,
+      mode: "string",
+    }),
     voidedAt: timestamp("voided_at", { withTimezone: true, mode: "string" }),
   },
   (table) => [
@@ -4051,8 +4099,12 @@ export const communityGoals = pgTable("community_goals", {
   targetMiles: numeric("target_miles").notNull(),
   startsOn: date("starts_on").notNull(),
   endsOn: date("ends_on").notNull(),
-  checkpoints: jsonb("checkpoints").notNull().default(sql`'[]'::jsonb`),
-  rewardTiers: jsonb("reward_tiers").notNull().default(sql`'[]'::jsonb`),
+  checkpoints: jsonb("checkpoints")
+    .notNull()
+    .default(sql`'[]'::jsonb`),
+  rewardTiers: jsonb("reward_tiers")
+    .notNull()
+    .default(sql`'[]'::jsonb`),
   rewardsGrantedAt: timestamp("rewards_granted_at", {
     withTimezone: true,
     mode: "string",
@@ -4137,9 +4189,14 @@ export const referrals = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
       .defaultNow()
       .notNull(),
-    qualifiedAt: timestamp("qualified_at", { withTimezone: true, mode: "string" }),
+    qualifiedAt: timestamp("qualified_at", {
+      withTimezone: true,
+      mode: "string",
+    }),
   },
-  (table) => [index("idx_referrals_referrer").on(table.referrerId, table.status)],
+  (table) => [
+    index("idx_referrals_referrer").on(table.referrerId, table.status),
+  ],
 ).enableRLS();
 
 // Rewards a person has reached. `claimed_at` is set for the ones they collect.
@@ -4156,7 +4213,10 @@ export const referralRewards = pgTable(
     claimedAt: timestamp("claimed_at", { withTimezone: true, mode: "string" }),
   },
   (table) => [
-    primaryKey({ columns: [table.userId, table.rewardCount], name: "referral_rewards_pkey" }),
+    primaryKey({
+      columns: [table.userId, table.rewardCount],
+      name: "referral_rewards_pkey",
+    }),
   ],
 ).enableRLS();
 
@@ -4166,8 +4226,13 @@ export const referralOfferCodes = pgTable(
   "referral_offer_codes",
   {
     code: text("code").primaryKey().notNull(),
-    assignedTo: text("assigned_to").references(() => users.userId, { onDelete: "set null" }),
-    assignedAt: timestamp("assigned_at", { withTimezone: true, mode: "string" }),
+    assignedTo: text("assigned_to").references(() => users.userId, {
+      onDelete: "set null",
+    }),
+    assignedAt: timestamp("assigned_at", {
+      withTimezone: true,
+      mode: "string",
+    }),
   },
   (table) => [index("idx_referral_offer_codes_owner").on(table.assignedTo)],
 ).enableRLS();
@@ -4181,7 +4246,10 @@ export const appleTokenRevocations = pgTable(
     encryptedRefreshToken: text("encrypted_refresh_token").notNull(),
     clientId: text("client_id").notNull(),
     attempts: integer().default(0).notNull(),
-    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true, mode: "string" })
+    nextAttemptAt: timestamp("next_attempt_at", {
+      withTimezone: true,
+      mode: "string",
+    })
       .defaultNow()
       .notNull(),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })

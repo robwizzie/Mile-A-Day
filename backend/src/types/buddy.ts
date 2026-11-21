@@ -124,6 +124,23 @@ export const BUDDY_START_COUNTDOWN_SECONDS = 8;
 export const BUDDY_STALE_PROGRESS_SECONDS = 90;
 
 /**
+ * "Your phone isn't recording this walk" (`alertSilentWalkers`). A walker who
+ * has sent NOTHING this long after the walk started (or after they joined it)
+ * never got their tracker going: the hand-off into tracking only happens with
+ * the app open, so a phone locked in a pocket at the countdown records
+ * nothing. Longer than the countdown plus a first report's 5s, short enough
+ * that the reminder lands in the first tenth of a mile.
+ */
+export const BUDDY_NOT_RECORDING_GRACE_SECONDS = 75;
+
+/**
+ * A walker who WAS reporting and has been silent this long (iOS killed the
+ * app, the phone died, the tracker was closed). Twice the roster's "out of
+ * range" so a tunnel or a dead zone doesn't buzz anybody.
+ */
+export const BUDDY_WENT_QUIET_SECONDS = 180;
+
+/**
  * Sessions abandoned this long are auto-completed by the hourly cron. Long
  * enough to cover a slow marathon-pace walk plus a phone dying mid-session.
  */
