@@ -46,7 +46,12 @@ import {
   type BuddySessionPost,
   buddySessionPostIds,
 } from "./postService.js";
-import { userOffsetMinutesOrNullSql } from "./dailyResetTime.js";
+import {
+  userOffsetMinutesOrNullSql,
+  userOffsetMinutesSql,
+} from "./dailyResetTime.js";
+import { VIEWER_MAY_SEE_WORKOUT_CONTENT_SQL } from "./visibilityService.js";
+import { countedWorkoutSql } from "./mileTime.js";
 
 const db = PostgresService.getInstance();
 
@@ -2894,6 +2899,24 @@ async function eligibleInvitees(
  * Friends eligible to be invited: accepted, unblocked both ways, on a build
  * that has the buddy screens, and not opted out.
  */
+/**
+ * Friends the caller can invite, plus what helps them pick.
+ *
+ * The picker was a bare list of names in streak order: nothing said who you
+ * actually walk with or who still uses the app, so the friend who installed it
+ * once in March sat beside the one you walk with every Tuesday. Two ADDITIVE
+ * fields (older clients decode by name and ignore them):
+ *
+ *  - `walks_together` / `last_walk_together`: buddy walks you BOTH finished,
+ *    the same rule as `getBuddyPartners` (completed session, the caller's
+ *    copy not hidden), so the picker and the partners card never disagree.
+ *  - `active_days_ago`: whole days between their own local today and their
+ *    latest counted workout, 0 = today. COARSE on purpose (a day count, never
+ *    a time) and served only where the caller may see that friend's workouts
+ *    (`VIEWER_MAY_SEE_WORKOUT_CONTENT_SQL`, so 'private' reads NULL, the same
+ *    as never). Capped at 60: past two months the number says nothing more
+ *    than "quiet".
+ */
 export async function getInviteCandidates(userId: string): Promise<
   Array<{
     user_id: string;
@@ -2902,13 +2925,53 @@ export async function getInviteCandidates(userId: string): Promise<
     last_name: string | null;
     profile_image_url: string | null;
     current_streak: number | null;
+    walks_together: number;
+    last_walk_together: string | null;
+    active_days_ago: number | null;
   }>
 > {
-  return db.query(
+  const rows = await db.query<{
+    user_id: string;
+    username: string | null;
+    first_name: string | null;
+    last_name: string | null;
+    profile_image_url: string | null;
+    current_streak: number | null;
+    walks_together: number | string | null;
+    last_walk_together: string | null;
+    active_days_ago: number | string | null;
+  }>(
     `SELECT u.user_id, u.username, u.first_name, u.last_name,
-            u.profile_image_url, u.current_streak
+            u.profile_image_url, u.current_streak,
+            COALESCE(together.walks, 0)::int AS walks_together,
+            together.last_walk AS last_walk_together,
+            CASE
+              WHEN last_w.local_date IS NULL THEN NULL
+              WHEN NOT ${VIEWER_MAY_SEE_WORKOUT_CONTENT_SQL("u.user_id", "$1")} THEN NULL
+              ELSE LEAST(60, GREATEST(0,
+                     ((NOW() AT TIME ZONE 'UTC')
+                        + (${userOffsetMinutesSql("u.user_id")} || ' minutes')::interval)::date
+                     - last_w.local_date))::int
+            END AS active_days_ago
        FROM friendships f
        JOIN users u ON u.user_id = f.friend_id
+       LEFT JOIN LATERAL (
+         SELECT MAX(w.local_date) AS local_date
+           FROM workouts w
+          WHERE w.user_id = u.user_id AND ${countedWorkoutSql("w")}
+       ) last_w ON true
+       LEFT JOIN LATERAL (
+         SELECT COUNT(*)::int AS walks,
+                to_char(MAX(s.local_date), 'YYYY-MM-DD') AS last_walk
+           FROM buddy_session_participants me
+           JOIN buddy_sessions s ON s.id = me.session_id
+           JOIN buddy_session_participants them
+             ON them.session_id = me.session_id AND them.user_id = u.user_id
+          WHERE me.user_id = $1
+            AND me.status = 'finished' AND me.hidden_at IS NULL
+            AND them.status = 'finished'
+            AND s.status = 'completed'
+       ) together ON true
       WHERE f.user_id = $1
         AND f.status = 'accepted'
         AND u.buddy_enrolled_at IS NOT NULL
@@ -2921,6 +2984,20 @@ export async function getInviteCandidates(userId: string): Promise<
       ORDER BY u.current_streak DESC NULLS LAST, u.username ASC`,
     [userId],
   );
+  return rows.map((r) => ({
+    user_id: r.user_id,
+    username: r.username,
+    first_name: r.first_name,
+    last_name: r.last_name,
+    profile_image_url: r.profile_image_url,
+    current_streak: r.current_streak,
+    walks_together: Number(r.walks_together) || 0,
+    last_walk_together: r.last_walk_together,
+    active_days_ago:
+      r.active_days_ago === null || r.active_days_ago === undefined
+        ? null
+        : Number(r.active_days_ago),
+  }));
 }
 
 /**

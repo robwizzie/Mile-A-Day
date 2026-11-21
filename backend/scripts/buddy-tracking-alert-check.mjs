@@ -107,6 +107,21 @@ async function inboxCount(userId) {
   return Number(rows[0]?.n ?? 0);
 }
 
+/**
+ * `recordProgress` fires the alert WITHOUT awaiting it (the reporter's roster
+ * shouldn't wait on a push), so a claim can land before its inbox row does.
+ * Wait for the row rather than reading the count the instant after.
+ */
+async function settledInboxCount(userId, expected, timeoutMs = 3000) {
+  const deadline = Date.now() + timeoutMs;
+  let n = await inboxCount(userId);
+  while (n < expected && Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 50));
+    n = await inboxCount(userId);
+  }
+  return n;
+}
+
 async function startedWalkWithQuietGuest() {
   const created = await createSession(HOST, {
     mode: "together",
@@ -162,9 +177,9 @@ async function main() {
     (await alertedAt(walk, HOST)) === null,
     true,
   );
-  check("the guest got exactly one push", await inboxCount(QUIET), 1);
+  check("the guest got exactly one push", await settledInboxCount(QUIET, 1), 1);
   check("a second pass sends nothing", await alertSilentWalkers(walk), 0);
-  check("still exactly one push", await inboxCount(QUIET), 1);
+  check("still exactly one push", await settledInboxCount(QUIET, 1), 1);
 
   // ─── 4. Mid-walk joiner: timed from their join ───
   await joinSession(LATE, { sessionId: walk });

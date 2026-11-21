@@ -570,6 +570,14 @@ struct BuddyCandidate: Codable, Identifiable, Equatable {
     let lastName: String?
     let profileImageUrl: String?
     let currentStreak: Int?
+    /// Buddy walks you both finished (the partners rule). Optional: absent
+    /// from a server that predates it.
+    let walksTogether: Int?
+    /// `YYYY-MM-DD` of the last of those.
+    let lastWalkTogetherRaw: String?
+    /// Whole days since their latest workout, 0 = today, capped at 60. Nil
+    /// when they've never logged one OR their workouts are private to you.
+    let activeDaysAgo: Int?
 
     var id: String { userId }
 
@@ -586,6 +594,9 @@ struct BuddyCandidate: Codable, Identifiable, Equatable {
         case lastName = "last_name"
         case profileImageUrl = "profile_image_url"
         case currentStreak = "current_streak"
+        case walksTogether = "walks_together"
+        case lastWalkTogetherRaw = "last_walk_together"
+        case activeDaysAgo = "active_days_ago"
     }
 }
 

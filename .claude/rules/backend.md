@@ -19,6 +19,7 @@ Details: docs/conventions/backend.md § Backend Conventions
 - `createPost` refuses a 2nd card per walk (`buddyWalkPostForWorkout`, incl. time OVERLAP) as 409 `workout_already_posted` + `reason`/`post_id`/`mine` + `photo_block`/`author` (`crewPhotoBlock`: why the photo can't join, never revealing a block); exclude by WORKOUT, not author.
 - `is_paused` (nullable, no default, unclamped) via `recordProgress`; `last_heard_seconds` is an AGE, never a timestamp. Check: `buddy-live-check`.
 - A walker whose phone isn't recording (no report `BUDDY_NOT_RECORDING_GRACE_SECONDS` after max(start, join), or silent `BUDDY_WENT_QUIET_SECONDS`) is pushed once per silence by `alertSilentWalkers` (claim `tracking_alert_sent_at`; from `recordProgress` + cron), as `buddy_started` + `data.kind`, never a new type. Check: `buddy-tracking-alert-check`.
+- `GET /buddy/candidates` adds `walks_together`/`last_walk_together` (the `getBuddyPartners` rule) and `active_days_ago` (latest COUNTED workout, friend's local day, capped 60, NULL unless `VIEWER_MAY_SEE_WORKOUT_CONTENT_SQL`); never a timestamp. Check: `buddy-candidates-check`.
 - `updateParticipantSettings` moves only `joined`↔`ready`, never rewrites `active`; push the host once. Check: `buddy-ready-check`.
 - Keep `JOIN_POLICY_ALLOWS_SQL` and `assertJoinPolicyAllows` in agreement; restricted walks: `join_closed`, `invites_host_only`. Check: `buddy-join-policy-check`.
 - `mergeSession` joins via `joinSession`, returns `left_behind`, cancels the source silently with `merged_into`. Check: `buddy-merge-check`.
