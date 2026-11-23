@@ -145,6 +145,10 @@ struct LiveFriendSheet: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
+            // "Tell me when they're out": the moment someone sees a friend
+            // out and wishes they'd known sooner is the moment to offer it.
+            outAlertToggle
+
             if let onSeeEveryone, buddy.friendsOutNow.count > 1 {
                 Button {
                     MADHaptics.tap()
@@ -166,6 +170,33 @@ struct LiveFriendSheet: View {
         .padding(.horizontal, 20)
         .padding(.top, 26)
         .padding(.bottom, 12)
+    }
+
+    private var outAlertToggle: some View {
+        let on = buddy.outAlertFriendIds.contains(friendId)
+        return Button {
+            MADHaptics.tap()
+            let id = friendId
+            Task { try? await buddy.setOutAlert(friendId: id, enabled: !on) }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: on ? "bell.fill" : "bell")
+                    .madFont(size: 13, weight: .bold, maxScale: 1.15)
+                    .accessibilityHidden(true)
+                Text(on ? "You'll hear when they're out" : "Tell me next time they're out")
+                    .madFont(size: 14, weight: .bold, design: .rounded)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+            .foregroundColor(on ? .white : .white.opacity(0.7))
+            .padding(.horizontal, 14)
+            .frame(minHeight: 40)
+            .frame(maxWidth: .infinity)
+            .background(Capsule().fill(Color.white.opacity(on ? 0.16 : 0.06)))
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(on ? .isSelected : [])
     }
 
     /// What Hype does, in one line.

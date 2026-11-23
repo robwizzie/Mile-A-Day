@@ -23,6 +23,9 @@ enum NotificationDestination: Identifiable, Equatable {
     case referrals
     /// A one-day event's page (Champ 5K Day); nil = whichever is showing.
     case specialEvent(id: String?)
+    /// A friend you asked to hear about is out: THEIR live sheet (Hype,
+    /// Join), the one their walking tile opens.
+    case friendOut(userId: String)
 
     var id: String {
         switch self {
@@ -31,6 +34,7 @@ enum NotificationDestination: Identifiable, Equatable {
         case .communityGoal: return "community-goal"
         case .referrals: return "referrals"
         case .specialEvent(let id): return "special-event-\(id ?? "")"
+        case .friendOut(let userId): return "friend-out-\(userId)"
         case .friendMedal(let ref): return "friend-medal-\(ref.userId)-\(ref.badgeId)"
         case .friendChallenge(let ref): return "friend-challenge-\(ref.userId)-\(ref.localDate ?? "")"
         }
@@ -54,6 +58,9 @@ enum NotificationDestination: Identifiable, Equatable {
             return .specialEvent(id: data["event_id"])
         case "daily_challenge":
             return .challenges
+        case "buddy_friend_out":
+            guard let userId = data["friend_id"], !userId.isEmpty else { return nil }
+            return .friendOut(userId: userId)
         case "daily_reminder":
             // Only the reminder that NAMES today's challenge; a plain, duel or
             // win-back reminder keeps going to the Dashboard.
@@ -146,6 +153,8 @@ private struct NotificationDestinationScreen: View {
                     ReferralsView()
                 case .specialEvent(let id):
                     SpecialEventView(eventId: id)
+                case .friendOut(let userId):
+                    FriendOutDestination(userId: userId) { dismiss() }
                 case .friendMedal(let ref):
                     FriendMedalView(ref: ref)
                 case .friendChallenge(let ref):
@@ -579,3 +588,38 @@ struct FriendChallengeView: View {
         }
     }
 }
+
+// MARK: - A friend is out
+
+/// "Alex is out walking" (`buddy_friend_out`, the per-friend "Tell me when
+/// they're out" switch): their live sheet, loaded fresh, so Join is one tap
+/// from the notification.
+private struct FriendOutDestination: View {
+    let userId: String
+    let close: () -> Void
+    @ObservedObject private var buddy = BuddySessionService.shared
+
+    var body: some View {
+        OutNowContainer(
+            initial: .person(userId),
+            onJoined: {
+                close()
+                guard let sessionId = buddy.session?.id else { return }
+                DeepLinkRouter.shared.requestOpenBuddySessionAfterDismiss(sessionId: sessionId)
+                NotificationCenter.default.post(
+                    name: NSNotification.Name("MAD_SwitchTab"), object: nil, userInfo: ["tab": 0])
+            },
+            onOpenProfile: { friend in
+                close()
+                guard let username = friend.username, !username.isEmpty else { return }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                    DeepLinkRouter.shared.pendingProfileUsername = username.lowercased()
+                    NotificationCenter.default.post(
+                        name: NSNotification.Name("MAD_SwitchTab"), object: nil, userInfo: ["tab": 3])
+                }
+            }
+        )
+        .task { await buddy.refreshFriendsOutNow() }
+    }
+}
+

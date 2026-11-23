@@ -1238,3 +1238,49 @@ struct BuddyLiveRoutesState: Codable {
     let sharing: Bool
     let routes: [Route]
 }
+
+// MARK: - Out alerts / nearby responses
+
+struct BuddyOutAlertsResponse: Codable {
+    let friendIds: [String]
+    enum CodingKeys: String, CodingKey { case friendIds = "friend_ids" }
+}
+
+struct BuddyOutAlertSetResponse: Codable {
+    let enabled: Bool
+}
+
+struct BuddyNearbyTokenResponse: Codable {
+    let token: String?
+    let expiresIn: Int
+    enum CodingKeys: String, CodingKey {
+        case token
+        case expiresIn = "expires_in"
+    }
+}
+
+struct BuddyNearbyResolveResponse: Codable {
+    let friends: [BuddyNearbyMatch]
+}
+
+/// A friend heard nearby, with the token they were heard by (so the app can
+/// forget them when that token goes quiet).
+struct BuddyNearbyMatch: Codable {
+    let token: String
+    let candidate: BuddyCandidate
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        token = try container.decode(String.self, forKey: .token)
+        candidate = try BuddyCandidate(from: decoder)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(token, forKey: .token)
+        try candidate.encode(to: encoder)
+    }
+
+    enum CodingKeys: String, CodingKey { case token }
+}
+

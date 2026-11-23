@@ -2586,6 +2586,9 @@ struct WorkoutTrackingView: View {
         let sessionStart = buddyService.session.flatMap {
             $0.id == effectiveBuddySessionId ? $0.startedAtDate : nil
         }
+        // This phone is recording now: the lock-screen countdown card goes,
+        // and the workout's own Live Activity takes its place.
+        BuddyWalkActivityManager.shared.endForRecording()
         BuddyLateStart.resolve(sessionStartedAt: sessionStart) { seed in
             // The query can take a moment; don't start under a stop or a
             // back-out the user asked for meanwhile (`isTracking` was set

@@ -91,6 +91,10 @@ export async function issueNearbyToken(
 }
 
 export interface NearbyFriend {
+  /** The token this friend was heard by: the caller heard it, so echoing it
+   * back tells them nothing new, and lets the app forget a friend whose
+   * token goes quiet. Never returned for anyone but a friend. */
+  token: string;
   user_id: string;
   username: string | null;
   first_name: string | null;
@@ -128,7 +132,7 @@ export async function resolveNearbyTokens(
 
   return db.query<NearbyFriend>(
     `SELECT DISTINCT ON (u.user_id)
-            u.user_id, u.username, u.first_name, u.last_name,
+            t.token, u.user_id, u.username, u.first_name, u.last_name,
             u.profile_image_url, u.current_streak
        FROM buddy_nearby_tokens t
        JOIN users u ON u.user_id = t.user_id
@@ -146,7 +150,7 @@ export async function resolveNearbyTokens(
            WHERE (b.blocker_id = $1 AND b.blocked_id = u.user_id)
               OR (b.blocker_id = u.user_id AND b.blocked_id = $1)
         )
-      ORDER BY u.user_id`,
+      ORDER BY u.user_id, t.expires_at DESC`,
     [userId, clean],
   );
 }

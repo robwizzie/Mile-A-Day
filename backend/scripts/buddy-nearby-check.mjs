@@ -108,6 +108,11 @@ async function main() {
     PAL,
   );
   check(
+    "...echoing the token they were heard by",
+    (await resolveNearbyTokens(ME, [pal.token]))[0]?.token,
+    pal.token,
+  );
+  check(
     "a stranger's token resolves to nothing",
     ids(await resolveNearbyTokens(ME, [stranger.token])),
     "",

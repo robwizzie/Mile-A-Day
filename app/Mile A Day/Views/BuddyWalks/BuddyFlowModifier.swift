@@ -217,7 +217,9 @@ struct BuddyFlowModifier: ViewModifier {
                 // offer appeared for people who had already found the feature
                 // elsewhere, which is the opposite of who it's for.
                 async let out: Void = BuddySessionService.shared.refreshFriendsOutNow()
-                _ = await (sessions, candidates, routines, out)
+                // Who this user asked to hear about, for the profile menu.
+                async let alerts: Void = BuddySessionService.shared.loadOutAlerts()
+                _ = await (sessions, candidates, routines, out, alerts)
 
                 // The `.onReceive` pair above only fires for values published
                 // AFTER this mounts. On a cold launch the link is already

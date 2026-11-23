@@ -13,6 +13,8 @@ struct UserProfileDetailView: View {
     @ObservedObject var friendService: FriendService
     @ObservedObject private var userManager = UserManager.shared
     @ObservedObject private var closeFriends = CloseFriendsService.shared
+    /// "Tell me when they're out" lives on this menu (`outAlertFriendIds`).
+    @ObservedObject private var buddyService = BuddySessionService.shared
     @Environment(\.dismiss) private var dismiss
 
     // Close-friend switch (in the ••• menu, whose item subtitle carries the
@@ -319,6 +321,28 @@ struct UserProfileDetailView: View {
                     }
                 }
                 .disabled(closeFriendActionInProgress)
+
+                // Per-friend, opt-in: a ping when THEY start a walk, at most
+                // once a day. Only offered where the build can open that push.
+                let alerting = buddyService.outAlertFriendIds.contains(user.user_id)
+                Button {
+                    let friendId = user.user_id
+                    Task {
+                        do {
+                            try await buddyService.setOutAlert(friendId: friendId, enabled: !alerting)
+                            MADHaptics.success()
+                        } catch {
+                            MADHaptics.error()
+                        }
+                    }
+                } label: {
+                    Label {
+                        Text(alerting ? "Stop telling me when they're out" : "Tell me when they're out")
+                        Text("A notification when they start a walk, at most once a day. They're never told.")
+                    } icon: {
+                        Image(systemName: alerting ? "bell.slash" : "bell.badge")
+                    }
+                }
 
                 Button(role: .destructive) {
                     showUnfriendConfirm = true

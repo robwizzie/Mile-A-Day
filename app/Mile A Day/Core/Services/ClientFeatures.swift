@@ -154,6 +154,10 @@ enum ClientFeatures {
     /// `special_event` push to the page.
     static let specialEventsV1 = "special_events_v1"
 
+    /// Routes `buddy_friend_out` ("Alex is out walking") to that friend's live
+    /// sheet and offers the per-friend "Tell me when they're out" switch.
+    static let buddyOutAlertV1 = "buddy_out_alert_v1"
+
     static let supported: [String] = [
         friendRequestV2, collabTagV1, ghostFriendRaceV1, postWindowV1, buddyWalksV1,
         weeklyChallengeV1, communityGoalV1, referralsV1, buddyGroupPostV1, buddyJoinRequestV1, activityDigestV1,
@@ -164,5 +168,6 @@ enum ClientFeatures {
         photoAskV1,
         dailyChallengePushV1,
         specialEventsV1,
+        buddyOutAlertV1,
     ]
 }

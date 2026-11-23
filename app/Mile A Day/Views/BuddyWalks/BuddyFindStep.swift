@@ -43,7 +43,9 @@ struct BuddySuggestion: Identifiable {
     static let limit = 4
 
     @MainActor
-    static func ranked(buddy: BuddySessionService, walkAgainUserId: String?) -> [BuddySuggestion] {
+    static func ranked(
+        buddy: BuddySessionService, walkAgainUserId: String?, nearby: [BuddyCandidate] = []
+    ) -> [BuddySuggestion] {
         var out: [BuddySuggestion] = []
         var seen = Set<String>()
         func add(_ s: BuddySuggestion) {
@@ -52,6 +54,20 @@ struct BuddySuggestion: Identifiable {
             out.append(s)
         }
         let me = buddy.currentUserId
+
+        // Physically next to you (Bluetooth, opt-in, `BuddyNearbyScanner`):
+        // the strongest signal there is, so it outranks even an invite —
+        // unless that same friend invited you, which the loop below names.
+        let invitingHosts = Set(buddy.invites.compactMap { invite in
+            invite.participants.first(where: { $0.isHost })?.userId
+        })
+        for friend in nearby where !invitingHosts.contains(friend.userId) {
+            add(BuddySuggestion(
+                userId: friend.userId, name: friend.displayName, imageURL: friend.profileImageUrl,
+                reason: String(localized: "Right next to you"), isLive: true,
+                actionTitle: "Walk with \(friend.displayName)", shortActionTitle: "Walk",
+                action: .invite(userId: friend.userId, activityType: nil)))
+        }
 
         for invite in buddy.invites {
             guard let host = invite.participants.first(where: { $0.isHost && $0.userId != me })
@@ -147,7 +163,9 @@ struct BuddyGroupSuggestion {
     static let maximumInvitees = 7
 
     @MainActor
-    static func around(buddy: BuddySessionService) -> BuddyGroupSuggestion? {
+    static func around(
+        buddy: BuddySessionService, nearby: [BuddyCandidate] = []
+    ) -> BuddyGroupSuggestion? {
         let me = buddy.currentUserId
         var seen = Set<String>()
         var people: [Person] = []
@@ -162,6 +180,10 @@ struct BuddyGroupSuggestion {
         // Whoever invited you is answered by joining THEIR walk.
         for invite in buddy.invites {
             for p in invite.participants where invite.isHost(p.userId) { seen.insert(p.userId) }
+        }
+        for friend in nearby {
+            add(Person(userId: friend.userId, name: friend.displayName, imageURL: friend.profileImageUrl),
+                activity: nil)
         }
         for friend in buddy.lookingFriends {
             add(Person(userId: friend.userId, name: friend.displayName, imageURL: friend.profileImageUrl),
@@ -205,6 +227,9 @@ struct BuddyFindContent: View {
     /// `actingId` while the group invite is in flight.
     static let groupActingId = "__everyone__"
 
+    /// Friends physically next to you (Bluetooth, opt-in).
+    @ObservedObject private var nearbyScanner = BuddyNearbyScanner.shared
+
     var body: some View {
         Group {
             if isSearching {
@@ -221,6 +246,7 @@ struct BuddyFindContent: View {
                 // The whole group is around: lead with going together, and
                 // keep the one-at-a-time list under it.
                 VStack(spacing: 20) {
+                    nearbyRow
                     groupHero(group)
                     if !suggestions.isEmpty { more(suggestions) }
                     chooseOthersButton(title: "Choose who's coming")
@@ -228,13 +254,18 @@ struct BuddyFindContent: View {
                 .transition(.opacity.combined(with: .scale(scale: 0.96)))
             } else if let top = suggestions.first {
                 VStack(spacing: 20) {
+                    nearbyRow
                     hero(top)
                     if suggestions.count > 1 { more(Array(suggestions.dropFirst())) }
                     chooseOthersButton(title: "Choose someone else")
                 }
                 .transition(.opacity.combined(with: .scale(scale: 0.96)))
             } else {
-                empty.transition(.opacity)
+                VStack(spacing: 20) {
+                    nearbyRow
+                    empty
+                }
+                .transition(.opacity)
             }
         }
         .animation(.spring(response: 0.45, dampingFraction: 0.85), value: isSearching)
@@ -277,6 +308,83 @@ struct BuddyFindContent: View {
         .frame(maxWidth: .infinity)
         .background(panel(24))
         .accessibilityElement(children: .contain)
+    }
+
+    // MARK: Nearby
+
+    /// The Bluetooth "next to you" control: an offer until it's on, then a
+    /// quiet status with a way to switch it off.
+    @ViewBuilder
+    private var nearbyRow: some View {
+        switch nearbyScanner.state {
+        case .off:
+            if nearbyScanner.isEnabled {
+                EmptyView()
+            } else {
+                Button {
+                    MADHaptics.action()
+                    nearbyScanner.enableAndStart()
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: "dot.radiowaves.left.and.right")
+                            .font(.system(size: 16, weight: .bold))
+                            .accessibilityHidden(true)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Find friends next to me")
+                                .font(MADTheme.Typography.smallBold)
+                            Text("Uses Bluetooth only while this screen is open. Only friends can see it's you.")
+                                .font(MADTheme.Typography.caption)
+                                .foregroundStyle(Color.white.opacity(0.65))
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .foregroundStyle(Color.white)
+                    .padding(14)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(panel(18))
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        case .starting, .scanning:
+            HStack(spacing: 8) {
+                Image(systemName: "dot.radiowaves.left.and.right")
+                    .accessibilityHidden(true)
+                Text(nearbyScanner.nearbyFriends.isEmpty
+                     ? String(localized: "Looking for friends next to you…")
+                     : String(localized: "\(nearbyScanner.nearbyFriends.count) next to you"))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                Spacer(minLength: 0)
+                Button("Stop") {
+                    MADHaptics.tap()
+                    nearbyScanner.disable()
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Color.white.opacity(0.7))
+            }
+            .font(MADTheme.Typography.caption)
+            .foregroundStyle(Color.white.opacity(0.85))
+            .padding(.horizontal, 14)
+            .frame(minHeight: 40)
+            .background(Capsule().fill(Color.white.opacity(0.08)))
+        case .unavailable(let why):
+            HStack(spacing: 8) {
+                Image(systemName: "exclamationmark.circle")
+                    .accessibilityHidden(true)
+                Text(why)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+                Button("Hide") { nearbyScanner.disable() }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Color.white.opacity(0.7))
+            }
+            .font(MADTheme.Typography.caption)
+            .foregroundStyle(Color.white.opacity(0.75))
+            .padding(12)
+            .background(panel(16))
+        }
     }
 
     // MARK: Group hero
