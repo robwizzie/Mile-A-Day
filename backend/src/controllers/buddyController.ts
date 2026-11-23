@@ -6,6 +6,13 @@ import {
   clearLooking,
   markLookingAndList,
 } from "../services/buddyLookingService.js";
+import { registerLiveActivity } from "../services/buddyLiveActivityService.js";
+import { listOutAlerts, setOutAlert } from "../services/buddyOutAlertService.js";
+import {
+  clearNearbyTokens,
+  issueNearbyToken,
+  resolveNearbyTokens,
+} from "../services/buddyNearbyService.js";
 import {
   BUDDY_ACTIVITY_TYPES,
   BUDDY_JOIN_POLICIES,
@@ -722,7 +729,7 @@ export async function progressController(
 ) {
   if (!requireEnabled(res)) return;
   try {
-    const { distanceMiles, durationSeconds, paused } = req.body ?? {};
+    const { distanceMiles, durationSeconds, paused, device } = req.body ?? {};
     if (distanceMiles === undefined || durationSeconds === undefined) {
       return res.status(400).json({ error: "progress_required" });
     }
@@ -736,6 +743,7 @@ export async function progressController(
         // which would let a client that never sends the flag write a state it
         // has no opinion about.
         typeof paused === "boolean" ? paused : undefined,
+        device === "watch" || device === "phone" ? device : undefined,
       ),
     );
   } catch (error) {
@@ -1025,3 +1033,99 @@ export async function historyController(
     handleError(res, error, "loading buddy history");
   }
 }
+
+// ─── Live Activity, out alerts, nearby ──────────────────────────────────
+
+/** POST /buddy/sessions/:sessionId/live-activity { pushToken, environment } */
+export async function registerLiveActivityController(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
+  if (!requireEnabled(res)) return;
+  try {
+    const { pushToken, environment } = req.body ?? {};
+    await registerLiveActivity(
+      req.params.sessionId,
+      req.userId!,
+      String(pushToken ?? ""),
+      typeof environment === "string" ? environment : null,
+    );
+    res.json({ ok: true });
+  } catch (error) {
+    handleError(res, error, "registering a buddy live activity");
+  }
+}
+
+/** GET /buddy/out-alerts → { friend_ids } */
+export async function listOutAlertsController(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
+  if (!requireEnabled(res)) return;
+  try {
+    res.json({ friend_ids: await listOutAlerts(req.userId!) });
+  } catch (error) {
+    handleError(res, error, "listing buddy out alerts");
+  }
+}
+
+/** PUT /buddy/out-alerts/:friendId { enabled } → { enabled } */
+export async function setOutAlertController(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
+  if (!requireEnabled(res)) return;
+  try {
+    const enabled = req.body?.enabled;
+    if (typeof enabled !== "boolean") {
+      return res.status(400).json({ error: "enabled_required" });
+    }
+    res.json({
+      enabled: await setOutAlert(req.userId!, req.params.friendId, enabled),
+    });
+  } catch (error) {
+    handleError(res, error, "setting a buddy out alert");
+  }
+}
+
+/** POST /buddy/nearby/token → { token, expires_in } | { token: null } */
+export async function nearbyTokenController(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
+  if (!requireEnabled(res)) return;
+  try {
+    const issued = await issueNearbyToken(req.userId!);
+    res.json(issued ?? { token: null, expires_in: 0 });
+  } catch (error) {
+    handleError(res, error, "issuing a nearby token");
+  }
+}
+
+/** DELETE /buddy/nearby/token */
+export async function clearNearbyTokenController(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
+  if (!requireEnabled(res)) return;
+  try {
+    await clearNearbyTokens(req.userId!);
+    res.json({ ok: true });
+  } catch (error) {
+    handleError(res, error, "clearing nearby tokens");
+  }
+}
+
+/** POST /buddy/nearby/resolve { tokens } → { friends } */
+export async function nearbyResolveController(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
+  if (!requireEnabled(res)) return;
+  try {
+    res.json({ friends: await resolveNearbyTokens(req.userId!, req.body?.tokens) });
+  } catch (error) {
+    handleError(res, error, "resolving nearby tokens");
+  }
+}
+

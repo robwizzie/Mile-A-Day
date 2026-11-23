@@ -2507,6 +2507,127 @@ export const buddyLiveRoutes = pgTable(
   ],
 );
 
+// A walker's buddy-walk Live Activity (the lock-screen countdown), by the
+// ActivityKit push token it reported. The server pushes the countdown, "it
+// started — tap to record" and the end through it, so a phone locked in a
+// pocket still shows the walk starting. One per walker per walk; deleted when
+// the walk closes or they leave.
+export const buddyLiveActivities = pgTable(
+  "buddy_live_activities",
+  {
+    sessionId: varchar("session_id", { length: 32 }).notNull(),
+    userId: text("user_id").notNull(),
+    pushToken: text("push_token").notNull(),
+    // 'production' | 'sandbox', as for device_tokens.
+    environment: text().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.sessionId, table.userId],
+      name: "buddy_live_activities_pkey",
+    }),
+    foreignKey({
+      columns: [table.sessionId],
+      foreignColumns: [buddySessions.id],
+      name: "buddy_live_activities_session_id_fkey",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.userId],
+      foreignColumns: [users.userId],
+      name: "buddy_live_activities_user_id_fkey",
+    }).onDelete("cascade"),
+  ],
+);
+
+// "Tell me when they're out": `user_id` asked to be pinged when `friend_id`
+// starts a walk. Per-friend, opt-in, removable; who follows whom is never
+// shown to the friend.
+export const buddyOutAlerts = pgTable(
+  "buddy_out_alerts",
+  {
+    userId: text("user_id").notNull(),
+    friendId: text("friend_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.userId, table.friendId],
+      name: "buddy_out_alerts_pkey",
+    }),
+    foreignKey({
+      columns: [table.userId],
+      foreignColumns: [users.userId],
+      name: "buddy_out_alerts_user_id_fkey",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.friendId],
+      foreignColumns: [users.userId],
+      name: "buddy_out_alerts_friend_id_fkey",
+    }).onDelete("cascade"),
+    index("idx_buddy_out_alerts_friend").using("btree", table.friendId.asc().nullsLast()),
+  ],
+);
+
+// One out-alert per (subscriber, friend, the FRIEND's local day): the claim
+// that keeps a friend who walks three times a day from pinging you three
+// times. Never deleted by the send path.
+export const buddyOutAlertLog = pgTable(
+  "buddy_out_alert_log",
+  {
+    userId: text("user_id").notNull(),
+    friendId: text("friend_id").notNull(),
+    localDate: date("local_date").notNull(),
+    sentAt: timestamp("sent_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.userId, table.friendId, table.localDate],
+      name: "buddy_out_alert_log_pkey",
+    }),
+    foreignKey({
+      columns: [table.userId],
+      foreignColumns: [users.userId],
+      name: "buddy_out_alert_log_user_id_fkey",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.friendId],
+      foreignColumns: [users.userId],
+      name: "buddy_out_alert_log_friend_id_fkey",
+    }).onDelete("cascade"),
+  ],
+);
+
+// Nearby friends: a short random token a phone broadcasts over Bluetooth
+// while buddy setup is open. It means nothing without this table, rotates,
+// and expires in minutes, so the broadcast never identifies anyone.
+export const buddyNearbyTokens = pgTable(
+  "buddy_nearby_tokens",
+  {
+    token: varchar({ length: 16 }).primaryKey().notNull(),
+    userId: text("user_id").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true, mode: "string" }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.userId],
+      foreignColumns: [users.userId],
+      name: "buddy_nearby_tokens_user_id_fkey",
+    }).onDelete("cascade"),
+    index("idx_buddy_nearby_tokens_user").using("btree", table.userId.asc().nullsLast()),
+    index("idx_buddy_nearby_tokens_expires").using("btree", table.expiresAt.asc().nullsLast()),
+  ],
+);
+
 export const androidWaitlist = pgTable(
   "android_waitlist",
   {
@@ -2705,6 +2826,11 @@ export const buddySessionParticipants = pgTable(
       withTimezone: true,
       mode: "string",
     }),
+    // Which device the latest progress report came from: 'phone' | 'watch'.
+    // NULL from a client that doesn't say (every build before Watch buddy
+    // walks), read as the phone. Lets the phone stand down while the Watch
+    // is recording the walk instead of starting a second workout.
+    reportingDevice: text("reporting_device"),
   },
   (table) => [
     index("idx_buddy_participants_user_status").using(

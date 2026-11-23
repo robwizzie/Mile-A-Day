@@ -18,6 +18,11 @@ import { logError } from "./errorLogService.js";
 import { BadRequestError } from "../errors/Errors.js";
 import { clearLiveRoute, clearLiveRoutes } from "./buddyLiveRouteService.js";
 import {
+  endLiveActivities,
+  pushCountdownToActivities,
+  pushStartedToActivity,
+} from "./buddyLiveActivityService.js";
+import {
   BUDDY_ABANDON_HOURS,
   BUDDY_MAX_PARTICIPANTS,
   BUDDY_MAX_SPEED_MPS,
@@ -179,6 +184,7 @@ async function loadParticipants(
     activity_type: BuddyParticipantActivityType | null;
     is_paused: boolean;
     last_heard_seconds: number | null;
+    reporting_device: string | null;
   }>(
     // Staleness means "was reporting, then stopped" — NOT "hasn't reported
     // yet". A participant's first progress report is up to 5s out, so falling
@@ -213,7 +219,10 @@ async function loadParticipants(
             -- Only a walker still ON the walk can be paused: a finished row
             -- keeps whatever flag its last report carried, and rendering that
             -- would put a pause badge on someone who is done.
-            (p.status = 'active' AND COALESCE(p.is_paused, false)) AS is_paused
+            (p.status = 'active' AND COALESCE(p.is_paused, false)) AS is_paused,
+            -- Which device is recording them ('watch' lets their phone stand
+            -- down instead of starting a second workout). NULL = the phone.
+            p.reporting_device
        FROM buddy_session_participants p
        JOIN users u ON u.user_id = p.user_id
        JOIN buddy_sessions s ON s.id = p.session_id
@@ -242,6 +251,7 @@ async function loadParticipants(
         ? null
         : Number(r.last_heard_seconds),
     is_paused: r.is_paused === true,
+    reporting_device: r.reporting_device === "watch" ? "watch" : r.reporting_device === "phone" ? "phone" : null,
     is_host: r.user_id === hostUserId,
     place: r.place,
     final_distance_miles:
@@ -943,6 +953,7 @@ export async function leaveSession(
     [sessionId, userId],
   );
   await clearLiveRoute(sessionId, userId);
+  void endLiveActivities(sessionId, userId);
   await bumpVersion(sessionId);
   await recordEvent(sessionId, userId, "left");
   await finalizeIfDue(sessionId);
@@ -1139,6 +1150,7 @@ export async function startSessionNow(
   if (!session) throw new BadRequestError("session_not_found");
   if (session.host_user_id !== userId) throw new BadRequestError("not_host");
 
+  let pulledIn = false;
   const client = await db.getClient();
   try {
     await client.query("BEGIN");
@@ -1161,6 +1173,7 @@ export async function startSessionNow(
         RETURNING id`,
       [sessionId],
     );
+    pulledIn = pulled.rows.length > 0;
     if (pulled.rows.length > 0) {
       // Anyone who landed in the room between Start and now. `activateSession`
       // lifted the roster it could see; a join that arrived during the
@@ -1182,6 +1195,9 @@ export async function startSessionNow(
   } finally {
     client.release();
   }
+
+  // The new start time onto everyone else's lock screen.
+  if (pulledIn) void pushCountdownToActivities(sessionId, userId);
 
   const fresh = await getSessionRow(sessionId);
   if (!fresh) throw new BadRequestError("session_not_found");
@@ -1754,6 +1770,8 @@ async function activateSession(
   if (!started) return false;
   await recordEvent(sessionId, actorUserId, "started");
   void notifySessionStarted(sessionId, actorUserId);
+  // The countdown onto pocketed lock screens (buddyLiveActivityService).
+  void pushCountdownToActivities(sessionId, actorUserId);
   return true;
 }
 
@@ -1991,6 +2009,7 @@ async function cancelInternal(
   );
   if (cancelled.length === 0) return false;
   await clearLiveRoutes(sessionId);
+  void endLiveActivities(sessionId);
 
   // Everyone still in the room is released. Deliberately NOT 'finished':
   // finished is what the history reads, and a walk nobody took must never
@@ -2236,6 +2255,11 @@ export async function recordProgress(
    * it can neither set nor strand the state.
    */
   paused?: boolean,
+  /**
+   * 'phone' | 'watch', additive. Absent from every build before Watch buddy
+   * walks, which leaves the stored value alone (NULL reads as the phone).
+   */
+  device?: "phone" | "watch",
 ): Promise<BuddySessionState> {
   if (!Number.isFinite(distanceMiles) || distanceMiles < 0) {
     throw new BadRequestError("invalid_distance");
@@ -2286,6 +2310,7 @@ export async function recordProgress(
             -- NOT clamped like the two above: a pause is a state, and the
             -- newest report is always the truth about it.
             is_paused = $6::boolean,
+            reporting_device = COALESCE($7::text, p.reporting_device),
             last_progress_at = NOW()
        FROM buddy_sessions s
       WHERE p.session_id = $1 AND p.user_id = $2 AND p.status = 'active'
@@ -2297,11 +2322,16 @@ export async function recordProgress(
       Math.floor(durationSeconds),
       maxMilesPerSecond,
       paused === undefined ? null : paused,
+      device ?? null,
     ],
   );
 
   await bumpVersion(sessionId);
   await finalizeIfDue(sessionId);
+  // This phone (or Watch) is recording now: the lock-screen countdown has
+  // done its job, and the workout's own Live Activity takes over. A no-op
+  // DELETE on every later report.
+  void endLiveActivities(sessionId, userId);
   // Somebody on this walk IS recording, so this is the moment to notice who
   // isn't. Not awaited: the reporter's roster shouldn't wait on a push.
   void alertSilentWalkers(sessionId);
@@ -2377,6 +2407,8 @@ export async function alertSilentWalkers(sessionId: string): Promise<number> {
     for (const row of claimed) {
       if (!allowed.has(row.user_id)) continue;
       const never = row.never_reported === true;
+      // Their lock-screen card says it too, for the moment they glance at it.
+      if (never) await pushStartedToActivity(sessionId, row.user_id);
       await sendPush(row.user_id, {
         title: never
           ? "Your phone isn't recording your buddy walk"
@@ -2431,6 +2463,7 @@ export async function finishParticipation(
     [sessionId, userId],
   );
   await clearLiveRoute(sessionId, userId);
+  void endLiveActivities(sessionId, userId);
   // Link NOW, not at close. The usual order on a phone is HealthKit save →
   // observer sync (reconcileBuddySessions: participant still 'active', no
   // stamp) → this Finish — so the workout was on the server, route and all,
@@ -2541,6 +2574,7 @@ async function closeSession(
   );
   if (closed.length === 0) return; // someone else finalized first
   await clearLiveRoutes(sessionId);
+  void endLiveActivities(sessionId);
 
   await db.query(
     `UPDATE buddy_session_participants

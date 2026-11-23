@@ -6,6 +6,8 @@ import {
   endSession,
   friendsOutNow,
 } from "../services/liveTrackingService.js";
+import { notifyOutAlertSubscribers } from "../services/buddyOutAlertService.js";
+import { buddySessionsEnabled } from "../services/buddyFeatures.js";
 
 /**
  * Live tracking presence endpoints. All self-scoped via req.userId (no
@@ -19,6 +21,12 @@ export async function startLiveTracking(
 ) {
   try {
     const result = await startSession(req.userId!, req.body?.workout_type);
+    // Friends who asked to hear when this person is out (opt-in per friend,
+    // once a day, presence-gated — buddyOutAlertService). Not awaited: the
+    // tracker shouldn't wait on anyone else's push.
+    if (buddySessionsEnabled()) {
+      void notifyOutAlertSubscribers(req.userId!, req.body?.workout_type);
+    }
     return res.status(200).json(result);
   } catch (error: any) {
     console.error("Error starting live tracking session:", error.message);

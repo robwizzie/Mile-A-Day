@@ -1,5 +1,11 @@
 import { Router } from "express";
 import {
+  clearNearbyTokenController,
+  listOutAlertsController,
+  nearbyResolveController,
+  nearbyTokenController,
+  registerLiveActivityController,
+  setOutAlertController,
   cancelSessionController,
   createSessionController,
   declineSessionController,
@@ -100,6 +106,15 @@ router.post(
   respondJoinRequestController,
 );
 router.post("/sessions/:sessionId/progress", progressController);
+// The lock-screen countdown's ActivityKit push token (buddyLiveActivityService).
+router.post("/sessions/:sessionId/live-activity", registerLiveActivityController);
+// "Tell me when they're out", per friend (buddyOutAlertService).
+router.get("/out-alerts", listOutAlertsController);
+router.put("/out-alerts/:friendId", setOutAlertController);
+// Nearby friends over Bluetooth while setup is open (buddyNearbyService).
+router.post("/nearby/token", nearbyTokenController);
+router.delete("/nearby/token", clearNearbyTokenController);
+router.post("/nearby/resolve", nearbyResolveController);
 // Opt-in, per walk, reciprocal. See buddyLiveRouteService.
 router.put("/sessions/:sessionId/live-route", liveRouteSharingController);
 router.post("/sessions/:sessionId/live-route/points", liveRoutePointsController);

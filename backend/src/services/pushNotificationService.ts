@@ -251,6 +251,9 @@ export type NotificationType =
   | "buddy_started"
   | "buddy_finished"
   | "buddy_friend_active"
+  // "Alex is out walking": a friend you asked to hear about started a walk
+  // (`buddyOutAlertService`). Gated per device on buddy_out_alert_v1.
+  | "buddy_friend_out"
   // A friend beat YOUR mile as their ghost. Deliberately not high-priority and
   // not cap-exempt: it's a flourish about someone else's workout, so quiet
   // hours and the daily cap both apply.
@@ -541,6 +544,8 @@ const CAP_EXEMPT_TYPES: NotificationType[] = [
   // already, via HIGH_PRIORITY.)
   "buddy_joined",
   "buddy_started",
+  // Asked for, per friend, and at most once a day per friend.
+  "buddy_friend_out",
   "buddy_finished",
   "buddy_join_refused",
   "crew_photo",
@@ -2100,4 +2105,135 @@ export async function cleanupNotificationLogs(): Promise<void> {
     ),
   ]);
   console.log("[Cleanup] Cleaned up old notification logs");
+}
+
+// ─── Live Activity pushes ───────────────────────────────────────────
+
+export type LiveActivityEvent = "update" | "end";
+
+export interface LiveActivityPush {
+  event: LiveActivityEvent;
+  /** The activity's ContentState, exactly as the app's Codable reads it. */
+  contentState: Record<string, unknown>;
+  /** Lights the screen and plays a sound with the update (ActivityKit alert). */
+  alert?: { title: string; body: string };
+  /** Unix seconds: when iOS removes an ended activity from the lock screen. */
+  dismissalDate?: number;
+  /** Unix seconds: when the activity reads as stale. */
+  staleDate?: number;
+}
+
+/**
+ * The exact APNs request a Live Activity push makes, as a PURE function so
+ * `scripts/buddy-live-activity-check.mjs` can pin it without a network. The
+ * contract: topic `<bundle>.push-type.liveactivity`, `apns-push-type:
+ * liveactivity`, and an aps dict of `timestamp` + `event` + `content-state`
+ * (plus the optional alert / dismissal / stale dates). Anything else and
+ * APNs rejects it, or worse accepts it and the lock screen never changes.
+ */
+export function buildLiveActivityPushRequest(
+  pushToken: string,
+  push: LiveActivityPush,
+  bundleId: string,
+  bearer: string,
+  nowSeconds: number = Math.floor(Date.now() / 1000),
+): { headers: Record<string, string>; body: string } {
+  const aps: Record<string, unknown> = {
+    timestamp: nowSeconds,
+    event: push.event,
+    "content-state": push.contentState,
+  };
+  if (push.alert) {
+    aps.alert = { title: push.alert.title, body: push.alert.body };
+    aps.sound = "default";
+  }
+  if (push.dismissalDate !== undefined) aps["dismissal-date"] = push.dismissalDate;
+  if (push.staleDate !== undefined) aps["stale-date"] = push.staleDate;
+  return {
+    headers: {
+      ":method": "POST",
+      ":path": `/3/device/${pushToken}`,
+      authorization: `bearer ${bearer}`,
+      "apns-topic": `${bundleId}.push-type.liveactivity`,
+      "apns-push-type": "liveactivity",
+      "apns-priority": "10",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ aps }),
+  };
+}
+
+/** `ok`, a token APNs says is gone (delete it), or another failure. */
+export type LiveActivitySendResult = "ok" | "dead" | "failed";
+
+type LiveActivityTransport = (
+  pushToken: string,
+  push: LiveActivityPush,
+  environment: DeviceTokenEnvironment,
+) => Promise<LiveActivitySendResult>;
+
+let liveActivityTransportOverride: LiveActivityTransport | null = null;
+
+/** Test seam, like `setSilentPushTransportForTesting`. */
+export function setLiveActivityTransportForTesting(
+  transport: LiveActivityTransport | null,
+): void {
+  liveActivityTransportOverride = transport;
+}
+
+/**
+ * Push one update (or the end) to a Live Activity by its ActivityKit push
+ * token. No inbox row, no notification_log, no cap: it changes a lock-screen
+ * card the user already has, it isn't a new notification.
+ */
+export function sendLiveActivityPush(
+  pushToken: string,
+  push: LiveActivityPush,
+  environment?: string | null,
+): Promise<LiveActivitySendResult> {
+  const env = normalizeTokenEnvironment(environment);
+  if (liveActivityTransportOverride) {
+    return liveActivityTransportOverride(pushToken, push, env);
+  }
+  return new Promise((resolve) => {
+    const token = getApnsToken();
+    if (!token || !APNS_BUNDLE_ID) {
+      resolve("failed");
+      return;
+    }
+    const { headers, body } = buildLiveActivityPushRequest(
+      pushToken,
+      push,
+      APNS_BUNDLE_ID,
+      token,
+    );
+    const client = http2.connect(apnsHostForEnvironment(env));
+    client.on("error", (err) => {
+      console.error("[Push] Live Activity connection error:", err.message);
+      client.close();
+      resolve("failed");
+    });
+    const req = client.request(headers);
+    let responseData = "";
+    let statusCode = 0;
+    req.on("response", (h) => {
+      statusCode = h[":status"] as number;
+    });
+    req.on("data", (chunk) => {
+      responseData += chunk;
+    });
+    req.on("end", () => {
+      client.close();
+      if (statusCode === 200) return resolve("ok");
+      console.error(`[Push] Live Activity APNs error ${statusCode}: ${responseData}`);
+      resolve(isDeadToken(statusCode, responseData) ? "dead" : "failed");
+    });
+    req.on("error", (err) => {
+      console.error("[Push] Live Activity request error:", err.message);
+      client.close();
+      resolve("failed");
+    });
+    req.write(body);
+    req.end();
+  });
 }
