@@ -1,0 +1,11 @@
+# App-folder files the Watch target also compiles (CI's Watch type-check reads this).
+# One path per line, relative to "app/Mile A Day/". Keep in step with the target.
+Models/HealthKitManager+DataFetching.swift
+Models/HealthKitManager+PersonalRecords.swift
+Models/HealthKitManager+StreakCalculation.swift
+Models/HealthKitManager+WorkoutIndex.swift
+Models/HealthKitManager.swift
+Models/WorkoutIndex.swift
+Models/WorkoutProcessor.swift
+Utils/SplitCalculator.swift
+Core/State/StepGoalDayStore.swift
