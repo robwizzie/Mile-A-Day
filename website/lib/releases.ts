@@ -77,7 +77,7 @@ export const RELEASES: Release[] = [
     date: "November 2026",
     headline: "Buddy walks that never miss a step",
     summary:
-      "Buddy walks now record even when your phone is in your pocket: the countdown lands on your lock screen, your Apple Watch can record the walk, and steps taken before you open the app are added in. Plus friends nearby, alerts when the friends you walk with head out, and one-tap group invites.",
+      "Buddy walks now record even when your phone is in your pocket: the countdown lands on your lock screen, your Apple Watch can record the walk, and steps taken before you open the app are added in. Plus friends nearby, alerts when the friends you walk with head out, one-tap group invites, medals Flamey can wear, and a round of fixes.",
     features: [
       {
         icon: Users,
@@ -120,6 +120,24 @@ export const RELEASES: Release[] = [
         color: "#FF2D55",
         title: "Invites you can't miss",
         desc: "Buddy walk invites and walks you're on now show at the bottom of every screen, with Join right there.",
+      },
+      {
+        icon: Medal,
+        color: "#FFCC5C",
+        title: "Wear your medals",
+        desc: "Any medal you've earned can hang on Flamey's chest, even with his Champ Shorts on. Costumes now keep his hat, glasses and shoes, and the Rainbow Streak arches over his head.",
+      },
+      {
+        icon: Activity,
+        color: "#5856D6",
+        title: "Add a workout after your mile",
+        desc: "Logging a walk by hand is still right there once your mile is done.",
+      },
+      {
+        icon: LifeBuoy,
+        color: "#8E8E93",
+        title: "Fixes",
+        desc: "No more being signed out when you reopen the app, notification switches now save to your account every time, and buddy walk photos always land on the walk's post.",
       },
     ],
   },

@@ -73,6 +73,24 @@ enum WhatsNewCatalog {
                     blurb: "Buddy walk invites and walks you're on now show at the bottom of every screen, with Join right there.",
                     tint: .pink
                 ),
+                WhatsNewFeature(
+                    icon: "medal.fill",
+                    title: "Wear your medals",
+                    blurb: "Any medal you've earned can hang on Flamey's chest, even with his Champ Shorts on. Costumes now keep his hat, glasses and shoes, and the Rainbow Streak arches over his head.",
+                    tint: .yellow
+                ),
+                WhatsNewFeature(
+                    icon: "plus.circle.fill",
+                    title: "Add a workout after your mile",
+                    blurb: "Logging a walk by hand is still right there once your mile is done.",
+                    tint: .indigo
+                ),
+                WhatsNewFeature(
+                    icon: "wrench.and.screwdriver.fill",
+                    title: "Fixes",
+                    blurb: "No more being signed out when you reopen the app, notification switches now save to your account every time, and buddy walk photos always land on the walk's post.",
+                    tint: .gray
+                ),
             ]
         ),
         // id 9, not 8: TestFlight saw an earlier 1.2.09 draft as 8 (routes
