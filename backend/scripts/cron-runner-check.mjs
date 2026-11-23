@@ -36,6 +36,21 @@ function check(label, actual, expected) {
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+/**
+ * logError is fire-and-forget, so a fixed sleep raced it on slow CI runners
+ * (the row landed after the count). Wait for the expected count instead,
+ * up to 5s, then let the check report whatever arrived.
+ */
+async function errorRowsReaching(expected, timeoutMs = 5000) {
+  const deadline = Date.now() + timeoutMs;
+  let n = await errorRows();
+  while (n < expected && Date.now() < deadline) {
+    await sleep(50);
+    n = await errorRows();
+  }
+  return n;
+}
+
 async function cleanup() {
   await db.query(`DELETE FROM in_app_notifications WHERE user_id = ANY($1)`, [
     [ADMIN, CIVILIAN],
@@ -82,7 +97,7 @@ try {
   });
   await sleep(300); // logError is fire-and-forget
   check("a throwing job returns false instead of throwing", first, false);
-  check("…and writes one error_log row under 'cron'", await errorRows(), 1);
+  check("…and writes one error_log row under 'cron'", await errorRowsReaching(1), 1);
   check("…and alerts the admin account once", await alerts(ADMIN), 1);
   check("…and never a civilian", await alerts(CIVILIAN), 0);
 
@@ -97,7 +112,7 @@ try {
     throw new Error("boom again");
   });
   await sleep(300);
-  check("a second failure is recorded", await errorRows(), 2);
+  check("a second failure is recorded", await errorRowsReaching(2), 2);
   check("…but does not ring the admin again inside the cooldown", await alerts(ADMIN), 1);
   check("cooldown is six hours", ALERT_COOLDOWN_MS, 6 * 60 * 60 * 1000);
   check("second call also returns false", second, false);
@@ -128,7 +143,7 @@ try {
     throw new Error("silent");
   });
   await sleep(300);
-  check("with CRON_ALERTS_DISABLED the row still lands", await errorRows(), 3);
+  check("with CRON_ALERTS_DISABLED the row still lands", await errorRowsReaching(3), 3);
   check("…and the admin is not rung", await alerts(ADMIN), 1);
 } finally {
   delete process.env.CRON_ALERTS_DISABLED;
