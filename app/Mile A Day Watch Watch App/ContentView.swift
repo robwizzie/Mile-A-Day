@@ -86,6 +86,10 @@ struct ContentView: View {
     @State private var locationType: HKWorkoutSessionLocationType = .outdoor
     @State private var ringPulse: Bool = false
     @State private var isRefreshing: Bool = false
+    /// The buddy walk this user is on (WatchBuddyClient), and the one a
+    /// workout was started for from its card.
+    @ObservedObject private var buddy = WatchBuddyClient.shared
+    @State private var buddySessionForWorkout: String?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.isLuminanceReduced) private var isLuminanceReduced
 
@@ -146,6 +150,10 @@ struct ContentView: View {
                         .lineLimit(1)
                         .minimumScaleFactor(0.7)
 
+                    if let offer = buddy.offer {
+                        buddyCard(offer)
+                    }
+
                     locationToggle
 
                     activityButtons
@@ -168,7 +176,8 @@ struct ContentView: View {
                 goalDistance: goalDistance,
                 startingDistance: currentDistance,
                 activityType: selectedActivityType,
-                locationType: locationType
+                locationType: locationType,
+                buddySessionId: buddySessionForWorkout
             )
         }
         .onAppear {
@@ -186,6 +195,7 @@ struct ContentView: View {
         .onChange(of: goalDistance) { syncComplications() }
         .onChange(of: showWorkoutView) { oldValue, newValue in
             if oldValue && !newValue {
+                buddySessionForWorkout = nil
                 // HK takes a beat to finalize the finished workout before it shows
                 // up in queries — refresh once immediately and once shortly after
                 // so distance + streak both settle to the post-workout truth.
@@ -207,6 +217,7 @@ struct ContentView: View {
         guard !isRefreshing else { return }
         isRefreshing = true
         healthManager.refreshWatchSummary()
+        Task { await WatchBuddyClient.shared.refresh() }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
             self.isRefreshing = false
         }
@@ -311,6 +322,44 @@ struct ContentView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    // MARK: - Buddy walk
+
+    /// "Rob's buddy walk has started · Start on Watch". The phone may be in a
+    /// pocket; the wrist is where the start is noticed.
+    private func buddyCard(_ offer: WatchBuddyOffer) -> some View {
+        let noun = offer.isRun ? "run" : "walk"
+        let whose = offer.hostName == "your" ? "Your buddy \(noun)" : "\(offer.hostName)'s buddy \(noun)"
+        return Button {
+            guard offer.canStart else { return }
+            selectedActivityType = offer.isRun ? .running : .walking
+            buddySessionForWorkout = offer.sessionId
+            showWorkoutView = true
+        } label: {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(whose)
+                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                Text(offer.canStart ? "Started · Tap to record here" : "Starting soon")
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.8))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+            }
+            .foregroundColor(.white)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(offer.canStart ? Color.red.opacity(0.85) : Color.blue.opacity(0.6))
+            )
+        }
+        .buttonStyle(WatchPressStyle())
+        .disabled(!offer.canStart)
+        .accessibilityLabel(offer.canStart ? "\(whose) has started. Start recording on Watch" : "\(whose) is starting soon")
     }
 
     // MARK: - Activity Buttons

@@ -54,7 +54,9 @@ struct BuddyAttentionBanner: View {
     private var need: Need? {
         // "Am I walking" is the persisted workout, not a view flag.
         guard !isTracking, InProgressWorkoutStore.load()?.isActive != true else { return nil }
-        if buddy.canReenterLiveSession, let session = buddy.session {
+        if buddy.canReenterLiveSession, let session = buddy.session,
+           // Their Watch is recording it: nothing for the phone to ask.
+           session.me(buddy.currentUserId)?.isRecordingOnWatch != true {
             if session.status == .active, let started = session.startedAtDate, started <= now {
                 return .notRecording(session)
             }

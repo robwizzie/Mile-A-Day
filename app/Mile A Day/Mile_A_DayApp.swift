@@ -149,6 +149,19 @@ struct Mile_A_DayApp: App {
                         if let code, !code.isEmpty {
                             DeepLinkRouter.shared.requestOpenBuddySession(code: code)
                         }
+                    case "buddy-session":
+                        // mileaday://buddy-session/<id> — the buddy walk's
+                        // lock-screen card. The walk this user is already on,
+                        // so it opens by id (the lobby hands off to tracking).
+                        let sessionId = url.pathComponents.first { $0 != "/" }
+                        NotificationCenter.default.post(
+                            name: NSNotification.Name("MAD_SwitchTab"),
+                            object: nil,
+                            userInfo: ["tab": 0]
+                        )
+                        if let sessionId, !sessionId.isEmpty {
+                            DeepLinkRouter.shared.requestOpenBuddySession(sessionId: sessionId)
+                        }
                     case "flamey-closet":
                         // mileaday://flamey-closet — parked on the link and
                         // presented by MainTabView's root host whenever it's

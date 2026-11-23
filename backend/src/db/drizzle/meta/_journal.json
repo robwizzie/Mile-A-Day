@@ -771,6 +771,13 @@
       "when": 1795290005497,
       "tag": "0109_buddy_tracking_alert",
       "breakpoints": true
+    },
+    {
+      "idx": 110,
+      "version": "7",
+      "when": 1795465907101,
+      "tag": "0110_buddy_walks_v2",
+      "breakpoints": true
     }
   ]
 }

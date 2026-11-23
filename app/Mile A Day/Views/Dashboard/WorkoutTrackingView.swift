@@ -2559,6 +2559,8 @@ struct WorkoutTrackingView: View {
               // Defense in depth behind the lobby/entry-point guards: never
               // auto-start a mile for a session THIS user already finished.
               buddyService.session?.me(buddyService.currentUserId)?.status != .finished,
+              // Recording on their Apple Watch already (WatchBuddyClient).
+              buddyService.session?.me(buddyService.currentUserId)?.isRecordingOnWatch != true,
               InProgressWorkoutStore.load()?.isActive != true else { return false }
         hasAutoStartedBuddyWorkout = true
         // This person's OWN answer from the lobby (a friend can run beside
@@ -2586,6 +2588,9 @@ struct WorkoutTrackingView: View {
         let sessionStart = buddyService.session.flatMap {
             $0.id == effectiveBuddySessionId ? $0.startedAtDate : nil
         }
+        // This phone is recording now: the lock-screen countdown card goes,
+        // and the workout's own Live Activity takes its place.
+        BuddyWalkActivityManager.shared.endForRecording()
         BuddyLateStart.resolve(sessionStartedAt: sessionStart) { seed in
             // The query can take a moment; don't start under a stop or a
             // back-out the user asked for meanwhile (`isTracking` was set

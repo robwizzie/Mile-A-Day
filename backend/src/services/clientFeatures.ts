@@ -231,6 +231,13 @@ export const CLIENT_FEATURES = {
    * build — an announcement that just opens the app is still the news.
    */
   specialEventsV1: "special_events_v1",
+  /**
+   * The build routes `buddy_friend_out` ("Alex is out walking — join?") to
+   * that friend, and offers the per-friend "Tell me when they're out"
+   * switch. Gated on the SUBSCRIBER's device: an older build has no route
+   * for the type, so the push would open nothing.
+   */
+  buddyOutAlertV1: "buddy_out_alert_v1",
 } as const;
 
 export type ClientFeature =

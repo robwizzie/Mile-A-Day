@@ -37,6 +37,8 @@ struct BuddySetupStepsView: View {
     /// The friend list's search and order (`BuddyFriendPicker.swift`). The
     /// order is remembered; the search starts empty every time.
     @State private var friendSearch = ""
+    /// Friends next to you over Bluetooth, while this screen is open.
+    @ObservedObject private var nearbyScanner = BuddyNearbyScanner.shared
     @AppStorage(BuddyPickerSort.storageKey) private var pickerSortRaw = BuddyPickerSort.best.rawValue
     @State private var isCreating = false
     /// Book the walk for later instead of starting it from the lobby. Off by
@@ -155,6 +157,8 @@ struct BuddySetupStepsView: View {
         .task {
             restoreLastSetup()
             claimWalkAgainHandoff()
+            // Only if the user turned it on before; the first time is their tap.
+            nearbyScanner.start()
             let searchStarted = Date()
             // A slow network must never hold the search screen hostage.
             Task { @MainActor in
@@ -193,7 +197,11 @@ struct BuddySetupStepsView: View {
         }
         // Closing setup (or moving on to a lobby) ends the search for
         // everyone else too. The server also forgets it after 150s.
-        .onDisappear { Task { await buddy.stopLooking() } }
+        .onDisappear {
+            Task { await buddy.stopLooking() }
+            // Bluetooth stops with the screen, always.
+            nearbyScanner.stop()
+        }
         .confirmationDialog(
             pendingTwin.map { "\($0.hostDisplayName) already started a \($0.isRunning ? "run" : "walk")" } ?? "",
             isPresented: Binding(get: { pendingTwin != nil }, set: { if !$0 { pendingTwin = nil } }),
@@ -223,12 +231,14 @@ struct BuddySetupStepsView: View {
     // MARK: - Per-step content
 
     private var suggestions: [BuddySuggestion] {
-        BuddySuggestion.ranked(buddy: buddy, walkAgainUserId: walkAgainUserId)
+        BuddySuggestion.ranked(
+            buddy: buddy, walkAgainUserId: walkAgainUserId, nearby: nearbyScanner.nearbyFriends)
     }
 
-    /// Two or more friends deciding or out right now: offer them all at once.
+    /// Two or more friends deciding, out, or next to you right now: offer
+    /// them all at once.
     private var groupSuggestion: BuddyGroupSuggestion? {
-        BuddyGroupSuggestion.around(buddy: buddy)
+        BuddyGroupSuggestion.around(buddy: buddy, nearby: nearbyScanner.nearbyFriends)
     }
 
     private var stepGlyph: WizardGlyph {

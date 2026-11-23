@@ -278,6 +278,9 @@ struct BuddyParticipant: Codable, Identifiable, Equatable {
     /// thing anyone on the walk wanted to know; "1.20 mi · 4m ago" is not a
     /// stale lie, it is precisely what we know.
     let lastHeardSeconds: Int?
+    /// "phone" | "watch": the device behind their latest report. Nil from a
+    /// server or build that predates Watch buddy walks (read as the phone).
+    let reportingDevice: String?
     /// They are paused and still on the walk — manually, or by the tracker's
     /// movement gate having gone quiet for a full evidence window
     /// (`WorkoutLocationManager.isPausedForCrew`). Optional twice over: nil
@@ -340,6 +343,13 @@ struct BuddyParticipant: Codable, Identifiable, Equatable {
         status == .active && isStale && lastHeardSeconds == nil
     }
 
+    /// Their Apple Watch is recording this walk right now (a fresh report
+    /// that said `device: "watch"`). The phone stands down: no second
+    /// workout, no "not recording" banner.
+    var isRecordingOnWatch: Bool {
+        status == .active && reportingDevice == "watch" && lastHeardSeconds != nil && !isStale
+    }
+
     var lastHeardAgo: String? {
         guard let seconds = lastHeardSeconds else { return nil }
         if seconds < 60 { return "just now" }
@@ -371,6 +381,7 @@ struct BuddyParticipant: Codable, Identifiable, Equatable {
         case durationSeconds = "duration_seconds"
         case isStale = "is_stale"
         case lastHeardSeconds = "last_heard_seconds"
+        case reportingDevice = "reporting_device"
         case isPaused = "is_paused"
         case isHost = "is_host"
         case place
@@ -1238,3 +1249,49 @@ struct BuddyLiveRoutesState: Codable {
     let sharing: Bool
     let routes: [Route]
 }
+
+// MARK: - Out alerts / nearby responses
+
+struct BuddyOutAlertsResponse: Codable {
+    let friendIds: [String]
+    enum CodingKeys: String, CodingKey { case friendIds = "friend_ids" }
+}
+
+struct BuddyOutAlertSetResponse: Codable {
+    let enabled: Bool
+}
+
+struct BuddyNearbyTokenResponse: Codable {
+    let token: String?
+    let expiresIn: Int
+    enum CodingKeys: String, CodingKey {
+        case token
+        case expiresIn = "expires_in"
+    }
+}
+
+struct BuddyNearbyResolveResponse: Codable {
+    let friends: [BuddyNearbyMatch]
+}
+
+/// A friend heard nearby, with the token they were heard by (so the app can
+/// forget them when that token goes quiet).
+struct BuddyNearbyMatch: Codable {
+    let token: String
+    let candidate: BuddyCandidate
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        token = try container.decode(String.self, forKey: .token)
+        candidate = try BuddyCandidate(from: decoder)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(token, forKey: .token)
+        try candidate.encode(to: encoder)
+    }
+
+    enum CodingKeys: String, CodingKey { case token }
+}
+

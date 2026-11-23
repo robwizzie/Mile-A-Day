@@ -26,6 +26,73 @@ enum WhatsNewCatalog {
     /// Newest first. Edit copy freely — keep it user-facing (no internal
     /// names, no "beta"), one short line per feature.
     static let releases: [WhatsNewRelease] = [
+        WhatsNewRelease(
+            id: 10,
+            versionLabel: "Version 1.2.10",
+            headline: "Buddy walks that never miss a step",
+            features: [
+                WhatsNewFeature(
+                    icon: "figure.2",
+                    title: "Every step counts on buddy walks",
+                    blurb: "If your phone was in your pocket when the walk started, the steps you took before opening the app are added in. And if your phone isn't recording, you'll get a nudge to tap in.",
+                    tint: MADTheme.Colors.madRed
+                ),
+                WhatsNewFeature(
+                    icon: "lock.iphone",
+                    title: "The countdown on your lock screen",
+                    blurb: "Tap Ready and put your phone away: the countdown shows up on your lock screen when the walk starts, and one tap starts recording.",
+                    tint: .blue
+                ),
+                WhatsNewFeature(
+                    icon: "applewatch",
+                    title: "Start a buddy walk on your Watch",
+                    blurb: "When the walk starts, tap it on your Apple Watch and it records from your wrist. Your phone can stay in your pocket.",
+                    tint: .orange
+                ),
+                WhatsNewFeature(
+                    icon: "dot.radiowaves.left.and.right",
+                    title: "Find friends right next to you",
+                    blurb: "Turn it on when you set up a buddy walk to see which friends are standing nearby, then invite them all in one tap. It only runs while that screen is open.",
+                    tint: .teal
+                ),
+                WhatsNewFeature(
+                    icon: "bell.badge.fill",
+                    title: "Know when they're out",
+                    blurb: "Turn on \"Tell me when they're out\" for the friends you walk with most, and get a heads-up when they start, at most once a day.",
+                    tint: .purple
+                ),
+                WhatsNewFeature(
+                    icon: "person.3.fill",
+                    title: "Walk with everyone at once",
+                    blurb: "When a few friends are around, invite all of them in one tap. Search your friends, and sort by who you walk with most or who's been active lately.",
+                    tint: .green
+                ),
+                WhatsNewFeature(
+                    icon: "envelope.badge.fill",
+                    title: "Invites you can't miss",
+                    blurb: "Buddy walk invites and walks you're on now show at the bottom of every screen, with Join right there.",
+                    tint: .pink
+                ),
+                WhatsNewFeature(
+                    icon: "medal.fill",
+                    title: "Wear your medals",
+                    blurb: "Any medal you've earned can hang on Flamey's chest, even with his Champ Shorts on. Costumes now keep his hat, glasses and shoes, and the Rainbow Streak arches over his head.",
+                    tint: .yellow
+                ),
+                WhatsNewFeature(
+                    icon: "plus.circle.fill",
+                    title: "Add a workout after your mile",
+                    blurb: "Logging a walk by hand is still right there once your mile is done.",
+                    tint: .indigo
+                ),
+                WhatsNewFeature(
+                    icon: "wrench.and.screwdriver.fill",
+                    title: "Fixes",
+                    blurb: "No more being signed out when you reopen the app, notification switches now save to your account every time, and buddy walk photos always land on the walk's post.",
+                    tint: .gray
+                ),
+            ]
+        ),
         // id 9, not 8: TestFlight saw an earlier 1.2.09 draft as 8 (routes
         // and iPhone Duo, folded in below), and a new id shows this one again.
         WhatsNewRelease(

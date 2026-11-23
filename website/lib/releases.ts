@@ -73,6 +73,75 @@ export type Release = {
 // user-facing: what the feature does for you, no internal names.
 export const RELEASES: Release[] = [
   {
+    version: "1.2.10",
+    date: "November 2026",
+    headline: "Buddy walks that never miss a step",
+    summary:
+      "Buddy walks now record even when your phone is in your pocket: the countdown lands on your lock screen, your Apple Watch can record the walk, and steps taken before you open the app are added in. Plus friends nearby, alerts when the friends you walk with head out, one-tap group invites, medals Flamey can wear, and a round of fixes.",
+    features: [
+      {
+        icon: Users,
+        color: "#D94059",
+        title: "Every step counts on buddy walks",
+        desc: "If your phone was in your pocket when the walk started, the steps you took before opening the app are added in. And if your phone isn't recording, you'll get a nudge to tap in.",
+      },
+      {
+        icon: Smartphone,
+        color: "#2A6BF2",
+        title: "The countdown on your lock screen",
+        desc: "Tap Ready and put your phone away: the countdown shows up on your lock screen when the walk starts, and one tap starts recording.",
+      },
+      {
+        icon: Watch,
+        color: "#FF9F0A",
+        title: "Start a buddy walk on your Watch",
+        desc: "When the walk starts, tap it on your Apple Watch and it records from your wrist. Your phone can stay in your pocket.",
+      },
+      {
+        icon: Bluetooth,
+        color: "#30B0C7",
+        title: "Find friends right next to you",
+        desc: "Turn it on when you set up a buddy walk to see which friends are standing nearby, then invite them all in one tap. It only runs while that screen is open.",
+      },
+      {
+        icon: Bell,
+        color: "#AF52DE",
+        title: "Know when they're out",
+        desc: "Turn on \"Tell me when they're out\" for the friends you walk with most, and get a heads-up when they start, at most once a day.",
+      },
+      {
+        icon: UserPlus,
+        color: "#34C759",
+        title: "Walk with everyone at once",
+        desc: "When a few friends are around, invite all of them in one tap. Search your friends, and sort by who you walk with most or who's been active lately.",
+      },
+      {
+        icon: Bell,
+        color: "#FF2D55",
+        title: "Invites you can't miss",
+        desc: "Buddy walk invites and walks you're on now show at the bottom of every screen, with Join right there.",
+      },
+      {
+        icon: Medal,
+        color: "#FFCC5C",
+        title: "Wear your medals",
+        desc: "Any medal you've earned can hang on Flamey's chest, even with his Champ Shorts on. Costumes now keep his hat, glasses and shoes, and the Rainbow Streak arches over his head.",
+      },
+      {
+        icon: Activity,
+        color: "#5856D6",
+        title: "Add a workout after your mile",
+        desc: "Logging a walk by hand is still right there once your mile is done.",
+      },
+      {
+        icon: LifeBuoy,
+        color: "#8E8E93",
+        title: "Fixes",
+        desc: "No more being signed out when you reopen the app, notification switches now save to your account every time, and buddy walk photos always land on the walk's post.",
+      },
+    ],
+  },
+  {
     version: "1.2.09",
     date: "November 2026",
     headline: "Champ 5K Day is Saturday",

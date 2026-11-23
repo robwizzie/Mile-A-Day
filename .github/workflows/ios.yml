@@ -89,3 +89,43 @@ jobs:
             -target arm64-apple-ios17.0 \
             -swift-version 5 \
             < /tmp/swift-files
+
+      # The widget extension: its own folder plus the app files the Xcode
+      # project shares into it (the same list as app/typecheck.sh). Live
+      # Activities render here, so a mistake in one never reached CI before.
+      - name: Type-check the widget extension
+        if: steps.changed.outputs.ios == 'true'
+        run: |
+          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
+          find "app/MileADayWidgets" -name '*.swift' -print0 > /tmp/widget-files
+          for f in "app/Mile A Day/Shared/WidgetDataStore.swift" \
+                   "app/Mile A Day/Widgets/StreakCountWidget.swift" \
+                   "app/Mile A Day/Widgets/TodayProgressWidget.swift" \
+                   "app/Mile A Day/Widgets/WorkoutLiveActivity.swift"; do
+            printf '%s\0' "$f" >> /tmp/widget-files
+          done
+          echo "Type-checking $(tr -dc '\0' < /tmp/widget-files | wc -c) widget files"
+          xargs -0 xcrun swiftc -typecheck \
+            -sdk "$SDK" \
+            -target arm64-apple-ios17.0 \
+            -swift-version 5 \
+            < /tmp/widget-files
+
+      # The Watch app: its synchronized folder plus the app files it shares
+      # (each guards Watch-only code with `#if os(watchOS)`; WATCH_SHARED lists
+      # them). Never type-checked before, so Watch code shipped uncompiled.
+      - name: Type-check the Watch app
+        if: steps.changed.outputs.ios == 'true'
+        run: |
+          SDK=$(xcrun --sdk watchos --show-sdk-path)
+          find "app/Mile A Day Watch Watch App" -name '*.swift' -print0 > /tmp/watch-files
+          while IFS= read -r f; do
+            case "$f" in ''|'#'*) continue ;; esac
+            printf '%s\0' "app/Mile A Day/$f" >> /tmp/watch-files
+          done < app/watch-shared-files.txt
+          echo "Type-checking $(tr -dc '\0' < /tmp/watch-files | wc -c) Watch files"
+          xargs -0 xcrun swiftc -typecheck \
+            -sdk "$SDK" \
+            -target arm64_32-apple-watchos10.0 \
+            -swift-version 5 \
+            < /tmp/watch-files

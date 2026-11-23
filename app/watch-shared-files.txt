@@ -1,0 +1,18 @@
+# App-folder files the Watch target also compiles (CI's Watch type-check reads this).
+# One path per line, relative to "app/Mile A Day/". This mirrors the Watch target's
+# membershipExceptions for the "Mile A Day" folder in project.pbxproj: when a file
+# joins the Watch target in Xcode, add it here too.
+Managers/CelebrationManager.swift
+Models/AppPreferences.swift
+Models/BackendUser.swift
+Models/HealthKitManager.swift
+Models/NotificationManager.swift
+Models/NotificationPreferences.swift
+Models/User.swift
+Models/UserManager.swift
+Models/WorkoutIndex.swift
+Models/WorkoutProcessor.swift
+Models/WorkoutSplit.swift
+Models/YearlyMilestoneInfo.swift
+Services/TokenStore.swift
+Utils/SplitCalculator.swift

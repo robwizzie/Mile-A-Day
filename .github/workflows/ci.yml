@@ -144,6 +144,19 @@ jobs:
       # partners rule, counted workouts only, and private workouts stay null.
       - name: Buddy invite candidates check
         run: node scripts/buddy-candidates-check.mjs
+      # The lock-screen countdown: APNs liveactivity shape, who may register,
+      # countdown on start (never to the starter), end on the first report,
+      # end on leave; and the Watch/phone reporting device.
+      - name: Buddy live activity + reporting device check
+        run: node scripts/buddy-live-activity-check.mjs
+      # "Tell me when they're out": friends only, opt-in, once a day, presence
+      # and blocks and the buddy switch all respected.
+      - name: Buddy out-alert check
+        run: node scripts/buddy-out-alert-check.mjs
+      # Nearby over Bluetooth: tokens resolve only to friends, never strangers,
+      # blocks hide, presence is symmetric, cleared tokens stop resolving.
+      - name: Buddy nearby check
+        run: node scripts/buddy-nearby-check.mjs
       # Live routes are the one place a position leaves the phone mid-walk. A
       # hole here is a privacy bug nobody sees, so every door is pinned: the
       # opt-in, reciprocity, blocks, stealth, maps-off, and deletion on finish.

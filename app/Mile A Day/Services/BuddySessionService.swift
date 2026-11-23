@@ -935,6 +935,9 @@ final class BuddySessionService: ObservableObject {
                         // opinion" and writes NULL, so an older build behaves
                         // exactly as it does today.
                         "paused": isPaused,
+                        // Which device is recording (additive). The Watch
+                        // sends "watch", so the phone knows to stand down.
+                        "device": "phone",
                     ],
                     responseType: BuddySessionState.self
                 ))
@@ -1171,6 +1174,7 @@ final class BuddySessionService: ObservableObject {
             session = nil
             droppedInviteeNames = []
             stopPolling()
+            BuddyWalkActivityManager.shared.sync(session: nil, currentUserId: currentUserId)
             return
         }
         // The dropped-invitee note belongs to ONE lobby; a different session
@@ -1190,6 +1194,90 @@ final class BuddySessionService: ObservableObject {
         session = state
         if state.status == .completed || state.status == .cancelled {
             stopPolling()
+        }
+        // The lock-screen card follows the walk (BuddyWalkActivityManager).
+        BuddyWalkActivityManager.shared.sync(session: state, currentUserId: currentUserId)
+    }
+
+    // MARK: - Lock-screen countdown, out alerts, nearby
+
+    /// Hand the server this walk's Live Activity push token, so it can push
+    /// the countdown onto a locked phone. Best-effort: without it the card
+    /// still shows "waiting" and the app updates it whenever it runs.
+    func registerLiveActivity(sessionId: String, pushToken: String) async {
+        do {
+            _ = try await request(
+                "/buddy/sessions/\(sessionId)/live-activity",
+                method: .POST,
+                json: ["pushToken": pushToken, "environment": AppEnvironment.apnsEnvironment],
+                responseType: BuddyOKResponse.self)
+        } catch {
+            print("[BuddySessionService] live activity register failed: \(error)")
+        }
+    }
+
+    /// Friends this user asked to hear about when they're out.
+    @Published private(set) var outAlertFriendIds: Set<String> = []
+
+    func loadOutAlerts() async {
+        do {
+            let response = try await request(
+                "/buddy/out-alerts", responseType: BuddyOutAlertsResponse.self)
+            outAlertFriendIds = Set(response.friendIds)
+        } catch {
+            print("[BuddySessionService] out alerts load failed: \(error)")
+        }
+    }
+
+    /// Optimistic: flips at once, rolls back if the server says no.
+    func setOutAlert(friendId: String, enabled: Bool) async throws {
+        let before = outAlertFriendIds
+        if enabled { outAlertFriendIds.insert(friendId) } else { outAlertFriendIds.remove(friendId) }
+        do {
+            let response = try await request(
+                "/buddy/out-alerts/\(friendId)",
+                method: .PUT,
+                json: ["enabled": enabled],
+                responseType: BuddyOutAlertSetResponse.self)
+            if response.enabled { outAlertFriendIds.insert(friendId) } else { outAlertFriendIds.remove(friendId) }
+        } catch {
+            outAlertFriendIds = before
+            throw error
+        }
+    }
+
+    /// The token to broadcast nearby, or nil when this user doesn't share
+    /// presence (then the phone neither broadcasts nor scans).
+    func nearbyToken() async -> (token: String, expiresIn: TimeInterval)? {
+        do {
+            let response = try await request(
+                "/buddy/nearby/token", method: .POST, responseType: BuddyNearbyTokenResponse.self)
+            guard let token = response.token, !token.isEmpty else { return nil }
+            return (token, TimeInterval(response.expiresIn))
+        } catch {
+            print("[BuddySessionService] nearby token failed: \(error)")
+            return nil
+        }
+    }
+
+    func clearNearbyToken() async {
+        _ = try? await request(
+            "/buddy/nearby/token", method: .DELETE, responseType: BuddyOKResponse.self)
+    }
+
+    /// Which heard tokens are this user's friends. Strangers resolve to nothing.
+    func resolveNearby(tokens: [String]) async -> [BuddyNearbyMatch] {
+        guard !tokens.isEmpty else { return [] }
+        do {
+            return try await request(
+                "/buddy/nearby/resolve",
+                method: .POST,
+                json: ["tokens": tokens],
+                responseType: BuddyNearbyResolveResponse.self
+            ).friends
+        } catch {
+            print("[BuddySessionService] nearby resolve failed: \(error)")
+            return []
         }
     }
 

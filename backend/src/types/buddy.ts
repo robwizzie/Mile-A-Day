@@ -230,6 +230,12 @@ export interface BuddyParticipantView {
    * lenient and flaps, and a roster badge that flickers is worse than none.
    */
   is_paused: boolean;
+  /**
+   * The device recording them, from their latest report: 'watch' when an
+   * Apple Watch is, so their phone doesn't start a second workout. Null =
+   * the phone (and every build before Watch buddy walks).
+   */
+  reporting_device: "phone" | "watch" | null;
   is_host: boolean;
   place: number | null;
   final_distance_miles: number | null;

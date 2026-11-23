@@ -41,7 +41,7 @@
 		<string>com.mileaday.background-refresh</string>
 	</array>
 	<key>NSBluetoothAlwaysUsageDescription</key>
-	<string>Mile A Day uses Bluetooth to connect to a gym treadmill during an indoor workout, so your mile counts the treadmill's own distance and speed. It only reads the treadmill's data and never controls the machine.</string>
+	<string>Mile A Day uses Bluetooth to connect to a gym treadmill during an indoor workout, so your mile counts the treadmill's own distance and speed (it only reads the treadmill's data and never controls the machine), and, if you turn it on, to find friends right next to you while you're setting up a buddy walk. It never uses your location.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Mile A Day uses the camera to take photos for your walk and run posts and stories, and to scan a friend's profile QR code so you can add each other quickly.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
