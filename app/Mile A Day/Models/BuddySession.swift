@@ -278,6 +278,9 @@ struct BuddyParticipant: Codable, Identifiable, Equatable {
     /// thing anyone on the walk wanted to know; "1.20 mi · 4m ago" is not a
     /// stale lie, it is precisely what we know.
     let lastHeardSeconds: Int?
+    /// "phone" | "watch": the device behind their latest report. Nil from a
+    /// server or build that predates Watch buddy walks (read as the phone).
+    let reportingDevice: String?
     /// They are paused and still on the walk — manually, or by the tracker's
     /// movement gate having gone quiet for a full evidence window
     /// (`WorkoutLocationManager.isPausedForCrew`). Optional twice over: nil
@@ -340,6 +343,13 @@ struct BuddyParticipant: Codable, Identifiable, Equatable {
         status == .active && isStale && lastHeardSeconds == nil
     }
 
+    /// Their Apple Watch is recording this walk right now (a fresh report
+    /// that said `device: "watch"`). The phone stands down: no second
+    /// workout, no "not recording" banner.
+    var isRecordingOnWatch: Bool {
+        status == .active && reportingDevice == "watch" && lastHeardSeconds != nil && !isStale
+    }
+
     var lastHeardAgo: String? {
         guard let seconds = lastHeardSeconds else { return nil }
         if seconds < 60 { return "just now" }
@@ -371,6 +381,7 @@ struct BuddyParticipant: Codable, Identifiable, Equatable {
         case durationSeconds = "duration_seconds"
         case isStale = "is_stale"
         case lastHeardSeconds = "last_heard_seconds"
+        case reportingDevice = "reporting_device"
         case isPaused = "is_paused"
         case isHost = "is_host"
         case place

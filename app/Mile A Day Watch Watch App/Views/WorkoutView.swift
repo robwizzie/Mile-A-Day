@@ -1,5 +1,6 @@
 import SwiftUI
 import HealthKit
+import Combine
 
 // MARK: - Workout View
 // Apple Workout-style paginated tracker — swipe between three pages:
@@ -15,7 +16,11 @@ struct WorkoutView: View {
     let startingDistance: Double
     let activityType: HKWorkoutActivityType
     let locationType: HKWorkoutSessionLocationType
+    /// A buddy walk this workout records (started from its card): progress
+    /// goes to the crew every 5s and the finish closes it (WatchBuddyClient).
+    var buddySessionId: String? = nil
     @Environment(\.dismiss) var dismiss
+    private let buddyTick = Timer.publish(every: 5, on: .main, in: .common).autoconnect()
 
     @StateObject private var workoutManager = WatchWorkoutManager()
     @State private var showRecap = false
@@ -95,11 +100,13 @@ struct WorkoutView: View {
                                              miles: totalDailyDistance, goal: goalDistance)
             }
         }
+        .onReceive(buddyTick) { _ in reportBuddyProgress() }
         .onChange(of: workoutManager.endedWithoutRequest) { _, ended in
             // The session ended without Stop being tapped — the paired iPhone
             // ended it, or it failed. Follow it to the recap rather than
             // leaving a tracking screen whose numbers have quietly stopped.
             if ended && !showRecap {
+                finishBuddyWalk()
                 showRecap = true
                 WKInterfaceDevice.current().play(.stop)
             }
@@ -493,6 +500,32 @@ struct WorkoutView: View {
         // Stop can no longer end in a frozen screen.
         workoutManager.endWorkout { _ in
             showRecap = true
+        }
+        finishBuddyWalk()
+    }
+
+    // MARK: - Buddy walk
+
+    private func reportBuddyProgress() {
+        guard let buddySessionId, !showRecap, !showCountdown,
+              workoutManager.sessionState == .running || workoutManager.sessionState == .paused
+        else { return }
+        let miles = workoutManager.distance
+        let seconds = workoutManager.elapsedTime
+        let paused = workoutManager.isPaused
+        Task {
+            await WatchBuddyClient.shared.reportProgress(
+                sessionId: buddySessionId, miles: miles, seconds: seconds, paused: paused)
+        }
+    }
+
+    private func finishBuddyWalk() {
+        guard let buddySessionId else { return }
+        let miles = workoutManager.distance
+        let seconds = workoutManager.elapsedTime
+        Task {
+            await WatchBuddyClient.shared.finish(
+                sessionId: buddySessionId, miles: miles, seconds: seconds)
         }
     }
 }

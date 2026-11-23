@@ -1486,6 +1486,9 @@ struct BuddyLobbyView: View {
     private func performHandOff(_ session: BuddySessionState) {
         guard !hasHandedOff, session.status == .active else { return }
         guard session.me(buddy.currentUserId)?.status != .finished else { return }
+        // Their Watch is recording this walk: a phone workout too would be a
+        // second, overlapping record of the same miles.
+        guard session.me(buddy.currentUserId)?.isRecordingOnWatch != true else { return }
         hasHandedOff = true
         MADHaptics.success()
         onStart(session)

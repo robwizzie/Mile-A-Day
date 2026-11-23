@@ -2559,6 +2559,8 @@ struct WorkoutTrackingView: View {
               // Defense in depth behind the lobby/entry-point guards: never
               // auto-start a mile for a session THIS user already finished.
               buddyService.session?.me(buddyService.currentUserId)?.status != .finished,
+              // Recording on their Apple Watch already (WatchBuddyClient).
+              buddyService.session?.me(buddyService.currentUserId)?.isRecordingOnWatch != true,
               InProgressWorkoutStore.load()?.isActive != true else { return false }
         hasAutoStartedBuddyWorkout = true
         // This person's OWN answer from the lobby (a friend can run beside
