@@ -8,7 +8,10 @@ Models/HealthKitManager.swift
 Models/WorkoutIndex.swift
 Models/WorkoutProcessor.swift
 Utils/SplitCalculator.swift
-Core/State/StepGoalDayStore.swift
 Models/UserManager.swift
 Models/User.swift
 Models/YearlyMilestoneInfo.swift
+Models/WorkoutSplit.swift
+Models/BackendUser.swift
+Core/State/StreakCoverageStore.swift
+Services/TokenStore.swift
