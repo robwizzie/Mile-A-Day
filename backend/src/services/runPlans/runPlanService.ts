@@ -815,6 +815,13 @@ export async function undoProposal(userId: string, id: string, today: string) {
     const p = await lockPlanAndProposal(client, userId, id);
     if (p.status !== "applied") throw new RunPlanError("proposal_not_pending", 409, { status: p.status });
     if (!p.undo_until || Date.parse(p.undo_until) < Date.now()) throw new RunPlanError("undo_expired", 409);
+    // Restoring the old days must still pass the HARD rules against the plan as it is now
+    // (e.g. A eased Tue, B then made Wed hard: undoing A would put two hard days in a row).
+    const restore = p.changes.filter((c) => c.before && c.local_date >= today).map((c) => ({ local_date: c.local_date, after: c.before! }));
+    if (restore.length) {
+      const v = validateChanges(await currentValidationContext(client, p, today, restore.map((c) => c.local_date)), restore);
+      if (!v.ok) throw new RunPlanError("undo_conflicts_with_plan", 409, { local_date: v.violations[0].local_date, violations: v.violations });
+    }
     // `changes` holds exactly the days the apply wrote (past days were dropped then).
     for (const c of p.changes) {
       if (!c.before) continue;

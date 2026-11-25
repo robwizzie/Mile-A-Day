@@ -472,6 +472,29 @@ async function main() {
   check("second apply would make back-to-back hard days → 409 stale_proposal with the violation", [bErr?.code, bErr?.status, (bErr?.extra?.violations ?? []).some((v) => v.rule === "no_back_to_back_hard")], ["stale_proposal", 409, true]);
   check("…refused proposal is superseded; Thursday untouched (still easy)", [(await S.getProposal(SEQ, pB.id, today)).status, await dayVer(thu), (await dayOf(thu)).is_hard], ["superseded", thuVer, false]);
 
+  // Undo re-checks HARD rules: Fri starts hard; A eases Fri, B makes Sat hard; undoing A
+  // would put Fri + Sat hard in a row (Wed, Fri, Sat = 3 hard that week).
+  const fri1 = E.addDays(W, 4);
+  const sat1 = E.addDays(W, 5);
+  const tempoDay1 = E.buildDay(tempo, bctx, { phase: "rolling", week_index: 0 });
+  await db.query(`UPDATE run_plan_days SET kind = 'tempo', day = $3::jsonb, note = $4 WHERE plan_id = $1 AND local_date = $2::date`, [seqId, fri1, JSON.stringify(tempoDay1), tempoDay1.note]);
+  const uA = await S.createProposal(SEQ, { source: "user", kind: "adjust", title: "Easy Fri", reason: "Tired.", changes: [{ local_date: fri1, spec: { kind: "easy", distance_mi: 3 } }], deviation_reason: "Test." }, today);
+  await S.applyProposal(SEQ, uA.id, today);
+  const uB = await S.createProposal(SEQ, { source: "user", kind: "adjust", title: "Sat tempo", reason: "Fresh.", changes: [{ local_date: sat1, spec: tempo }], deviation_reason: "Test." }, today);
+  await S.applyProposal(SEQ, uB.id, today);
+  const friVer1 = await dayVer(fri1);
+  let uErr = null;
+  try {
+    await S.undoProposal(SEQ, uA.id, today);
+  } catch (e) {
+    uErr = e;
+  }
+  check("undo that would make back-to-back hard days → 409 undo_conflicts_with_plan with the violation", [uErr?.code, uErr?.status, (uErr?.extra?.violations ?? []).some((v) => v.rule === "no_back_to_back_hard")], ["undo_conflicts_with_plan", 409, true]);
+  check("…nothing written: A still applied, Friday still easy", [(await S.getProposal(SEQ, uA.id, today)).status, await dayVer(fri1), (await dayOf(fri1)).is_hard], ["applied", friVer1, false]);
+  await S.undoProposal(SEQ, uB.id, today);
+  const reA = await S.undoProposal(SEQ, uA.id, today);
+  check("undo B first, then A undoes cleanly (Friday hard again)", [reA.proposal.status, (await dayOf(fri1)).is_hard, (await dayOf(sat1)).is_hard], ["undone", true, false]);
+
   // Late acceptance: proposed on W2 Mon for Mon–Thu, accepted on W2 Wed.
   const w2 = [0, 1, 2, 3].map((i) => E.addDays(W2, i));
   const w2Before = await Promise.all(w2.map(async (d) => [await dayVer(d), (await dayOf(d)).distance_mi]));
