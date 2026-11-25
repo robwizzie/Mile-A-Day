@@ -310,6 +310,15 @@ struct PlanRunLiveCard: View {
         return tile(title: "PACE", value: value, unit: unit, note: note.text, noteColor: note.color)
     }
 
+    /// Why there's no bpm: the Watch link's state (`WatchWorkoutLink`).
+    private var noHeartRateNote: String {
+        switch WatchWorkoutLink.shared.state {
+        case .starting: return String(localized: "Connecting to your Watch.")
+        case .connected: return String(localized: "Waiting for your Watch.")
+        case .off, .unavailable: return String(localized: "Watch not connected. Cues use pace and feel.")
+        }
+    }
+
     @ViewBuilder
     private func heartTile(_ status: PlanRunStatus) -> some View {
         if let bpm = coach.heartRate {
@@ -329,7 +338,7 @@ struct PlanRunLiveCard: View {
                 Text("No heart rate")
                     .madFont(size: 13, weight: .black, design: .rounded, maxScale: 1.4)
                     .foregroundColor(.white.opacity(0.85))
-                Text("Cues use pace and feel.")
+                Text(noHeartRateNote)
                     .madFont(size: 11, weight: .medium, design: .rounded, maxScale: 1.4)
                     .foregroundColor(.white.opacity(0.55))
                     .fixedSize(horizontal: false, vertical: true)

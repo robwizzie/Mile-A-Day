@@ -49,6 +49,29 @@ final class WatchWorkoutManager: NSObject, ObservableObject {
     @Published var planCountingDown: Bool = false
     private var planEngine: PlanRunCoachEngine?
 
+    /// A run the iPhone records (`startCompanion`, from
+    /// `WatchAppDelegate.handle(_:)`): this session is the heart-rate source
+    /// and the wrist's copy of the phone's plan screen. It mirrors to the
+    /// phone, takes distance, clock and plan from it (`WorkoutMirrorMessage`)
+    /// and DISCARDS its workout at the end: the phone saves the run.
+    private(set) var isCompanion = false
+    /// The companion run is over (either side ended it, or the phone went
+    /// quiet): the phone-run screen closes.
+    @Published var companionFinished = false
+    private var lastPhoneMessageAt = Date()
+    private var lastHRSentAt = Date.distantPast
+    private var lastHRSent: Double = 0
+    /// Don't send `.ended` to the phone: it ended the run itself, or this
+    /// session is standing down while the phone's run goes on.
+    private var phoneEnded = false
+    private var sessionEndCalled = false
+    /// No word from the phone for this long: stop recording heart rate
+    /// nobody is reading (the phone app died, or the run ended unseen).
+    private let phoneSilenceLimit: TimeInterval = 15 * 60
+
+    /// The manager whose session is live on this Watch (one at a time).
+    private(set) static weak var live: WatchWorkoutManager?
+
     // HealthKit. The store must outlive every operation started on it — a
     // released store answers nothing, silently.
     private let healthStore = HKHealthStore()
@@ -172,6 +195,14 @@ final class WatchWorkoutManager: NSObject, ObservableObject {
 
     // MARK: - Lifecycle
 
+    /// The iPhone started a run and asked for this Watch
+    /// (`HKHealthStore.startWatchApp(with:)` → `WKApplicationDelegate.handle`).
+    func startCompanion(configuration: HKWorkoutConfiguration) {
+        isCompanion = true
+        lastPhoneMessageAt = Date()
+        startWorkout(activityType: configuration.activityType, locationType: configuration.locationType)
+    }
+
     func startWorkout(activityType: HKWorkoutActivityType, locationType: HKWorkoutSessionLocationType) {
         guard HKHealthStore.isHealthDataAvailable() else {
             DispatchQueue.main.async {
@@ -231,31 +262,67 @@ final class WatchWorkoutManager: NSObject, ObservableObject {
             session.delegate = self
             builder.delegate = self
 
-            builder.dataSource = HKLiveWorkoutDataSource(
+            let source = HKLiveWorkoutDataSource(
                 healthStore: healthStore,
                 workoutConfiguration: configuration
             )
-
-            let start = Date()
-            startDate = start
-            session.startActivity(with: start)
-            builder.beginCollection(withStart: start) { [weak self] success, error in
-                guard success == false || error != nil else { return }
-                print("[Watch] beginCollection failed: \(error?.localizedDescription ?? "unknown")")
-                DispatchQueue.main.async {
-                    // Nothing is being collected, so the distance would never
-                    // move and Stop would have nothing to end. Say so now
-                    // rather than at the end of a walk that recorded nothing.
-                    self?.startupFailure = "Couldn't start recording this workout."
+            if isCompanion {
+                // The iPhone measures distance (GPS or treadmill) and saves
+                // the workout: this session collects heart rate only.
+                let phoneOwned: [HKQuantityTypeIdentifier] = [.distanceWalkingRunning, .activeEnergyBurned]
+                for identifier in phoneOwned {
+                    if let type = HKQuantityType.quantityType(forIdentifier: identifier) {
+                        source.disableCollection(for: type)
+                    }
                 }
             }
+            builder.dataSource = source
+            Self.live = self
 
-            startTimer()
-            if locationType == .outdoor { startRoute() }
+            guard isCompanion else {
+                beginActivity(session: session, builder: builder, locationType: locationType)
+                return
+            }
+            // Mirror first, then start (Apple's order): the phone gets the
+            // session in its `workoutSessionMirroringStartHandler`.
+            session.startMirroringToCompanionDevice { [weak self] success, error in
+                let reason = error?.localizedDescription
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    guard success else {
+                        print("[Watch] startMirroringToCompanionDevice failed: \(reason ?? "unknown")")
+                        self.startupFailure = "Couldn't connect to your iPhone's run."
+                        self.standDownCompanion()
+                        return
+                    }
+                    self.beginActivity(session: session, builder: builder, locationType: locationType)
+                }
+            }
         } catch {
             print("[Watch] Failed to create workout session: \(error.localizedDescription)")
             startupFailure = "Couldn't start this workout."
         }
+    }
+
+    private func beginActivity(session: HKWorkoutSession, builder: HKLiveWorkoutBuilder,
+                               locationType: HKWorkoutSessionLocationType) {
+        let start = Date()
+        startDate = start
+        session.startActivity(with: start)
+        builder.beginCollection(withStart: start) { [weak self] success, error in
+            guard success == false || error != nil else { return }
+            print("[Watch] beginCollection failed: \(error?.localizedDescription ?? "unknown")")
+            DispatchQueue.main.async {
+                // Nothing is being collected, so the distance would never
+                // move and Stop would have nothing to end. Say so now
+                // rather than at the end of a walk that recorded nothing.
+                self?.startupFailure = "Couldn't start recording this workout."
+            }
+        }
+
+        startTimer()
+        // A companion run's route is the phone's.
+        if locationType == .outdoor, !isCompanion { startRoute() }
     }
 
     private func startTimer() {
@@ -263,6 +330,11 @@ final class WatchWorkoutManager: NSObject, ObservableObject {
         timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             guard let self else { return }
             DispatchQueue.main.async {
+                // A companion run's clock, distance and plan are the phone's.
+                if self.isCompanion {
+                    self.companionTick()
+                    return
+                }
                 // The builder's own clock already excludes paused time, and it
                 // is the clock of the workout HealthKit will actually save — so
                 // the screen can't drift away from the saved duration the way
@@ -275,6 +347,102 @@ final class WatchWorkoutManager: NSObject, ObservableObject {
                 self.tickPlan()
             }
         }
+    }
+
+    // MARK: - Companion (a run the iPhone records)
+
+    /// Main-thread only; the 1 Hz tick. Heart rate to the phone (on change,
+    /// at least every 5 s, never more than every 2 s), and a stop when the
+    /// phone has gone quiet for good.
+    private func companionTick() {
+        guard !isEnding else { return }
+        if Date().timeIntervalSince(lastPhoneMessageAt) > phoneSilenceLimit {
+            print("[Watch] No word from the iPhone; ending the companion session")
+            standDownCompanion()
+            return
+        }
+        let bpm = currentHeartRate
+        let sinceSent = Date().timeIntervalSince(lastHRSentAt)
+        guard bpm > 0, sinceSent >= 2, bpm != lastHRSent || sinceSent >= 5 else { return }
+        lastHRSent = bpm
+        lastHRSentAt = Date()
+        sendToPhone(.heartRate(bpm: bpm, at: Date()))
+    }
+
+    /// The relaunched iPhone app asked again: mirror the running session to it.
+    func remirrorCompanion() {
+        guard isCompanion, !isEnding, let session, session.state == .running || session.state == .paused else { return }
+        lastPhoneMessageAt = Date()
+        session.startMirroringToCompanionDevice { _, error in
+            if let error { print("[Watch] re-mirror: \(error.localizedDescription)") }
+        }
+    }
+
+    /// End this companion session WITHOUT ending the phone's run (it goes on
+    /// without heart rate).
+    func standDownCompanion() {
+        guard isCompanion else { return }
+        phoneEnded = true
+        endWorkout { _ in }
+    }
+
+    private func sendToPhone(_ message: WorkoutMirrorMessage) {
+        guard isCompanion, let session, let data = message.encoded else { return }
+        session.sendToRemoteWorkoutSession(data: data) { _, error in
+            if let error { print("[Watch] send to iPhone failed: \(error.localizedDescription)") }
+        }
+    }
+
+    /// Main-thread only.
+    private func applyFromPhone(_ message: WorkoutMirrorMessage) {
+        guard isCompanion else { return }
+        lastPhoneMessageAt = Date()
+        switch message {
+        case .run(let run):
+            guard !isEnding else { return }
+            distance = run.miles
+            elapsedTime = run.elapsed
+            if planStatus != run.status { planStatus = run.status }
+            if planPace != run.pace { planPace = run.pace }
+            // Taps for what's happening now; a batch delivered late (this app
+            // was suspended) only updates the screen.
+            if let status = run.status, Date().timeIntervalSince(run.at) < 10 {
+                for event in run.events { cue(event, status: status) }
+            }
+        case .ended:
+            phoneEnded = true
+            if !isEnding { endWorkout { _ in } }
+        case .heartRate:
+            break
+        }
+    }
+
+    /// `end()` once. A companion end tells the phone first (unless the phone
+    /// ended it), giving the message a moment before the session goes.
+    private func endSession(_ session: HKWorkoutSession) {
+        guard !sessionEndCalled else { return }
+        guard isCompanion, !phoneEnded else {
+            sessionEndCalled = true
+            session.end()
+            return
+        }
+        guard let data = WorkoutMirrorMessage.ended.encoded else {
+            sessionEndCalled = true
+            session.end()
+            return
+        }
+        session.sendToRemoteWorkoutSession(data: data) { [weak self] _, _ in
+            DispatchQueue.main.async { self?.endSessionNow(session) }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+            self?.endSessionNow(session)
+        }
+    }
+
+    private func endSessionNow(_ session: HKWorkoutSession) {
+        guard !sessionEndCalled else { return }
+        sessionEndCalled = true
+        if session.state != .ended { session.end() }
     }
 
     /// Best effort: a walk with no location permission still saves, without a map.
@@ -336,7 +504,7 @@ final class WatchWorkoutManager: NSObject, ObservableObject {
             // The timer above was already dead by then, so Stop read as a
             // button that did nothing. Finalizing is now driven by the .ended
             // state transition below, with the deadline as the backstop.
-            session.end()
+            endSession(session)
         }
     }
 
@@ -373,6 +541,15 @@ final class WatchWorkoutManager: NSObject, ObservableObject {
 
         guard let builder else {
             finishEnding(false)
+            return
+        }
+
+        if isCompanion {
+            // The iPhone saves this run (its distance, its HKWorkoutBuilder).
+            // Saving here too would put a second, Watch-sourced copy of the
+            // same run in Health, and into the app's own sync.
+            builder.discardWorkout()
+            finishEnding(true)
             return
         }
 
@@ -438,6 +615,8 @@ final class WatchWorkoutManager: NSObject, ObservableObject {
 
         saveFailed = !success
         if !endWasUserRequested { endedWithoutRequest = true }
+        if Self.live === self { Self.live = nil }
+        if isCompanion { companionFinished = true }
 
         let waiting = endCompletions
         endCompletions = []
@@ -468,6 +647,8 @@ final class WatchWorkoutManager: NSObject, ObservableObject {
     private func applyStatistics(_ statistics: HKStatistics) {
         switch statistics.quantityType {
         case HKQuantityType.quantityType(forIdentifier: .distanceWalkingRunning):
+            // A companion run's distance is the phone's (`applyFromPhone`).
+            guard !isCompanion else { return }
             let meters = statistics.sumQuantity()?.doubleValue(for: HKUnit.meter()) ?? 0
             distance = meters * 0.000621371
 
@@ -514,6 +695,15 @@ extension WatchWorkoutManager: HKWorkoutSessionDelegate {
                 self.armEndDeadline()
             }
             self.finalizeBuilder(endingAt: date)
+        }
+    }
+
+    /// The iPhone's messages for a companion run (`WorkoutMirrorMessage`).
+    func workoutSession(_ workoutSession: HKWorkoutSession, didReceiveDataFromRemoteWorkoutSession data: [Data]) {
+        DispatchQueue.main.async {
+            for item in data {
+                if let message = WorkoutMirrorMessage.decode(item) { self.applyFromPhone(message) }
+            }
         }
     }
 

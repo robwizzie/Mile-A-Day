@@ -2910,7 +2910,7 @@ struct PlanRunDay: Codable, Equatable {
 }
 
 /// Where the runner is in the plan, for one tick.
-struct PlanRunStatus: Equatable {
+struct PlanRunStatus: Codable, Equatable {
     let index: Int
     let segment: PlanRunSegment
     let next: PlanRunSegment?
@@ -3069,7 +3069,7 @@ struct PlanRunTracker: Codable, Equatable {
 
 /// Pace vs the segment's band, with a 2 s/mi dead band past its edges so a
 /// stride's drift is silence. Drift is quoted against the target.
-enum PlanRunPaceCall: Equatable {
+enum PlanRunPaceCall: Codable, Equatable {
     case onTarget
     /// Seconds per mile faster than target.
     case fast(Double)
@@ -3086,7 +3086,7 @@ enum PlanRunPaceCall: Equatable {
     }
 }
 
-enum PlanRunHRCall: Equatable {
+enum PlanRunHRCall: Codable, Equatable {
     /// Over the segment's ceiling.
     case high(bpm: Int, ceiling: Int)
     /// Under a work segment's floor (HR-scored reps only).
@@ -3094,7 +3094,7 @@ enum PlanRunHRCall: Equatable {
 }
 
 /// What the coach wants said on this tick. The text is each platform's.
-enum PlanRunEvent: Equatable {
+enum PlanRunEvent: Codable, Equatable {
     /// First tick: the plan starts with `status.segment`.
     case began
     /// 10 seconds before the next segment.
@@ -3467,6 +3467,59 @@ enum PlanRunFormat {
         if h > 0 { return String(format: "%d:%02d:%02d", h, m, s) }
         return String(format: "%d:%02d", m, s)
     }
+}
+
+// MARK: - Phone run ⇄ Watch (mirrored workout session)
+
+/// What the iPhone and the Watch say to each other over a MIRRORED
+/// `HKWorkoutSession` (`sendToRemoteWorkoutSession(data:)`, iOS 17 /
+/// watchOS 10) while a run the iPhone records is live. The phone started
+/// the Watch's session (`startWatchApp(with:)`); the Watch's session is
+/// the heart-rate source and the wrist's plan screen, and it DISCARDS its
+/// own workout at the end: the phone's workout is the one saved.
+///
+/// Lives here because both targets compile this file. JSON, Foundation
+/// only. Add cases and fields (Optional), never rename: a phone and a
+/// Watch on different builds must still read what they know, and an
+/// unknown case simply fails to decode and is ignored.
+enum WorkoutMirrorMessage: Codable, Equatable {
+    /// Watch → phone: the latest heart rate and when the Watch measured it.
+    case heartRate(bpm: Double, at: Date)
+    /// Phone → Watch: the run as the phone measures it (every 2 s, and at
+    /// once when the plan coach fires an event).
+    case run(WorkoutMirrorRun)
+    /// Either way: the runner ended the run on this device. The Watch
+    /// ends its session and discards it; the phone ends and saves its run.
+    case ended
+
+    var encoded: Data? { try? JSONEncoder().encode(self) }
+
+    static func decode(_ data: Data) -> WorkoutMirrorMessage? {
+        try? JSONDecoder().decode(WorkoutMirrorMessage.self, from: data)
+    }
+}
+
+/// One phone → Watch update. The phone owns distance (GPS, pedometer or
+/// treadmill) and the plan coach; the Watch only mirrors them.
+struct WorkoutMirrorRun: Codable, Equatable {
+    /// When the phone sent it: events in a batch the Watch got late (it was
+    /// suspended) are shown, never tapped.
+    var at: Date
+    /// This run's distance, miles.
+    var miles: Double
+    /// Wall time minus manual pauses (the plan's clock).
+    var elapsed: Double
+    var paused: Bool
+    /// The plan day (`PlanRunDay.date`), nil for a run without a plan.
+    var planDate: String?
+    /// Where the run is in the plan: segment index, the segment itself
+    /// (kind, targets, HR band), its elapsed and remaining, the rep count.
+    var status: PlanRunStatus?
+    /// The coach's smoothed pace (or the belt's), seconds per mile.
+    var pace: Double?
+    /// The plan coach's events since the last update: the Watch taps and
+    /// shows its own few words for each (`WatchWorkoutManager.cue`).
+    var events: [PlanRunEvent]
 }
 
 #if os(watchOS)

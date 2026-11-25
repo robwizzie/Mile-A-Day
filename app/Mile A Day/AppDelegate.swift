@@ -24,6 +24,11 @@ class AppDelegate: NSObject, UIApplicationDelegate {
         // only those after a plan screen happened to mount.
         Task { @MainActor in _ = RunPlanV2Store.shared }
 
+        // Run Plans v2: catch the Watch's mirrored heart-rate session. Set at
+        // launch, because HealthKit may launch the app in the background just
+        // to hand it over (`WatchWorkoutLink`).
+        WatchWorkoutLink.shared.install()
+
         // HealthKit step-count observer — start after UIApplication is ready.
         DailyStepsSyncService.shared.start()
 

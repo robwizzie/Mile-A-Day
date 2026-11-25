@@ -1,8 +1,11 @@
 import SwiftUI
 import HealthKit
+import WatchKit
 
 @main
 struct Mile_A_Day_Watch_Watch_AppApp: App {
+    /// Receives runs started on the iPhone (`handle(_:)`; `PhoneRunView`).
+    @WKApplicationDelegateAdaptor(WatchAppDelegate.self) private var appDelegate
     @StateObject private var healthManager = HealthKitManager.shared
     @StateObject private var userManager = UserManager.shared
 

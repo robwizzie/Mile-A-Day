@@ -94,6 +94,8 @@ struct ContentView: View {
     /// the one the next run coaches (nil = an ordinary run or walk).
     @ObservedObject private var planStore = WatchPlanRunStore.shared
     @State private var selectedPlan: PlanRunDay?
+    /// A run the iPhone is recording, mirrored here (`PhoneRunView`).
+    @ObservedObject private var phoneRun = PhoneRunCompanion.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.isLuminanceReduced) private var isLuminanceReduced
 
@@ -168,6 +170,12 @@ struct ContentView: View {
                         .padding(.bottom, 4)
                 }
                 .padding(.horizontal, 6)
+            }
+            // Its own node: two covers on one view fight each other.
+            .fullScreenCover(isPresented: phoneRunShown) {
+                if let manager = phoneRun.manager {
+                    PhoneRunView(manager: manager)
+                }
             }
         }
         #if DEBUG
@@ -512,6 +520,13 @@ struct ContentView: View {
             )
         }
         .buttonStyle(.plain)
+    }
+
+    private var phoneRunShown: Binding<Bool> {
+        Binding(
+            get: { phoneRun.manager != nil },
+            set: { shown in if !shown { phoneRun.close() } }
+        )
     }
 
     // MARK: - Actions

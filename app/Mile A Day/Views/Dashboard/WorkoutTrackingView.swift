@@ -2543,6 +2543,11 @@ struct WorkoutTrackingView: View {
             // And the plan coach (Run Plans v2), from its persisted snapshot
             // when it was coaching THIS workout: same segment, same stats.
             PlanRunCoachV2.shared.resume(workoutKey: saved.workoutUUID)
+            // The Watch's heart rate again (it may already be reconnecting).
+            if PlanRunCoachV2.shared.day != nil, effectiveBuddySessionId == nil {
+                WatchWorkoutLink.shared.runStarted(
+                    activityType: selectedActivityType ?? .running, locationType: selectedLocationType)
+            }
         }
         // Keeps the mid-walk join offer fresh without adding another node to
         // this already type-check-fragile chain.
@@ -3027,6 +3032,13 @@ struct WorkoutTrackingView: View {
         // step. Never alongside a ghost race; consumes the arm either way.
         // Keyed to this workout so a relaunch resumes into it, not another.
         PlanRunCoachV2.shared.begin(allowed: raceGhost == nil, workoutKey: initialState.workoutUUID)
+        // A plan run asks the paired Watch for live heart rate and puts the
+        // plan on the wrist (`WatchWorkoutLink`). Not on a buddy walk (the
+        // Watch may be recording that one itself). No Watch = no change.
+        if PlanRunCoachV2.shared.isActive, effectiveBuddySessionId == nil {
+            WatchWorkoutLink.shared.runStarted(
+                activityType: selectedActivityType ?? .running, locationType: selectedLocationType)
+        }
         // What Start My Mile pre-answers next time.
         TrackerLaunchPreference.record(selectedActivityType)
 
@@ -3118,7 +3130,27 @@ struct WorkoutTrackingView: View {
             // minus manual pauses (`elapsedTime`), never `raceClockSeconds`:
             // the moving clock stands still while you do, so a timed recovery
             // spent standing would never end.
-            PlanRunCoachV2.shared.update(distance: locationManager.liveDistance, clock: elapsedTime)
+            //
+            // Watch link first: a pause/resume/end the runner made on the
+            // Watch is followed BEFORE the tick sends the phone's state back.
+            let watch = WatchWorkoutLink.shared
+            switch watch.takeRemoteCommand() {
+            case .pause?:
+                if !locationManager.isPaused { pauseWorkout() }
+            case .resume?:
+                if locationManager.isPaused { resumeWorkout() }
+            case .end?:
+                if isTracking {
+                    stopWorkout()
+                    return
+                }
+            case nil:
+                break
+            }
+            let planEvents = PlanRunCoachV2.shared.update(
+                distance: locationManager.liveDistance, clock: elapsedTime, heartRate: watch.heartRate)
+            watch.tick(miles: locationManager.liveDistance, elapsed: elapsedTime,
+                       paused: locationManager.isPaused, events: planEvents)
             // Foreground heartbeat driver (self-throttled to ~45s). The
             // background driver is the location/pedometer callback path.
             livePresence.tick()
@@ -3290,6 +3322,9 @@ struct WorkoutTrackingView: View {
         // Run Plans v2: freeze the plan's segment stats for the grade upload
         // (before `stopTracking()` resets the distance it was measured on).
         PlanRunCoachV2.shared.end(distance: finalDistance, clock: elapsedTime)
+        // The Watch ends and DISCARDS its heart-rate session: this phone's
+        // workout is the one saved.
+        WatchWorkoutLink.shared.runEnded()
 
         // Stop timer and location tracking
         timer?.invalidate()
@@ -3608,6 +3643,7 @@ struct WorkoutTrackingView: View {
         endLiveActivity()
         InProgressWorkoutStore.clear()
         PlanRunCoachV2.shared.stop()
+        WatchWorkoutLink.shared.runEnded()
         workoutSession = nil
         workoutBuilder = nil
         isStopping = false
@@ -3648,6 +3684,7 @@ struct WorkoutTrackingView: View {
         pendingRaceStamp = nil
         GhostCoach.shared.stop()
         PlanRunCoachV2.shared.stop()
+        WatchWorkoutLink.shared.runEnded()
 
         endFinishBackgroundTask()
 

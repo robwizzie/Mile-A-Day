@@ -14,9 +14,10 @@ import Observation
 /// tracker's existing 1 Hz tick (`update`, beside `GhostCoach.update`) and
 /// keeps no timer of its own.
 ///
-/// Heart rate: the iPhone tracker has no HR source (no Watch mirroring exists
-/// between the apps), so phone runs coach on pace and feel. `update` takes an
-/// optional bpm for when one exists.
+/// Heart rate: the paired Watch's, live over a mirrored workout session
+/// (`WatchWorkoutLink`, started for plan runs); the tracker passes it to
+/// `update`. Without a Watch the run coaches on pace and feel.
+/// `update` returns the tick's events so the link can mirror them.
 ///
 /// Lifetimes: `arm` from the start wizard's Run plan option, `begin` in
 /// `startWorkout` (exclusive with a ghost race), `resume` when a relaunched
@@ -48,7 +49,7 @@ final class PlanRunCoachV2 {
     private(set) var day: PlanRunDay?
     /// Pace the coach judged (smoothed, or the belt's), seconds per mile.
     private(set) var pace: Double?
-    /// 15 s average bpm; nil on the phone today (no source).
+    /// 15 s average bpm from the Watch (`WatchWorkoutLink`); nil without one.
     private(set) var heartRate: Double?
     /// The plan's last line.
     private(set) var line: String?
@@ -262,14 +263,15 @@ final class PlanRunCoachV2 {
     /// (wall time minus MANUAL pauses — never the moving clock, which freezes
     /// while the runner stands, so a timed recovery spent standing would
     /// never end).
-    func update(distance: Double, clock: TimeInterval, heartRate bpm: Double? = nil) {
-        guard var walker = engine else { return }
+    @discardableResult
+    func update(distance: Double, clock: TimeInterval, heartRate bpm: Double? = nil) -> [PlanRunEvent] {
+        guard var walker = engine else { return [] }
         let link = TreadmillLink.shared
         let belt = link.isConnected ? link.speedKmh.map { $0 / 1.609344 } : nil
         let beltPace = belt.flatMap { $0 > 0.5 ? 3600 / $0 : nil }
         let events = walker.tick(clock: clock, miles: distance, beltPace: beltPace, heartRate: bpm)
         engine = walker
-        guard let fresh = walker.status else { return }
+        guard let fresh = walker.status else { return events }
 
         if status != fresh { status = fresh }
         if pace != walker.pace { pace = walker.pace }
@@ -280,6 +282,7 @@ final class PlanRunCoachV2 {
 
         for event in events { handle(event, status: fresh) }
         persist(force: !events.isEmpty)
+        return events
     }
 
     private func handle(_ event: PlanRunEvent, status: PlanRunStatus) {
