@@ -1692,6 +1692,26 @@ final class MADWatchBridge: NSObject {
     private var lastPushedHash: Int = 0
     private var lastFacePushHash: Int = 0
 
+    #if os(iOS)
+    /// Run Plans v2: the coming week's runnable plan days for the Watch
+    /// (`PlanRunDay.json(_:)`), written only by the iPhone-only
+    /// `PlanRunWatchSync`. PERSISTED, not in-memory: most pushes (including
+    /// background HealthKit launches) happen before `RunPlanV2Store` exists,
+    /// and a context without the key deletes the Watch's copy.
+    /// nil = no plan (or signed out): the key is left out on purpose.
+    static let planRunJSONKey = "MAD_watchPlanRunDaysV2"
+    var planRunJSON: String? {
+        get { UserDefaults.standard.string(forKey: Self.planRunJSONKey) }
+        set {
+            if let newValue {
+                UserDefaults.standard.set(newValue, forKey: Self.planRunJSONKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: Self.planRunJSONKey)
+            }
+        }
+    }
+    #endif
+
     private override init() { super.init() }
 
     func activate() {
@@ -1761,10 +1781,17 @@ final class MADWatchBridge: NSObject {
         if let flameyChoice { payload["flameyChoice"] = flameyChoice }
         if let flameySignup { payload["flameySignup"] = flameySignup }
 
+        // Run Plans v2 (Mile A Day+): the coming week's sessions, so the Watch
+        // can coach today's even after midnight with the phone app closed.
+        // Omitted when there is none — the context REPLACES the last one, so a
+        // missing key is how the Watch learns the plan is gone.
+        let planRunJSON = self.planRunJSON
+        if let planRunJSON { payload[PlanRunDay.contextKey] = planRunJSON }
+
         // Hash on the value-bearing fields only (not the timestamp) so we don't
         // re-send identical state. Token + id are included so a token change
         // forces a re-push.
-        let stableHash = "\(payload["streak"] ?? 0)|\(payload["todayMiles"] ?? 0)|\(payload["goalMiles"] ?? 0)|\(payload["firstName"] ?? "")|\(payload["name"] ?? "")|\(authToken ?? "")|\(backendUserId ?? "")|\(tokensReady)|\(flameyOwned)|\(flameyChoice?.hashValue ?? 0)|\(flameySignup ?? 0)".hashValue
+        let stableHash = "\(payload["streak"] ?? 0)|\(payload["todayMiles"] ?? 0)|\(payload["goalMiles"] ?? 0)|\(payload["firstName"] ?? "")|\(payload["name"] ?? "")|\(authToken ?? "")|\(backendUserId ?? "")|\(tokensReady)|\(flameyOwned)|\(flameyChoice?.hashValue ?? 0)|\(flameySignup ?? 0)|\(planRunJSON ?? "")".hashValue
         if stableHash == lastPushedHash { return }
         lastPushedHash = stableHash
 
@@ -1847,6 +1874,13 @@ final class MADWatchBridge: NSObject {
                 hk.heldStreakTokens = tokens
             }
             WatchFlameyWardrobe.apply(context: context)
+            // Run Plans v2. Only from a FULL context (`flameyOwned` is always
+            // in one): the watch-face path (`didReceiveUserInfo`) carries a
+            // subset without this key, and reading its absence there as "no
+            // plan" would wipe today's session.
+            if context["flameyOwned"] != nil {
+                WatchPlanRunStore.shared.apply(json: context[PlanRunDay.contextKey] as? String)
+            }
             userManager.saveUserData()
             WatchComplicationSync.update(streak: hk.retroactiveStreak, miles: hk.todaysDistance,
                                          goal: userManager.currentUser.goalMiles > 0 ? userManager.currentUser.goalMiles : 1.0)

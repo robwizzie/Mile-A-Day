@@ -277,6 +277,7 @@ class UserManager: ObservableObject {
         Task { @MainActor in InjuryPauseState.shared.reset() }
         Task { @MainActor in ShoeStore.shared.reset() }
         Task { @MainActor in PlusStore.shared.reset() }
+        Task { @MainActor in RunPlanV2Store.shared.reset(); RunFitnessAnalyzer.shared.reset() }
         #endif
 
         currentUser.appleId = nil

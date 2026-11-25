@@ -350,6 +350,8 @@ final class RunPlanV2Store: ObservableObject {
 
     private var lastRefresh: Date?
     private var lastRefreshDay: String?
+    private var syncTask: Task<Void, Never>?
+    private var uploadObserver: NSObjectProtocol?
     private let cachePrefix = "runPlanV2Current|"
     private let openDayPrefix = "runPlanV2OpenDay|"
 
@@ -357,6 +359,12 @@ final class RunPlanV2Store: ObservableObject {
         if let cached = loadCache() {
             adoptCurrent(cached, persist: false)
             loaded = true
+        }
+        // Posted by WorkoutSyncService after every successful upload.
+        uploadObserver = NotificationCenter.default.addObserver(
+            forName: Notification.Name("MAD_WorkoutsUploaded"), object: nil, queue: .main
+        ) { _ in
+            Task { @MainActor in RunPlanV2Store.shared.workoutDidSync() }
         }
     }
 
@@ -456,8 +464,8 @@ final class RunPlanV2Store: ObservableObject {
             let result = try await RunPlanV2Service.open(today: today)
             UserDefaults.standard.set(today, forKey: key)
             if let ai = result.ai { status?.ai = ai }
-            if (result.ai ?? ai).effectiveProvider == .apple, AppleCoach.isAvailable {
-                Task { await AppleCoach.shared.runAdjustPass(trigger: .firstOpen) }
+            if coachTier.isAI {
+                Task { await RunPlanCoach.runBackgroundPass(trigger: .firstOpen) }
             }
         } catch {
             // Not marked: the next refresh tries again.
@@ -468,16 +476,16 @@ final class RunPlanV2Store: ObservableObject {
     /// asynchronously, so wait a moment, refetch, then let Apple's coach look.
     func workoutDidSync() {
         guard TokenStore.hasTokens, hasPlan || status?.hasPlan == true else { return }
-        Task { @MainActor in
+        // A history import posts one upload per batch: coalesce them.
+        syncTask?.cancel()
+        syncTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: 4_000_000_000)
+            guard !Task.isCancelled else { return }
             lastRefresh = nil
             await refresh()
             RunFitnessAnalyzer.shared.invalidate()
             RunFitnessAnalyzer.shared.refreshIfStale()
-            if coachTier == .apple {
-                await AppleCoach.shared.runAdjustPass(trigger: .afterRun)
-                await refreshQuietly()
-            }
+            if coachTier.isAI { await RunPlanCoach.runBackgroundPass(trigger: .afterRun) }
         }
     }
 
