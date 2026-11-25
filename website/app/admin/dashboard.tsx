@@ -11,6 +11,7 @@ import { ErrorsTab } from "./_components/Errors";
 import { DiagnosticsTab } from "./_components/Diagnostics";
 import { DisplaysTab } from "./_components/Displays";
 import { WebsiteTab } from "./_components/Website";
+import { CoachTab } from "./_components/Coach";
 import { DrilldownProvider } from "./_components/Drilldown";
 import { APP_BACKGROUND, ROUNDED_STACK } from "./_components/theme";
 
@@ -21,6 +22,7 @@ const TABS = [
   { id: "features", label: "Features", render: () => <FeaturesTab /> },
   { id: "growth", label: "Growth", render: () => <GrowthTab /> },
   { id: "network", label: "Network", render: () => <NetworkTab /> },
+  { id: "coach", label: "Coach", render: () => <CoachTab /> },
   { id: "website", label: "Website", render: () => <WebsiteTab /> },
   { id: "errors", label: "Errors", render: () => <ErrorsTab /> },
   { id: "crashes", label: "Crashes", render: () => <DiagnosticsTab /> },
