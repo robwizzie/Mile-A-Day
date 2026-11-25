@@ -469,6 +469,13 @@ jobs:
       # overseer set_plan only with confirmed_in_chat on the admin's own plan.
       - name: Run Plans v2 check
         run: node scripts/run-plans-v2-check.mjs
+      # Overseer tools on the admin connector (list_run_plans, get_run_plan_detail,
+      # get_coach_calls, review_note, propose_plan_change, set_plan) through the
+      # MCP SDK: non-admins refused by every tool, read-only sign-ins can't
+      # write, set_plan only with confirmed_in_chat + summary on the admin's own
+      # plan, propose stays pending, notes saved, every call audited.
+      - name: Overseer tools check
+        run: node scripts/overseer-check.mjs
 
   website:
     name: Website (lint + build)

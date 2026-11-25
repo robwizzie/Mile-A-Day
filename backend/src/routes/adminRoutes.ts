@@ -85,6 +85,7 @@ adminRouter.get("/coach/spend", coach.spend);
 adminRouter.get("/coach/users", coach.users);
 adminRouter.get("/coach/users/:userId", coach.userDetail);
 adminRouter.put("/coach/users/:userId/ai-mode", coach.setAiMode);
+adminRouter.get("/coach/calls", coach.recentCalls);
 adminRouter.get("/coach/calls/:id", coach.callDetail);
 adminRouter.get("/coach/plans", coach.plans);
 adminRouter.get("/coach/settings", coach.getSettings);

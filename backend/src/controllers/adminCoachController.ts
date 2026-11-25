@@ -27,3 +27,10 @@ export const listNotes = wrap(async (req) => ({ notes: await svc.listReviewNotes
 export const createNote = wrap((req) => svc.createReviewNote(req.userId!, req.body ?? {}, "admin"), 201);
 export const patchNote = wrap((req) => svc.setReviewNoteStatus(String(req.params.id), req.body?.status));
 export const plans = wrap(async () => ({ plans: await svc.listRunPlansForAdmin() }));
+export const recentCalls = wrap(async (req) => ({
+  calls: await svc.listRecentCoachCalls(
+    Number(req.query.limit ?? 50) || 50,
+    typeof req.query.before === "string" ? req.query.before : null,
+    typeof req.query.provider === "string" ? req.query.provider : null,
+  ),
+}));

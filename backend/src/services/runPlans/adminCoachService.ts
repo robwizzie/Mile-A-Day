@@ -22,8 +22,12 @@ import { RunPlanError, getPlanDetailForAdmin } from "./runPlanService.js";
 
 const db = PostgresService.getInstance();
 const PREVIEW = 300;
-const CALL_LIST_COLS = `id, user_id, provider, kind, trigger, model, started_at, created_at, latency_ms, tokens_in, tokens_out, tokens_cached,
-  cost_usd, error, daily_limit_hit, left(input, ${PREVIEW}) AS input_preview, left(output, ${PREVIEW}) AS output_preview, proposal_ids`;
+const CALL_LIST_FIELDS = ["id", "user_id", "provider", "kind", "trigger", "model", "started_at", "created_at", "latency_ms", "tokens_in", "tokens_out", "tokens_cached", "cost_usd", "error", "daily_limit_hit", "proposal_ids"];
+const callListCols = (a = "") => {
+  const p = a ? `${a}.` : "";
+  return [...CALL_LIST_FIELDS.map((f) => `${p}${f}`), `left(${p}input, ${PREVIEW}) AS input_preview`, `left(${p}output, ${PREVIEW}) AS output_preview`].join(", ");
+};
+const CALL_LIST_COLS = callListCols();
 
 export async function coachUsage(days = 30) {
   days = Math.min(90, Math.max(1, Math.round(days)));
@@ -113,6 +117,30 @@ export async function listCoachCalls(userId: string, limit = 100, before: string
     `SELECT ${CALL_LIST_COLS} FROM coach_ai_calls WHERE user_id = $1 AND ($2::timestamptz IS NULL OR created_at < $2::timestamptz)
       ORDER BY created_at DESC LIMIT $3`,
     [userId, before, Math.min(500, Math.max(1, limit))],
+  );
+}
+
+/** Overseer `get_coach_calls`: a user's calls with FULL input/output (small pages; the text can be long). */
+export async function listCoachCallsFull(userId: string, limit = 10, before: string | null = null) {
+  if (before !== null && Number.isNaN(Date.parse(before))) throw new RunPlanError("invalid_today", 400, { field: "before" });
+  return db.query(
+    `SELECT ${CALL_LIST_FIELDS.join(", ")}, input, output FROM coach_ai_calls
+      WHERE user_id = $1 AND ($2::timestamptz IS NULL OR created_at < $2::timestamptz)
+      ORDER BY created_at DESC LIMIT $3`,
+    [userId, before, Math.min(25, Math.max(1, limit))],
+  );
+}
+
+/** Recent AI calls across every user (Coach tab call log), previews only. */
+export async function listRecentCoachCalls(limit = 50, before: string | null = null, provider: string | null = null) {
+  if (before !== null && Number.isNaN(Date.parse(before))) before = null;
+  if (provider !== null && provider !== "apple" && provider !== "anthropic") provider = null;
+  return db.query(
+    `SELECT ${callListCols("c")}, u.username
+       FROM coach_ai_calls c LEFT JOIN users u ON u.user_id = c.user_id
+      WHERE ($1::timestamptz IS NULL OR c.created_at < $1::timestamptz) AND ($2::text IS NULL OR c.provider = $2)
+      ORDER BY c.created_at DESC LIMIT $3`,
+    [before, provider, Math.min(200, Math.max(1, limit))],
   );
 }
 

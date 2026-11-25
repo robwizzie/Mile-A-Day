@@ -34,6 +34,7 @@ import {
   runWrite,
   type Caller,
 } from "./dbTools.js";
+import { registerRunPlanTools } from "./runPlanTools.js";
 
 type Reply = { content: { type: "text"; text: string }[]; isError?: boolean };
 const text = (t: string, isError = false): Reply => ({ content: [{ type: "text", text: t }], ...(isError ? { isError } : {}) });
@@ -47,7 +48,10 @@ function buildServer(auth: AuthInfo): McpServer {
       instructions:
         "Direct access to the Mile A Day PRODUCTION Postgres database (live users). " +
         "Use `query` freely to read. Change data only with `execute`: dry-run first, show the user " +
-        "the statement and the row count, and commit only after they confirm.",
+        "the statement and the row count, and commit only after they confirm. " +
+        "Run Plans overseer tools (list_run_plans, get_run_plan_detail, get_coach_calls, review_note, " +
+        "propose_plan_change, set_plan) go through the app's plan engine, never SQL: use them, not `execute`, " +
+        "to change a run plan. set_plan only after the admin approved the exact change in this chat.",
     },
   );
 
@@ -133,6 +137,8 @@ function buildServer(auth: AuthInfo): McpServer {
       return text(JSON.stringify(await recentAudit(limit ?? 25, writes_only === true), null, 1));
     },
   );
+
+  registerRunPlanTools(server, caller, can);
 
   return server;
 }
