@@ -12,6 +12,8 @@ enum RunPlanV2Service {
         let error: String?
         let reason: String?
         let status: String?
+        /// `undo_conflicts_with_plan`: the day the undo would break.
+        let local_date: String?
         @RunPlanV2List var violations: [RunPlanV2Violation] = []
         @RunPlanV2List var deviations: [RunPlanV2Deviation] = []
     }
@@ -53,10 +55,18 @@ enum RunPlanV2Service {
         case "ai_unavailable": return .aiUnavailable(reason: parsed?.reason)
         case "hard_rule_violation": return .hardRuleViolation(parsed?.violations ?? [])
         case "deviation_reason_required": return .deviationReasonRequired(parsed?.deviations ?? [])
-        case "stale_proposal": return .staleProposal
-        case "proposal_not_pending": return .proposalNotPending(status: parsed?.status)
+        case "stale_proposal":
+            // With `violations`: the plan changed and the HARD rules now fail
+            // (the server marked it superseded).
+            let violations = parsed?.violations ?? []
+            return violations.isEmpty ? .staleProposal : .proposalSuperseded(violations)
+        case "proposal_not_pending":
+            if parsed?.status == "expired" { return .proposalExpired }
+            return .proposalNotPending(status: parsed?.status)
         case "undo_expired": return .undoExpired
         case "undo_conflict": return .undoConflict
+        case "undo_conflicts_with_plan":
+            return .undoConflictsWithPlan(localDate: parsed?.local_date, violations: parsed?.violations ?? [])
         case "proposal_not_found", "day_not_found": return .notFound(code)
         default: return .invalid(code)
         }
@@ -637,6 +647,9 @@ final class RunPlanV2Store: ObservableObject {
         } catch let e as RunPlanV2Error {
             if e == .plusRequired { plusRequired = true }
             if e == .noPlan { clearPlanState() }
+            // The plan moved under this proposal (or its days passed): show
+            // the plan as it is now, without the stale card.
+            if e.refreshesPlan { Task { await self.refreshQuietly() } }
             throw e
         } catch {
             throw RunPlanV2Error.offline

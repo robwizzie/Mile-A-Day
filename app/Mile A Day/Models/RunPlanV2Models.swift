@@ -1405,6 +1405,14 @@ enum RunPlanV2Error: Error, Equatable {
     case proposalNotPending(status: String?)
     case undoExpired
     case undoConflict
+    /// 409 `stale_proposal` with `violations`: the plan changed since, and
+    /// the change now breaks a HARD rule (the server marked it superseded).
+    case proposalSuperseded([RunPlanV2Violation])
+    /// 409 `proposal_not_pending` `{"status":"expired"}`: its days passed.
+    case proposalExpired
+    /// 409 `undo_conflicts_with_plan`: restoring the old days would break a
+    /// HARD rule given later changes. Nothing was written.
+    case undoConflictsWithPlan(localDate: String?, violations: [RunPlanV2Violation])
     case notFound(String)
     /// Any other 4xx code (e.g. `invalid_goals`, `past_date`).
     case invalid(String)
@@ -1423,13 +1431,27 @@ enum RunPlanV2Error: Error, Equatable {
             return String(localized: "That change would break a safety rule, so it wasn't made.")
         case .deviationReasonRequired:
             return String(localized: "That change needs a reason before it can go in.")
-        case .staleProposal: return String(localized: "Your plan changed since this was suggested.")
+        case .staleProposal, .proposalSuperseded: return String(localized: "That change no longer fits your plan.")
         case .proposalNotPending: return String(localized: "That change was already handled.")
+        case .proposalExpired: return String(localized: "That suggestion expired.")
         case .undoExpired: return String(localized: "Undo is only possible for 24 hours.")
         case .undoConflict: return String(localized: "A later change touched the same day, so this can't be undone.")
+        case .undoConflictsWithPlan:
+            return String(localized: "Can't undo that: it would put two hard days in a row.")
         case .notFound: return String(localized: "That's no longer there.")
         case .invalid(let code): return RunPlanV2Error.friendly(code)
         case .offline: return String(localized: "Couldn't reach your plan right now. Try again in a moment.")
+        }
+    }
+
+    /// The plan moved under the request: reload it so the stale card goes.
+    var refreshesPlan: Bool {
+        switch self {
+        case .staleProposal, .proposalSuperseded, .proposalExpired, .proposalNotPending,
+             .undoConflict, .undoConflictsWithPlan:
+            return true
+        default:
+            return false
         }
     }
 

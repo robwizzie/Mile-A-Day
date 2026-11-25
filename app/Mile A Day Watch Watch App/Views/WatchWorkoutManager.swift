@@ -1,4 +1,5 @@
 import CoreLocation
+import Combine
 import Foundation
 import HealthKit
 import WatchKit
@@ -59,8 +60,10 @@ final class WatchWorkoutManager: NSObject, ObservableObject {
     /// quiet): the phone-run screen closes.
     @Published var companionFinished = false
     private var lastPhoneMessageAt = Date()
-    private var lastHRSentAt = Date.distantPast
-    private var lastHRSent: Double = 0
+    /// When the latest heart-rate reading was MEASURED (its sample's end
+    /// date, from the builder's statistics), and the one last sent.
+    private var latestHRDate: Date?
+    private var lastHRSentDate: Date?
     /// Don't send `.ended` to the phone: it ended the run itself, or this
     /// session is standing down while the phone's run goes on.
     private var phoneEnded = false
@@ -351,9 +354,11 @@ final class WatchWorkoutManager: NSObject, ObservableObject {
 
     // MARK: - Companion (a run the iPhone records)
 
-    /// Main-thread only; the 1 Hz tick. Heart rate to the phone (on change,
-    /// at least every 5 s, never more than every 2 s), and a stop when the
-    /// phone has gone quiet for good.
+    /// Main-thread only; the 1 Hz tick. Each NEW heart-rate reading goes to
+    /// the phone once, stamped with when it was measured. Never re-sent or
+    /// re-stamped: a sensor that stops reading must go stale on the phone
+    /// (20 s), whose HR tile then waits and whose HR cues stop. Also stops
+    /// the session when the phone has gone quiet for good.
     private func companionTick() {
         guard !isEnding else { return }
         if Date().timeIntervalSince(lastPhoneMessageAt) > phoneSilenceLimit {
@@ -362,11 +367,9 @@ final class WatchWorkoutManager: NSObject, ObservableObject {
             return
         }
         let bpm = currentHeartRate
-        let sinceSent = Date().timeIntervalSince(lastHRSentAt)
-        guard bpm > 0, sinceSent >= 2, bpm != lastHRSent || sinceSent >= 5 else { return }
-        lastHRSent = bpm
-        lastHRSentAt = Date()
-        sendToPhone(.heartRate(bpm: bpm, at: Date()))
+        guard bpm > 0, let measured = latestHRDate, measured != lastHRSentDate else { return }
+        lastHRSentDate = measured
+        sendToPhone(.heartRate(bpm: bpm, at: measured))
     }
 
     /// The relaunched iPhone app asked again: mirror the running session to it.
@@ -659,6 +662,7 @@ final class WatchWorkoutManager: NSObject, ObservableObject {
             let hrUnit = HKUnit.count().unitDivided(by: HKUnit.minute())
             if let latest = statistics.mostRecentQuantity()?.doubleValue(for: hrUnit) {
                 currentHeartRate = latest
+                latestHRDate = statistics.mostRecentQuantityDateInterval()?.end
             }
             // HealthKit's own average over the workout. The running mean this
             // replaced averaged one reading per delegate callback, so a minute

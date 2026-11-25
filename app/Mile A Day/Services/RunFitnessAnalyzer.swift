@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 import HealthKit
 import os
@@ -81,8 +82,15 @@ final class RunFitnessAnalyzer: ObservableObject {
         let includeHR = hasAskedForAccess
         let store = HealthKitManager.shared.healthStore
         let floor = HistoryWindow.floor
+        // Any failed read → nil: keep the previous (cached) profile, don't
+        // upload, and let the next `refreshIfStale` try again.
         let t = Task.detached(priority: .utility) { () -> RunPlanV2FitnessProfile? in
-            try? await RunFitnessComputation(store: store, includeHR: includeHR, historyFloor: floor).run()
+            do {
+                return try await RunFitnessComputation(store: store, includeHR: includeHR, historyFloor: floor).run()
+            } catch {
+                print("[RunFitness] analysis aborted, keeping the previous profile: \(error.localizedDescription)")
+                return nil
+            }
         }
         task = t
         let result = await t.value
@@ -194,10 +202,15 @@ struct RunFitnessComputation: Sendable {
         while index < workouts.count {
             try Task.checkCancellation()
             let slice = Array(workouts[index..<min(index + 4, workouts.count)])
-            let built = try await withThrowingTaskGroup(of: RunFitnessTimeline?.self) { group -> [RunFitnessTimeline] in
-                for w in slice { group.addTask { try? await timeline(for: w) } }
+            // A read that FAILS (locked phone, HealthKit busy) fails the whole
+            // analysis: dropping that run would compute, cache for 12 h and
+            // upload a profile with less mileage than the runner has. The
+            // caller keeps the previous profile and retries on the next
+            // refresh. (A denied read is not an error: it returns no samples.)
+            let built = try await withThrowingTaskGroup(of: RunFitnessTimeline.self) { group -> [RunFitnessTimeline] in
+                for w in slice { group.addTask { try await timeline(for: w) } }
                 var out: [RunFitnessTimeline] = []
-                for try await t in group { if let t { out.append(t) } }
+                for try await t in group { out.append(t) }
                 return out
             }
             timelines.append(contentsOf: built)
@@ -206,9 +219,13 @@ struct RunFitnessComputation: Sendable {
         timelines.sort { $0.start > $1.start }
 
         let age = includeHR ? self.age() : nil
-        let resting = includeHR ? try? await dailyAverages(.restingHeartRate, unit: HKUnit.count().unitDivided(by: .minute()), days: 30) : nil
-        let hrv = includeHR ? try? await dailyAverages(.heartRateVariabilitySDNN, unit: .secondUnit(with: .milli), days: 60) : nil
-        let firstEver = try? await firstRunDate()
+        var resting: [String: Double]?
+        var hrv: [String: Double]?
+        if includeHR {
+            resting = try await dailyAverages(.restingHeartRate, unit: HKUnit.count().unitDivided(by: .minute()), days: 30)
+            hrv = try await dailyAverages(.heartRateVariabilitySDNN, unit: .secondUnit(with: .milli), days: 60)
+        }
+        let firstEver = try await firstRunDate()
 
         return Self.profile(from: timelines, workouts: workouts, age: age, restingDaily: resting ?? [:],
                             hrvDaily: hrv ?? [:], firstEver: firstEver, now: now)
@@ -273,7 +290,7 @@ struct RunFitnessComputation: Sendable {
     }
 
     /// Every value in [start, end], series samples expanded. A 20 s
-    /// watchdog stops a query that never reports `done`.
+    /// watchdog stops a query that never reports `done` and fails the read.
     private func series(_ id: HKQuantityTypeIdentifier, unit: HKUnit, start: Date, end: Date,
                         cap: Int = 20_000) async throws -> [(start: Date, end: Date, value: Double)] {
         guard let type = HKQuantityType.quantityType(forIdentifier: id) else { return [] }
@@ -305,7 +322,8 @@ struct RunFitnessComputation: Sendable {
             DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 20) {
                 guard box.finish() else { return }
                 store.stop(q)
-                cont.resume(returning: box.points)
+                // A partial series would under-count this run: fail the read.
+                cont.resume(throwing: RunFitnessReadError.timedOut)
             }
         }
     }
@@ -343,7 +361,7 @@ struct RunFitnessComputation: Sendable {
         var hr = [Double?](repeating: nil, count: n)
         if includeHR {
             let bpm = HKUnit.count().unitDivided(by: .minute())
-            let samples = (try? await series(.heartRate, unit: bpm, start: start, end: end)) ?? []
+            let samples = try await series(.heartRate, unit: bpm, start: start, end: end)
             var sums = [Double](repeating: 0, count: n)
             var counts = [Int](repeating: 0, count: n)
             for s in samples where s.value >= 40 && s.value <= 230 {
@@ -779,4 +797,9 @@ extension HistoryWindow {
         let window = HKQuery.predicateForSamples(withStart: floor, end: nil, options: .strictStartDate)
         return NSCompoundPredicate(andPredicateWithSubpredicates: [base, window])
     }
+}
+
+/// A HealthKit read that never answered (the series watchdog).
+enum RunFitnessReadError: Error {
+    case timedOut
 }
