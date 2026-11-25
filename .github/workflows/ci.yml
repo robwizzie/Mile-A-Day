@@ -460,6 +460,15 @@ jobs:
       # a too-powerful role refused outright.
       - name: MCP connector check
         run: node scripts/mcp-check.mjs
+      # Run Plans v2: the engine's research rules (spike guard + no back-to-back
+      # hard days are HARD; ramp, taper, cutback, missed days, walk modes,
+      # check-in tweaks, grade, notification timing), proposals NEVER
+      # auto-apply (formula pass, open, upload hook, nightly), the apply /
+      # after-run / decline / undo lifecycle, Plus + ai_mode gating, the
+      # Anthropic $48 stop with a mocked client, the 90-day AI log sweep, and
+      # overseer set_plan only with confirmed_in_chat on the admin's own plan.
+      - name: Run Plans v2 check
+        run: node scripts/run-plans-v2-check.mjs
 
   website:
     name: Website (lint + build)
