@@ -209,4 +209,6 @@ Details: docs/conventions/backend.md § Run Plans v2
 - `applyOverseerChange` (overseer `set_plan`) needs `confirmed_in_chat === true`, a `summary`, `role = admin` and the admin's OWN plan; everyone else gets `proposeOverseerChange` (pending).
 - AI access via `getAiStatus` only (`coach_settings.ai_mode`, default `apple`; `app_settings['coach']`; `COACH_AI_DISABLED`); Anthropic also needs `ANTHROPIC_API_KEY`, consent and month spend < `COACH_ANTHROPIC_STOP_USD` (48), every call through `runAnthropicCoach` (`recordAiCall` + `addAnthropicSpend`).
 - `coach_ai_calls` is health-derived: admins only, swept at 90 days (`sweepAiCallLogs`); shoes still only via `shoeService` (`listShoes`).
+- Overseer tools (`src/mcp/runPlanTools.ts`) call runPlans services, never SQL; each re-checks `role = 'admin'`, runs inside `audited()`, and `set_plan` goes only through `applyOverseerChange`. Check: `overseer-check`.
+- Coach MCP (`src/coachMcp`, the runner's own Claude) is proposal-only: tools self-scoped on the token's user, `isPlusActive` on every call, `createProposal` with source `user_claude`, never an apply; `coach_mcp_*` `.enableRLS()`; off unless `COACH_MCP_ENABLED=1`. Check: `coach-mcp-check`.
 - `run_plan_proposal` push: next-run proposals only, `notificationDueAt` (run hour < 9 → 8 PM eve, else 9 AM), `run_plans_v2` devices, claimed on `notified_at`.
