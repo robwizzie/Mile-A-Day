@@ -1,4 +1,5 @@
 import { Router } from "express";
+import * as coach from "../controllers/adminCoachController.js";
 import { signInLimiter } from "../middleware/rateLimit.js";
 import {
   adminCreateDisplayKey,
@@ -76,6 +77,21 @@ adminAuthRouter.post("/apple", signInLimiter, verifyAppleWeb);
 // Protected: mounted AFTER authenticateToken + requireAdmin in server.ts.
 const adminRouter = Router();
 adminRouter.get("/overview", overview);
+
+// Coach tab (Run Plans v2 AI Coach): usage, Anthropic spend, per-user access,
+// plans + proposals + call logs, global switch, review notes.
+adminRouter.get("/coach/usage", coach.usage);
+adminRouter.get("/coach/spend", coach.spend);
+adminRouter.get("/coach/users", coach.users);
+adminRouter.get("/coach/users/:userId", coach.userDetail);
+adminRouter.put("/coach/users/:userId/ai-mode", coach.setAiMode);
+adminRouter.get("/coach/calls/:id", coach.callDetail);
+adminRouter.get("/coach/plans", coach.plans);
+adminRouter.get("/coach/settings", coach.getSettings);
+adminRouter.put("/coach/settings", coach.putSettings);
+adminRouter.get("/coach/review-notes", coach.listNotes);
+adminRouter.post("/coach/review-notes", coach.createNote);
+adminRouter.patch("/coach/review-notes/:id", coach.patchNote);
 
 // Desk display keys (the LED counter). Plaintext key returned once on create.
 adminRouter.get("/display-keys", adminListDisplayKeys);

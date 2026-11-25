@@ -1,3 +1,4 @@
+import { afterWorkoutUpload } from "../services/runPlans/triggers.js";
 import { refreshFriendsLeaderboardWidgets } from "../services/widgetRefreshService.js";
 import { Request, Response } from "express";
 import { AuthenticatedRequest } from "../middleware/auth.js";
@@ -176,6 +177,10 @@ export async function uploadWorkouts(req: Request, res: Response) {
     reconcileBuddySessions(userId, uploadedWorkoutIds).catch((err) =>
       console.error("Error reconciling buddy sessions:", err.message),
     );
+    // Run Plans: apply "after today's run" proposals, grade the day, run the
+    // formula pass (new proposals only; nothing auto-applies). Fire-and-forget
+    // and a no-op without an active plan; skipped on the setup backfill.
+    if (!isFullSync) void afterWorkoutUpload(userId, uploadedWorkoutIds);
     // Head-to-Head standings: tell whoever this upload just overtook (and the
     // syncer, when they took the lead) while there's still a day left to
     // answer. Skipped on the account-setup backfill and on pure history

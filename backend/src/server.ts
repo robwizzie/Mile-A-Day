@@ -63,6 +63,8 @@ import { startDeskPushCron } from "./cron/deskPushCron.js";
 import { startLastCallCron } from "./cron/lastCallCron.js";
 import { startDiagnosticsCron } from "./cron/diagnosticsCron.js";
 import { startAppleRevocationCron } from "./cron/appleRevocationCron.js";
+import { startRunPlansCron } from "./cron/runPlansCron.js";
+import runPlansRoutes from "./routes/runPlansRoutes.js";
 import { healUncomputedStreaks } from "./services/streakFeatureCore.js";
 import { seedExtraBadges } from "./services/badgeService.js";
 import { seedExtraChallenges } from "./services/dailyChallengeService.js";
@@ -386,6 +388,7 @@ app.use("/live", liveTrackingRoutes);
 app.use("/ghosts", ghostRoutes);
 app.use("/telemetry", telemetryRoutes);
 app.use("/diagnostics", diagnosticsRoutes);
+app.use("/run-plans", runPlansRoutes);
 
 app.use((err: Error, req: Request, res: Response, _next: NextFunction) => {
   console.error("Error:", err.message);
@@ -500,6 +503,7 @@ function startCrons() {
   startLastCallCron();
   startDiagnosticsCron();
   startAppleRevocationCron();
+  startRunPlansCron();
   // Idempotently ensure the v2 social/app-function badges exist in the catalog.
   seedExtraBadges();
   // Idempotently ensure the v2 daily challenges (5K/10K/social) exist.
