@@ -1437,7 +1437,7 @@ enum RunPlanV2Error: Error, Equatable {
         case .undoExpired: return String(localized: "Undo is only possible for 24 hours.")
         case .undoConflict: return String(localized: "A later change touched the same day, so this can't be undone.")
         case .undoConflictsWithPlan:
-            return String(localized: "Can't undo that: it would put two hard days in a row.")
+            return String(localized: "Can't undo that: it would break a safety rule in your plan, like two hard days in a row.")
         case .notFound: return String(localized: "That's no longer there.")
         case .invalid(let code): return RunPlanV2Error.friendly(code)
         case .offline: return String(localized: "Couldn't reach your plan right now. Try again in a moment.")
