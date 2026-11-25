@@ -28,12 +28,14 @@ Feed 1080×1350 (`*-feed.png`) and Stories/Reels 1080×1920 (`*-story.png`, text
 
 ### Alternates (no phone, text-led)
 
-Same rules, different shape, to test against the phone-layout ads above.
+Same rules, different shape, to test against the phone-layout ads above. Each is one centred column, and Flamey is
+the punchline: he peeks over the 37-day streak card, grows from a dim ember on Day 1 to a blaze on Day 37 (as he does
+in the app), and peeks out from behind the Start your mile button.
 
 | Ad | Primary text | Headline |
 |---|---|---|
 | `g-grateful` (cream note) | Family. Pie. A streak you're proud of. Walk or run one mile a day, starting Thanksgiving. Become a streaker. Free on iPhone. | Things I'm grateful for. |
-| `d-day1-37` (red, two streak cards) | Start Thursday and you're on day 37 by New Year's Day, one mile at a time. Join the streakers. Free on iPhone. | Day 1 to Day 37 by New Year's. |
+| `d-day1-37` (red, two streak cards) | Start Thursday and you're on day 37 by New Year's Day, one mile at a time. Your Flamey grows with your streak. Join the streakers. Free on iPhone. | Day 1 to Day 37 by New Year's. |
 | `t-todo` (amber, real Start your mile button) | Turkey: done. Pie: done. One mile: one tap away. Become a streaker. Free on iPhone. | Today's to-do list. |
 
 Social ads (friends with nudges and hypes, the locked feed, a competition leaderboard) come next in the same layout,
