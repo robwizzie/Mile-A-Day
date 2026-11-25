@@ -315,6 +315,23 @@ struct MADSettingsView: View {
             }
             .buttonStyle(.plain)
 
+            if PlusStore.shared.isPlus {
+                SettingsDivider()
+
+                // One row for the whole plan; its page holds every plan setting.
+                NavigationLink(destination: RunPlanSettingsEntry()) {
+                    SettingsRow(
+                        icon: "calendar",
+                        title: "Run plan",
+                        subtitle: RunPlanV2Store.shared.hasPlan
+                            ? "Goals, walk days, shoes and the AI Coach"
+                            : "A plan built from your runs",
+                        tint: .orange
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+
             SettingsDivider()
 
             NavigationLink(destination: RecoveryModeView()) {

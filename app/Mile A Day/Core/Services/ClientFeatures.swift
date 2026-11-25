@@ -158,6 +158,11 @@ enum ClientFeatures {
     /// sheet and offers the per-friend "Tell me when they're out" switch.
     static let buddyOutAlertV1 = "buddy_out_alert_v1"
 
+    /// Run Plans v2: this build routes `run_plan_proposal` pushes (tap →
+    /// proposal screen, `RUN_PLAN_PROPOSAL` Apply / Keep actions). The server
+    /// sends those pushes only to devices that declare it.
+    static let runPlansV2 = "run_plans_v2"
+
     static let supported: [String] = [
         friendRequestV2, collabTagV1, ghostFriendRaceV1, postWindowV1, buddyWalksV1,
         weeklyChallengeV1, communityGoalV1, referralsV1, buddyGroupPostV1, buddyJoinRequestV1, activityDigestV1,
@@ -169,5 +174,6 @@ enum ClientFeatures {
         dailyChallengePushV1,
         specialEventsV1,
         buddyOutAlertV1,
+        runPlansV2,
     ]
 }

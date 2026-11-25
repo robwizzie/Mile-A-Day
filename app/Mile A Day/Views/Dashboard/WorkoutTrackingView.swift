@@ -598,6 +598,10 @@ struct WorkoutTrackingView: View {
             )
 
         case .mode:
+            // Run Plans v2 (Mile A Day+): today's planned run, when there is
+            // one. Renders nothing otherwise, so the two cards below are untouched.
+            PlanRunModeOption(isRunning: selectedActivityType == .running) { choosePlanRun() }
+
             workoutOptionButton(
                 icon: selectedActivityType == .running ? "figure.run" : "figure.walk",
                 title: "Just Track It",
@@ -605,6 +609,9 @@ struct WorkoutTrackingView: View {
             ) {
                 chooseRaceMode(ghost: false)
             }
+            // Always on this step, unlike the plan option (which renders
+            // nothing until a plan is cached), so the plan read is kicked here.
+            .task { await PlanRunModeOption.refreshIfPlus() }
 
             workoutOptionButton(
                 leading: {
@@ -908,6 +915,9 @@ struct WorkoutTrackingView: View {
                         if isTracking, !isStopping, locationManager.acceptsTreadmill {
                             TreadmillTrackerRow()
                         }
+
+                        // Run Plans v2 card; renders nothing unless a plan run is live.
+                        PlanRunLiveCard()
 
                         distanceDisplay
 
@@ -2530,6 +2540,9 @@ struct WorkoutTrackingView: View {
                 ghostSeconds: nil,
                 targetDistance: max(goalDistance, 0.1)
             )
+            // And the plan coach (Run Plans v2), from its persisted snapshot
+            // when it was coaching THIS workout: same segment, same stats.
+            PlanRunCoachV2.shared.resume(workoutKey: saved.workoutUUID)
         }
         // Keeps the mid-walk join offer fresh without adding another node to
         // this already type-check-fragile chain.
@@ -2579,6 +2592,8 @@ struct WorkoutTrackingView: View {
         // One-shot: consumed by this walk, never carried into the next.
         armedGhostSessionId = ""
         UserDefaults.standard.removeObject(forKey: BuddyGhostArming.legacyArmedKey)
+        // A buddy walk skips the mode step, so a plan armed earlier is stale.
+        PlanRunCoachV2.shared.disarm()
         isTracking = true
         // Handed off LATE — the phone was locked through the countdown and
         // this is the walker opening the app a few minutes in: credit the
@@ -2701,6 +2716,9 @@ struct WorkoutTrackingView: View {
     /// anything — nothing is armed until a target is actually picked. Also the
     /// "Skip the race" exit from step 4, hence both flags being cleared.
     private func chooseRaceMode(ghost: Bool) {
+        // Plan mode and the ghost race are exclusive; either answer here
+        // replaces a plan armed earlier (wizard or plan screen).
+        PlanRunCoachV2.shared.disarm()
         guard ghost else {
             raceArmed = false
             advance {
@@ -2713,6 +2731,17 @@ struct WorkoutTrackingView: View {
         advance {
             showRaceModeSelection = false
             showGhostOptions = true
+        }
+    }
+
+    /// Step 3's plan answer (Run Plans v2): the coach is already armed by
+    /// `PlanRunModeOption`; go. Exclusive with the ghost race.
+    private func choosePlanRun() {
+        raceArmed = false
+        advance {
+            showRaceModeSelection = false
+            showGhostOptions = false
+            proceedPastRaceChoice()
         }
     }
 
@@ -2866,6 +2895,7 @@ struct WorkoutTrackingView: View {
     private func cancelCountdown() {
         countdownTimer?.invalidate()
         countdownTimer = nil
+        PlanRunCoachV2.shared.disarm()
         MADHaptics.tap()
         wizardGoingBack = true
         withAnimation(.easeInOut(duration: 0.28)) {
@@ -2993,6 +3023,10 @@ struct WorkoutTrackingView: View {
             buddySessionId: effectiveBuddySessionId
         )
         InProgressWorkoutStore.save(initialState)
+        // Run Plans v2: coach today's session if it was picked on the mode
+        // step. Never alongside a ghost race; consumes the arm either way.
+        // Keyed to this workout so a relaunch resumes into it, not another.
+        PlanRunCoachV2.shared.begin(allowed: raceGhost == nil, workoutKey: initialState.workoutUUID)
         // What Start My Mile pre-answers next time.
         TrackerLaunchPreference.record(selectedActivityType)
 
@@ -3079,6 +3113,12 @@ struct WorkoutTrackingView: View {
                     goalProgress: totalDailyDistance
                 )
             )
+            // Plan coach (Run Plans v2): same tick, speaks through GhostCoach.
+            // No-op unless a plan run is live. Segment time is WALL time
+            // minus manual pauses (`elapsedTime`), never `raceClockSeconds`:
+            // the moving clock stands still while you do, so a timed recovery
+            // spent standing would never end.
+            PlanRunCoachV2.shared.update(distance: locationManager.liveDistance, clock: elapsedTime)
             // Foreground heartbeat driver (self-throttled to ~45s). The
             // background driver is the location/pedometer callback path.
             livePresence.tick()
@@ -3247,6 +3287,10 @@ struct WorkoutTrackingView: View {
         // auto-presented the tracker and made the same mile get ended again.
         InProgressWorkoutStore.markEnded()
 
+        // Run Plans v2: freeze the plan's segment stats for the grade upload
+        // (before `stopTracking()` resets the distance it was measured on).
+        PlanRunCoachV2.shared.end(distance: finalDistance, clock: elapsedTime)
+
         // Stop timer and location tracking
         timer?.invalidate()
         timer = nil
@@ -3315,6 +3359,9 @@ struct WorkoutTrackingView: View {
                         PendingWorkoutSaveStore.resolve(sessionId: pendingSessionId)
                         DispatchQueue.main.async {
                             self.recapWorkoutId = workout.uuid.uuidString
+                            // Plan run: pre-load the plan's shoe and queue the
+                            // grade upload for once this syncs. No-op otherwise.
+                            PlanRunCoachV2.shared.workoutSaved(workoutId: workout.uuid.uuidString)
                         }
                     }
                     let finalize = {
@@ -3560,6 +3607,7 @@ struct WorkoutTrackingView: View {
         locationManager.stopTracking()
         endLiveActivity()
         InProgressWorkoutStore.clear()
+        PlanRunCoachV2.shared.stop()
         workoutSession = nil
         workoutBuilder = nil
         isStopping = false
@@ -3599,6 +3647,7 @@ struct WorkoutTrackingView: View {
         raceFinalDelta = nil
         pendingRaceStamp = nil
         GhostCoach.shared.stop()
+        PlanRunCoachV2.shared.stop()
 
         endFinishBackgroundTask()
 

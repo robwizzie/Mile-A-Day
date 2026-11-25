@@ -49,6 +49,9 @@ struct DashboardCardsBlock: View {
         // isn't a card you can hide: it's two weeks long. Draws nothing
         // between events.
         SpecialEventCard()
+        // Mile A Day+ run plans: today's plan run, or a quiet offer. Draws
+        // nothing for non-members.
+        RunPlanDashboardCard(style: style)
         // Two plain stacks, not a lazy grid: a card here declares a
         // navigationDestination, which SwiftUI won't honour from a lazy cell.
         if duoHomeWide, drawnCards.count > 1 {

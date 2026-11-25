@@ -2783,3 +2783,711 @@ extension Notification.Name {
     static let madHistoryFloorLifted = Notification.Name("madHistoryFloorLifted")
 }
 
+
+// MARK: - Run Plans v2: live plan run (iPhone + Watch)
+//
+// Run Plans (Mile A Day+): the server plans every session as a list of
+// segments (warm up, reps, recoveries, cool down). Both the iPhone's
+// `PlanRunCoachV2` and the Watch's `WatchWorkoutManager` walk those segments
+// during a run and decide WHEN to say something, so the shapes, the walking
+// and the cue timing live HERE: this file is compiled into both targets and
+// the Watch target can't see new iPhone files. Same rule as `WorkoutDedup`:
+// Foundation only, no SwiftUI, no app types. Nothing here invents a plan
+// number — distances, durations, paces, speeds and HR bands all arrive from
+// the server; this only measures the run against them. The WORDS are each
+// platform's own (the phone speaks sentences, the Watch shows a few words).
+
+/// One block of a planned session. Paces are seconds per MILE, HR in bpm.
+/// `index` is the block's position in the server's `day.segments`, which is
+/// what the grade upload names.
+struct PlanRunSegment: Codable, Equatable {
+    var index: Int
+    /// warmup | steady | work | recover | cooldown | walk
+    var kind: String
+    var distanceMiles: Double?
+    var durationSeconds: Double?
+    var targetPace: Double?
+    /// Fastest allowed.
+    var paceLow: Double?
+    /// Slowest allowed.
+    var paceHigh: Double?
+    /// The treadmill cue (`3600 / target`, 0.1 mph).
+    var speedMph: Double?
+    var hrLow: Double?
+    var hrHigh: Double?
+    var zone: Int?
+    /// pace | hr | pace_and_hr | effort
+    var scoreBy: String?
+    /// How it should feel, for runners without heart rate.
+    var feel: String?
+    var rep: Int?
+    var reps: Int?
+
+    var isWork: Bool { kind == "work" }
+    var isRecover: Bool { kind == "recover" }
+    var isWarmup: Bool { kind == "warmup" }
+    var isCooldown: Bool { kind == "cooldown" }
+    var isWalk: Bool { kind == "walk" }
+
+    /// Measured by distance (else by time, else open-ended).
+    var isDistanceBased: Bool { (distanceMiles ?? 0) > 0 }
+    var isDurationBased: Bool { !isDistanceBased && (durationSeconds ?? 0) > 0 }
+
+    /// Paces that count as on target: the server's band when it sent one,
+    /// else ±10 s/mi around the target. nil = no pace target (easy jog, walk).
+    var paceBand: ClosedRange<Double>? {
+        if let low = paceLow, let high = paceHigh, low > 0, high >= low { return low...high }
+        guard let target = targetPace, target > 0 else { return nil }
+        return (target - 10)...(target + 10)
+    }
+
+    /// The pace to quote: the target, else the band's middle.
+    var quotedPace: Double? {
+        if let targetPace, targetPace > 0 { return targetPace }
+        guard let band = paceBand else { return nil }
+        return (band.lowerBound + band.upperBound) / 2
+    }
+
+    /// Seconds this block should take (nil when it can't be known).
+    var expectedSeconds: Double? {
+        if isDurationBased { return durationSeconds }
+        if isDistanceBased, let miles = distanceMiles, let pace = quotedPace { return miles * pace }
+        return nil
+    }
+
+    /// Reps under 2 minutes are coached on pace only (research rule 16): HR
+    /// can't catch up inside one.
+    var isShortRep: Bool { isWork && (expectedSeconds ?? .infinity) < 120 }
+
+    /// Scored on heart rate (when there is any).
+    var scoresHeartRate: Bool { scoreBy == "hr" || scoreBy == "pace_and_hr" }
+}
+
+/// One planned day as the live coach (and the Watch) needs it. The iPhone's
+/// app context carries the coming week's days as a JSON ARRAY under
+/// `contextKey`; the Watch picks the one dated today.
+struct PlanRunDay: Codable, Equatable {
+    static let contextKey = "runPlanV2Days"
+
+    /// The plan's local day, Gregorian `yyyy-MM-dd` (same as `RunPlanV2Date`).
+    var date: String
+    /// easy | long | tempo | intervals | race | calibration
+    var kind: String
+    var title: String
+    var subtitle: String?
+    var estDurationSeconds: Double?
+    var shoeId: String?
+    var shoeName: String?
+    var segments: [PlanRunSegment]
+
+    var isForToday: Bool { date == Self.dayKey(for: Date()) }
+
+    /// An easy or long run over 45 minutes: heart rate governs, the pace is
+    /// allowed to slow (research rule 16).
+    var holdsHeartRate: Bool {
+        (kind == "easy" || kind == "long") && (estDurationSeconds ?? 0) > 45 * 60
+    }
+
+    var isEasyDay: Bool { kind == "easy" || kind == "long" }
+
+    static func dayKey(for date: Date) -> String {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = .current
+        let c = cal.dateComponents([.year, .month, .day], from: date)
+        return String(format: "%04d-%02d-%02d", c.year ?? 0, c.month ?? 0, c.day ?? 0)
+    }
+
+    /// nil for no days (so the key is omitted).
+    static func json(_ days: [PlanRunDay]) -> String? {
+        guard !days.isEmpty, let data = try? JSONEncoder().encode(days) else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    static func decodeDays(_ json: String?) -> [PlanRunDay] {
+        guard let json, let data = json.data(using: .utf8) else { return [] }
+        return (try? JSONDecoder().decode([PlanRunDay].self, from: data)) ?? []
+    }
+}
+
+/// Where the runner is in the plan, for one tick.
+struct PlanRunStatus: Equatable {
+    let index: Int
+    let segment: PlanRunSegment
+    let next: PlanRunSegment?
+    /// Time left in a duration segment.
+    let remainingSeconds: Double?
+    /// Distance left in a distance segment.
+    let remainingMiles: Double?
+    /// 0...1 through this segment (0 for an open-ended one).
+    let progress: Double
+    /// Seconds into this segment.
+    let segmentSeconds: Double
+    /// 1-based number of the current work segment, or of the one just run
+    /// during its recovery. nil before the first.
+    let workNumber: Int?
+    let workCount: Int
+    /// Work segments finished.
+    let workDone: Int
+    let finished: Bool
+
+    var isLastWork: Bool { segment.isWork && workNumber == workCount }
+    /// The number the NEXT work segment carries ("Interval 4 in 1:12").
+    var upcomingWorkNumber: Int { segment.isWork ? (workNumber ?? 0) + 1 : workDone + 1 }
+    /// The next work segment is the last one.
+    var nextIsLastWork: Bool { (next?.isWork ?? false) && upcomingWorkNumber == workCount }
+}
+
+/// Walks a plan's segments against the run's distance and clock. Value type,
+/// no timers: callers feed it from the tick they already have. Codable so a
+/// relaunched tracker can pick the plan up where it was.
+///
+/// `clock` must be WALL time minus manual pauses — never a moving clock that
+/// freezes while the runner stands, or a timed recovery spent standing
+/// would never end.
+struct PlanRunTracker: Codable, Equatable {
+    enum Change: Equatable {
+        /// First sample: the plan starts here.
+        case began
+        /// Moved into the segment at this position.
+        case advanced(Int)
+        case finished
+    }
+
+    let segments: [PlanRunSegment]
+    private(set) var index = 0
+    private(set) var finished = false
+    private var seeded = false
+    private var startMiles: Double = 0
+    private var startClock: Double = 0
+    /// 1-based work ordinal per position (nil for non-work segments).
+    private let workOrdinals: [Int?]
+    let workCount: Int
+
+    init(segments: [PlanRunSegment]) {
+        self.segments = segments
+        var ordinals: [Int?] = []
+        var count = 0
+        for segment in segments {
+            if segment.isWork {
+                count += 1
+                ordinals.append(count)
+            } else {
+                ordinals.append(nil)
+            }
+        }
+        workOrdinals = ordinals
+        workCount = count
+    }
+
+    var isEmpty: Bool { segments.isEmpty }
+
+    /// Advance on a new sample. Returns what changed, if anything. A distance
+    /// segment that overshoots hands the extra to the next one (GPS lands in
+    /// steps).
+    mutating func step(miles: Double, clock: Double) -> Change? {
+        guard !segments.isEmpty, !finished else { return nil }
+        guard seeded else {
+            seeded = true
+            startMiles = miles
+            startClock = clock
+            return .began
+        }
+        var moved = false
+        while index < segments.count, isComplete(segments[index], miles: miles, clock: clock) {
+            let segment = segments[index]
+            if segment.isDistanceBased {
+                startMiles += segment.distanceMiles ?? 0
+                startClock = clock
+            } else {
+                startClock += segment.durationSeconds ?? 0
+                startMiles = miles
+            }
+            if index == segments.count - 1 {
+                finished = true
+                return .finished
+            }
+            index += 1
+            moved = true
+        }
+        return moved ? .advanced(index) : nil
+    }
+
+    private func isComplete(_ segment: PlanRunSegment, miles: Double, clock: Double) -> Bool {
+        if segment.isDistanceBased {
+            // ~5 m of slack so a rep never hangs one GPS step short.
+            return miles - startMiles >= (segment.distanceMiles ?? 0) - 0.003
+        }
+        if segment.isDurationBased {
+            return clock - startClock >= (segment.durationSeconds ?? 0) - 0.5
+        }
+        return false
+    }
+
+    /// 1-based work number at a position: the work itself, or the last one
+    /// before it (a recovery belongs to the rep it follows).
+    func workNumber(at i: Int) -> Int? {
+        guard !workOrdinals.isEmpty else { return nil }
+        var probe = min(i, workOrdinals.count - 1)
+        while probe >= 0 {
+            if let n = workOrdinals[probe] { return n }
+            probe -= 1
+        }
+        return nil
+    }
+
+    func status(miles: Double, clock: Double) -> PlanRunStatus? {
+        guard !segments.isEmpty else { return nil }
+        let i = min(index, segments.count - 1)
+        let segment = segments[i]
+        let next: PlanRunSegment? = (!finished && i + 1 < segments.count) ? segments[i + 1] : nil
+        let seconds = seeded ? max(0, clock - startClock) : 0
+        let covered = seeded ? max(0, miles - startMiles) : 0
+
+        var remainingSeconds: Double?
+        var remainingMiles: Double?
+        var progress: Double = 0
+        if segment.isDistanceBased, let d = segment.distanceMiles {
+            remainingMiles = finished ? 0 : max(0, d - covered)
+            progress = finished ? 1 : min(1, covered / d)
+        } else if segment.isDurationBased, let t = segment.durationSeconds {
+            remainingSeconds = finished ? 0 : max(0, t - seconds)
+            progress = finished ? 1 : min(1, seconds / t)
+        }
+
+        let current = workOrdinals[i]
+        var done = 0
+        if let n = workNumber(at: i) { done = (current != nil && !finished) ? n - 1 : n }
+
+        return PlanRunStatus(
+            index: i, segment: segment, next: next,
+            remainingSeconds: remainingSeconds, remainingMiles: remainingMiles,
+            progress: progress, segmentSeconds: seconds,
+            workNumber: workNumber(at: i), workCount: workCount, workDone: done,
+            finished: finished)
+    }
+}
+
+/// Pace vs the segment's band, with a 2 s/mi dead band past its edges so a
+/// stride's drift is silence. Drift is quoted against the target.
+enum PlanRunPaceCall: Equatable {
+    case onTarget
+    /// Seconds per mile faster than target.
+    case fast(Double)
+    /// Seconds per mile slower than target.
+    case slow(Double)
+
+    static let deadBand: Double = 2
+
+    static func judge(pace: Double?, segment: PlanRunSegment) -> PlanRunPaceCall? {
+        guard let pace, pace > 0, let band = segment.paceBand, let target = segment.quotedPace else { return nil }
+        if pace < band.lowerBound - deadBand { return .fast(max(1, target - pace)) }
+        if pace > band.upperBound + deadBand { return .slow(max(1, pace - target)) }
+        return .onTarget
+    }
+}
+
+enum PlanRunHRCall: Equatable {
+    /// Over the segment's ceiling.
+    case high(bpm: Int, ceiling: Int)
+    /// Under a work segment's floor (HR-scored reps only).
+    case low(bpm: Int, floor: Int)
+}
+
+/// What the coach wants said on this tick. The text is each platform's.
+enum PlanRunEvent: Equatable {
+    /// First tick: the plan starts with `status.segment`.
+    case began
+    /// 10 seconds before the next segment.
+    case lead(PlanRunSegment)
+    /// "3, 2, 1, go" into the next segment.
+    case go(PlanRunSegment)
+    /// Into a new segment; `countedDown` = the lead and go were already said.
+    case advanced(countedDown: Bool)
+    case finished
+    case pace(PlanRunPaceCall)
+    case heartRate(PlanRunHRCall)
+    /// No heart rate: a reminder of how it should feel (the segment's own
+    /// words, or "" for the platform's default).
+    case feel(String)
+}
+
+/// Pace over the last `span` seconds from (clock, miles) samples: the coach's
+/// 15–20 s smoothing, so a correction answers what you're doing now without
+/// chasing a single GPS step.
+struct PlanRunPaceWindow {
+    private struct Point {
+        let clock: Double
+        let miles: Double
+    }
+
+    let span: Double
+    private var points: [Point] = []
+
+    init(span: Double = 20) { self.span = span }
+
+    mutating func reset() { points = [] }
+
+    mutating func add(clock: Double, miles: Double) {
+        if let last = points.last, last.clock >= clock { return }
+        points.append(Point(clock: clock, miles: miles))
+        while let first = points.first, clock - first.clock > span + 5 { points.removeFirst() }
+    }
+
+    /// Seconds per mile, nil while there's too little to say.
+    var pace: Double? {
+        guard let newest = points.last,
+              let anchor = points.first(where: { newest.clock - $0.clock <= span }) else { return nil }
+        let seconds = newest.clock - anchor.clock
+        let miles = newest.miles - anchor.miles
+        guard seconds >= 12, miles > 0.004 else { return nil }
+        let value = seconds / miles
+        guard value > 180, value < 3600 else { return nil }
+        return value
+    }
+}
+
+/// Heart rate averaged over the last 15 s of ticks.
+struct PlanRunHRWindow {
+    private struct Point {
+        let clock: Double
+        let bpm: Double
+    }
+
+    private var points: [Point] = []
+
+    mutating func reset() { points = [] }
+
+    mutating func add(clock: Double, bpm: Double?) {
+        if let last = points.last, last.clock >= clock { return }
+        while let first = points.first, clock - first.clock > 15 { points.removeFirst() }
+        guard let bpm, bpm > 30, bpm < 240 else { return }
+        points.append(Point(clock: clock, bpm: bpm))
+    }
+
+    var average: Double? {
+        guard points.count >= 3 else { return nil }
+        return points.map(\.bpm).reduce(0, +) / Double(points.count)
+    }
+}
+
+/// How one segment went, for the grade upload (`POST /run-plans/grades`).
+struct PlanRunSegmentStats: Codable, Equatable {
+    var index: Int
+    /// Seconds judged on pace (the first 15 s of a segment are the
+    /// smoothing window catching up, so they don't count).
+    var scoredSeconds: Double = 0
+    var inBandSeconds: Double = 0
+    var fastSeconds: Double = 0
+    var slowSeconds: Double = 0
+    var hrSum: Double = 0
+    var hrSeconds: Double = 0
+    var actualSeconds: Double?
+    var actualMiles: Double?
+
+    var avgPace: Double? {
+        guard let s = actualSeconds, let m = actualMiles, m > 0.01 else { return nil }
+        let pace = s / m
+        return pace > 180 && pace < 3600 ? pace : nil
+    }
+
+    var avgHR: Double? { hrSeconds > 0 ? hrSum / hrSeconds : nil }
+}
+
+/// Everything a relaunched tracker needs to pick the plan back up.
+struct PlanRunSnapshot: Codable, Equatable {
+    var day: PlanRunDay
+    var tracker: PlanRunTracker
+    var stats: [PlanRunSegmentStats]
+    var segmentStartClock: Double
+    var segmentStartMiles: Double
+}
+
+/// Decides, one tick at a time, what the plan coach should say. Rules
+/// (build spec §8, research rule 16):
+///  - Segment changes are counted down: a lead 10 s out, then "3, 2, 1, go".
+///    Distance segments use the smoothed pace (or belt speed) for the ETA.
+///  - Pace corrections from the 20 s window, outside the band plus a dead
+///    band, with a minimum gap and a per-segment cap ("fewer cues" doubles
+///    the gaps and lowers the cap). Never in the last 15 s of a segment.
+///  - Heart rate only when there is some: none in the first 5 minutes of the
+///    run or the first 90 s of a segment, none on reps under 2 minutes, and
+///    on easy runs over 45 minutes it holds HR and lets the pace slow.
+///  - No heart rate: how it should feel, at the start of a segment (the
+///    platform adds it) and every 10 minutes on a long easy block.
+struct PlanRunCoachEngine {
+    let day: PlanRunDay
+    var fewerCues: Bool
+    private(set) var tracker: PlanRunTracker
+    private(set) var status: PlanRunStatus?
+    /// Smoothed pace (or the belt's) this tick, seconds per mile.
+    private(set) var pace: Double?
+    /// 15 s average heart rate, nil without a source.
+    private(set) var heartRate: Double?
+    private(set) var stats: [PlanRunSegmentStats]
+
+    private var paceWindow = PlanRunPaceWindow(span: 20)
+    private var hrWindow = PlanRunHRWindow()
+    private var lastClock: Double?
+    private var segmentStartClock: Double = 0
+    private var segmentStartMiles: Double = 0
+    // Per-segment cue state.
+    private var leadFired = false
+    private var goFired = false
+    private var lastCueClock = -Double.infinity
+    private var lastPaceCueClock = -Double.infinity
+    private var lastHRCueClock = -Double.infinity
+    private var lastFeelClock = -Double.infinity
+    private var paceCuesThisSegment = 0
+    private var hrCuesThisSegment = 0
+    private var lastPaceCall: PlanRunPaceCall?
+
+    init(day: PlanRunDay, fewerCues: Bool) {
+        self.day = day
+        self.fewerCues = fewerCues
+        tracker = PlanRunTracker(segments: day.segments)
+        stats = day.segments.map { PlanRunSegmentStats(index: $0.index) }
+    }
+
+    /// Resume a relaunched run. The first tick after this does NOT re-announce.
+    init(snapshot: PlanRunSnapshot, fewerCues: Bool) {
+        day = snapshot.day
+        self.fewerCues = fewerCues
+        tracker = snapshot.tracker
+        stats = snapshot.stats.count == snapshot.tracker.segments.count
+            ? snapshot.stats
+            : snapshot.tracker.segments.map { PlanRunSegmentStats(index: $0.index) }
+        segmentStartClock = snapshot.segmentStartClock
+        segmentStartMiles = snapshot.segmentStartMiles
+        lastCueClock = snapshot.segmentStartClock
+    }
+
+    var snapshot: PlanRunSnapshot {
+        PlanRunSnapshot(day: day, tracker: tracker, stats: stats,
+                        segmentStartClock: segmentStartClock, segmentStartMiles: segmentStartMiles)
+    }
+
+    var isFinished: Bool { tracker.finished }
+
+    /// One tick. `clock` = wall time minus manual pauses; `miles` = the run's
+    /// distance; `beltPace` = the paired treadmill's speed as a pace (it wins
+    /// over GPS/pedometer); `heartRate` = the latest bpm, nil without a source.
+    mutating func tick(clock: Double, miles: Double, beltPace: Double?, heartRate bpm: Double?) -> [PlanRunEvent] {
+        paceWindow.add(clock: clock, miles: miles)
+        pace = beltPace ?? paceWindow.pace
+        hrWindow.add(clock: clock, bpm: bpm)
+        heartRate = hrWindow.average
+        let dt = lastClock.map { min(max(clock - $0, 0), 3) } ?? 0
+        lastClock = clock
+
+        let before = status
+        let change = tracker.step(miles: miles, clock: clock)
+        guard let fresh = tracker.status(miles: miles, clock: clock) else { return [] }
+        if let before, dt > 0 { score(before, dt: dt) }
+        status = fresh
+
+        switch change {
+        case .some(.began):
+            startSegment(clock: clock, miles: miles)
+            return [.began]
+        case .some(.advanced):
+            if let before { closeSegment(before.index, clock: clock, miles: miles) }
+            let countedDown = leadFired && goFired
+            startSegment(clock: clock, miles: miles)
+            return [.advanced(countedDown: countedDown)]
+        case .some(.finished):
+            closeSegment(fresh.index, clock: clock, miles: miles)
+            return [.finished]
+        case .none:
+            break
+        }
+        guard !fresh.finished else { return [] }
+        return cue(fresh, clock: clock).map { [$0] } ?? []
+    }
+
+    /// The run ended: close the segment in progress.
+    mutating func close(clock: Double, miles: Double) {
+        guard !tracker.finished, let status else { return }
+        closeSegment(status.index, clock: clock, miles: miles)
+    }
+
+    /// Paces of the work segments that were run, seconds per mile.
+    var repPaces: [Double] {
+        zip(tracker.segments, stats).compactMap { segment, stat in
+            segment.isWork ? stat.avgPace : nil
+        }
+    }
+
+    /// Time-weighted average heart rate over the run.
+    var averageHeartRate: Double? {
+        let seconds = stats.map(\.hrSeconds).reduce(0, +)
+        guard seconds > 0 else { return nil }
+        return stats.map(\.hrSum).reduce(0, +) / seconds
+    }
+
+    // MARK: Segments
+
+    private mutating func startSegment(clock: Double, miles: Double) {
+        segmentStartClock = clock
+        segmentStartMiles = miles
+        leadFired = false
+        goFired = false
+        paceCuesThisSegment = 0
+        hrCuesThisSegment = 0
+        lastPaceCall = nil
+        // A segment change was just announced: every correction waits a full
+        // gap, and the feel reminder counts from here.
+        lastCueClock = clock
+        lastPaceCueClock = clock
+        lastHRCueClock = clock
+        lastFeelClock = clock
+    }
+
+    private mutating func closeSegment(_ position: Int, clock: Double, miles: Double) {
+        guard stats.indices.contains(position) else { return }
+        stats[position].actualSeconds = max(0, clock - segmentStartClock)
+        stats[position].actualMiles = max(0, miles - segmentStartMiles)
+    }
+
+    private mutating func score(_ status: PlanRunStatus, dt: Double) {
+        let position = status.index
+        guard stats.indices.contains(position), !status.finished else { return }
+        if let bpm = heartRate {
+            stats[position].hrSum += bpm * dt
+            stats[position].hrSeconds += dt
+        }
+        guard let band = status.segment.paceBand, let pace, status.segmentSeconds >= 15 else { return }
+        stats[position].scoredSeconds += dt
+        if pace < band.lowerBound {
+            stats[position].fastSeconds += dt
+        } else if pace > band.upperBound {
+            stats[position].slowSeconds += dt
+        } else {
+            stats[position].inBandSeconds += dt
+        }
+    }
+
+    // MARK: Cues
+
+    /// Seconds until this segment ends, nil when it can't be told.
+    private func eta(_ status: PlanRunStatus) -> Double? {
+        if let seconds = status.remainingSeconds { return seconds }
+        if let miles = status.remainingMiles, let pace = pace ?? status.segment.quotedPace { return miles * pace }
+        return nil
+    }
+
+    private mutating func cue(_ status: PlanRunStatus, clock: Double) -> PlanRunEvent? {
+        let segment = status.segment
+        let left = eta(status)
+
+        // The countdown outranks everything and ignores every gap: it has to
+        // land on time. Needs >5 s of runway for "3, 2, 1".
+        if let next = status.next, let eta = left {
+            if !leadFired, eta <= 10.5, eta > 5, status.segmentSeconds >= 8 {
+                leadFired = true
+                lastCueClock = clock
+                return .lead(next)
+            }
+            if leadFired, !goFired, eta <= 3.4 {
+                goFired = true
+                lastCueClock = clock
+                return .go(next)
+            }
+        }
+        if leadFired { return nil }
+        // Quiet into a change: a correction now would only collide with it.
+        if status.next != nil, let left, left < 15 { return nil }
+        guard clock - lastCueClock >= (fewerCues ? 25 : 12) else { return nil }
+
+        if let call = heartRateCall(status, clock: clock) {
+            hrCuesThisSegment += 1
+            lastHRCueClock = clock
+            lastCueClock = clock
+            return .heartRate(call)
+        }
+        if let call = paceCall(status, clock: clock) {
+            paceCuesThisSegment += 1
+            lastPaceCall = call
+            lastPaceCueClock = clock
+            lastCueClock = clock
+            return .pace(call)
+        }
+        // Every 10 minutes into a block, which only a long easy one reaches.
+        if heartRate == nil, !segment.isWork, !segment.isWalk,
+           clock - lastFeelClock >= (fewerCues ? 20 * 60 : 10 * 60) {
+            lastFeelClock = clock
+            lastCueClock = clock
+            return .feel(segment.feel ?? "")
+        }
+        return nil
+    }
+
+    private func heartRateCall(_ status: PlanRunStatus, clock: Double) -> PlanRunHRCall? {
+        let segment = status.segment
+        guard let bpm = heartRate, let ceiling = segment.hrHigh, ceiling > 0 else { return nil }
+        // HR lags effort by 1–3 minutes.
+        guard clock >= 5 * 60, status.segmentSeconds >= 90, !segment.isShortRep else { return nil }
+        // Reps are coached on pace unless the plan scores them on HR.
+        if segment.isWork, !segment.scoresHeartRate { return nil }
+        guard hrCuesThisSegment < (fewerCues ? 2 : 3),
+              clock - lastHRCueClock >= (fewerCues ? 150 : 75) else { return nil }
+        if bpm > ceiling + 3 { return .high(bpm: Int(bpm.rounded()), ceiling: Int(ceiling.rounded())) }
+        if segment.isWork, let floor = segment.hrLow, floor > 0, bpm < floor - 5 {
+            return .low(bpm: Int(bpm.rounded()), floor: Int(floor.rounded()))
+        }
+        return nil
+    }
+
+    private func paceCall(_ status: PlanRunStatus, clock: Double) -> PlanRunPaceCall? {
+        let segment = status.segment
+        guard let call = PlanRunPaceCall.judge(pace: pace, segment: segment) else { return nil }
+        let gap: Double = segment.isWork ? (fewerCues ? 60 : 30) : (fewerCues ? 180 : 75)
+        guard paceCuesThisSegment < (fewerCues ? 2 : 3), clock - lastPaceCueClock >= gap else { return nil }
+        switch call {
+        case .onTarget:
+            // Only worth saying right after a correction landed.
+            guard !fewerCues, let previous = lastPaceCall, previous != .onTarget else { return nil }
+        case .fast:
+            guard status.segmentSeconds >= 20 else { return nil }
+        case .slow:
+            guard status.segmentSeconds >= (segment.isWork ? 30 : 60) else { return nil }
+            // Heart rate governs: easy runs over 45 minutes and HR-scored
+            // easy blocks let the pace slow.
+            if heartRate != nil, day.holdsHeartRate || segment.scoreBy == "hr" { return nil }
+            if day.isEasyDay, clock > 45 * 60 { return nil }
+        }
+        return call
+    }
+}
+
+/// "1:40", "1:02:10". Plan clocks, for both platforms.
+enum PlanRunFormat {
+    static func clock(_ seconds: Double) -> String {
+        let total = max(0, Int(seconds.rounded()))
+        let h = total / 3600, m = (total % 3600) / 60, s = total % 60
+        if h > 0 { return String(format: "%d:%02d:%02d", h, m, s) }
+        return String(format: "%d:%02d", m, s)
+    }
+}
+
+#if os(watchOS)
+/// The plan days the iPhone last pushed. Watch-only; fed by
+/// `MADWatchBridge.apply` from a full app context, persisted by the system
+/// (`receivedApplicationContext`, re-applied at launch).
+final class WatchPlanRunStore: ObservableObject {
+    static let shared = WatchPlanRunStore()
+
+    @Published private(set) var days: [PlanRunDay] = []
+
+    /// Today's session, when one was pushed (read at render time, so it
+    /// rolls over at midnight without a new push).
+    var today: PlanRunDay? {
+        days.first { $0.isForToday && !$0.segments.isEmpty }
+    }
+
+    /// Called on the main thread from `MADWatchBridge.apply`.
+    func apply(json: String?) {
+        let fresh = PlanRunDay.decodeDays(json)
+        if fresh != days { days = fresh }
+    }
+}
+#endif

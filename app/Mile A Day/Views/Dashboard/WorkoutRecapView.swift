@@ -162,6 +162,11 @@ struct WorkoutRecapView: View {
 
                     statsGrid
 
+                    // Run Plans v2: the plan grade for a plan run; nothing otherwise.
+                    if let workoutId {
+                        PlanRunRecapCard(workoutId: workoutId)
+                    }
+
                     if let workoutId {
                         RecapShoePicker(
                             workoutId: workoutId,

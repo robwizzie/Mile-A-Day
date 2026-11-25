@@ -26,6 +26,8 @@ enum NotificationDestination: Identifiable, Equatable {
     /// A friend you asked to hear about is out: THEIR live sheet (Hype,
     /// Join), the one their walking tile opens.
     case friendOut(userId: String)
+    /// A suggested run-plan change (Run Plans v2): the proposal screen.
+    case runPlanProposal(id: String)
 
     var id: String {
         switch self {
@@ -35,6 +37,7 @@ enum NotificationDestination: Identifiable, Equatable {
         case .referrals: return "referrals"
         case .specialEvent(let id): return "special-event-\(id ?? "")"
         case .friendOut(let userId): return "friend-out-\(userId)"
+        case .runPlanProposal(let id): return "run-plan-proposal-\(id)"
         case .friendMedal(let ref): return "friend-medal-\(ref.userId)-\(ref.badgeId)"
         case .friendChallenge(let ref): return "friend-challenge-\(ref.userId)-\(ref.localDate ?? "")"
         }
@@ -58,6 +61,9 @@ enum NotificationDestination: Identifiable, Equatable {
             return .specialEvent(id: data["event_id"])
         case "daily_challenge":
             return .challenges
+        case "run_plan_proposal":
+            guard let id = data["proposal_id"], !id.isEmpty else { return nil }
+            return .runPlanProposal(id: id)
         case "buddy_friend_out":
             guard let userId = data["friend_id"], !userId.isEmpty else { return nil }
             return .friendOut(userId: userId)
@@ -155,6 +161,8 @@ private struct NotificationDestinationScreen: View {
                     SpecialEventView(eventId: id)
                 case .friendOut(let userId):
                     FriendOutDestination(userId: userId) { dismiss() }
+                case .runPlanProposal(let id):
+                    RunPlanProposalView(proposalId: id) { dismiss() }
                 case .friendMedal(let ref):
                     FriendMedalView(ref: ref)
                 case .friendChallenge(let ref):

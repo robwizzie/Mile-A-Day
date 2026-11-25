@@ -37,6 +37,11 @@ struct Mile_A_DayApp: App {
                     await verifyAppleCredentialIfNeeded()
                 }
                 .task {
+                    // Run Plans v2: keep the Watch's copy of the week's plan
+                    // days in step with the plan store (idempotent).
+                    PlanRunWatchSync.start()
+                }
+                .task {
                     // Flamey's wardrobe as data: pick up skins added on the
                     // server since this build (no-op until the set changes).
                     await FlameySkinSync.syncIfNeeded()

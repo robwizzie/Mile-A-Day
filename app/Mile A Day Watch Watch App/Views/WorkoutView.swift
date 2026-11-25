@@ -19,6 +19,9 @@ struct WorkoutView: View {
     /// A buddy walk this workout records (started from its card): progress
     /// goes to the crew every 5s and the finish closes it (WatchBuddyClient).
     var buddySessionId: String? = nil
+    /// Run Plans v2: today's session from the iPhone, when the runner picked
+    /// "Today's plan". nil = an ordinary run or walk.
+    var plan: PlanRunDay? = nil
     @Environment(\.dismiss) var dismiss
     private let buddyTick = Timer.publish(every: 5, on: .main, in: .common).autoconnect()
 
@@ -199,6 +202,7 @@ struct WorkoutView: View {
                 timer.invalidate()
                 WKInterfaceDevice.current().play(.success)
                 withAnimation { showCountdown = false }
+                if let plan { workoutManager.armPlan(plan) }
                 workoutManager.startWorkout(activityType: activityType, locationType: locationType)
             }
         }
@@ -208,7 +212,7 @@ struct WorkoutView: View {
 
     private var trackingPager: some View {
         TabView(selection: $pageSelection) {
-            nowPlayingPage
+            firstPage
                 .tag(0)
             statsPage
                 .tag(1)
@@ -220,6 +224,199 @@ struct WorkoutView: View {
             Button("End Workout", role: .destructive) { endWorkout() }
             Button("Cancel", role: .cancel) { }
         }
+    }
+
+    // MARK: - Page 1: Plan (plan runs) or Now Playing
+
+    @ViewBuilder
+    private var firstPage: some View {
+        if let status = workoutManager.planStatus {
+            planPage(status)
+        } else {
+            nowPlayingPage
+        }
+    }
+
+    /// Segment, countdown, progress, pace vs target, heart rate vs the
+    /// segment's ceiling, and the coach's few words (the wrist taps at every
+    /// change; the phone speaks, the Watch doesn't).
+    private func planPage(_ status: PlanRunStatus) -> some View {
+        let tint = Self.planTint(status)
+        let note = Self.planPaceNote(status, pace: workoutManager.planPace)
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 4) {
+                Text(Self.planLabel(status))
+                    .foregroundColor(tint)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                Spacer(minLength: 2)
+                Text(formattedTime)
+                    .foregroundColor(WatchTheme.textSecondary)
+                    .monospacedDigit()
+            }
+            .font(.system(size: 11, weight: .heavy, design: .rounded))
+
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                Text(Self.planBig(status))
+                    .font(.system(size: 40, weight: .heavy, design: .rounded))
+                    .foregroundColor(WatchTheme.textPrimary)
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+                if workoutManager.planCountingDown, !status.finished {
+                    Text("to go")
+                        .font(.system(size: 10, weight: .heavy, design: .rounded))
+                        .foregroundColor(WatchTheme.warning)
+                }
+            }
+
+            Capsule()
+                .fill(Color.white.opacity(0.15))
+                .frame(height: 4)
+                .overlay(alignment: .leading) {
+                    GeometryReader { geo in
+                        Capsule()
+                            .fill(tint)
+                            .frame(width: geo.size.width * CGFloat(min(max(status.progress, 0), 1)))
+                    }
+                }
+                .clipShape(Capsule())
+
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(workoutManager.planPace.map(Self.clock) ?? "--:--")
+                        .font(.system(size: 20, weight: .heavy, design: .rounded))
+                        .foregroundColor(WatchTheme.textPrimary)
+                        .monospacedDigit()
+                    Text(note.text)
+                        .font(.system(size: 10, weight: .heavy, design: .rounded))
+                        .foregroundColor(note.color)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                }
+                Spacer(minLength: 4)
+                if let bpm = workoutManager.planHeartRate ?? (workoutManager.currentHeartRate > 0 ? workoutManager.currentHeartRate : nil) {
+                    VStack(alignment: .trailing, spacing: 0) {
+                        Text("\(Int(bpm.rounded()))")
+                            .font(.system(size: 20, weight: .heavy, design: .rounded))
+                            .foregroundColor(Self.heartColor(bpm, segment: status.segment))
+                            .monospacedDigit()
+                        Text(status.segment.hrHigh.map { "bpm · <\(Int($0))" } ?? "bpm")
+                            .font(.system(size: 10, weight: .heavy, design: .rounded))
+                            .foregroundColor(WatchTheme.textTertiary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.7)
+                    }
+                }
+            }
+            .padding(.top, 2)
+
+            Spacer(minLength: 2)
+
+            Text(planLine(status))
+                .font(.system(size: 11, weight: .bold, design: .rounded))
+                .foregroundColor(WatchTheme.textPrimary)
+                .lineLimit(2)
+                .minimumScaleFactor(0.8)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 5)
+                .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(WatchTheme.surface))
+        }
+        .padding(.horizontal, 8)
+    }
+
+    /// The coach's cue for 8 seconds after it fired, else what to do now.
+    private func planLine(_ status: PlanRunStatus) -> String {
+        if let cue = workoutManager.planCue, Date().timeIntervalSince(workoutManager.planCueAt) < 8 { return cue }
+        return Self.planStandingLine(status)
+    }
+
+    // MARK: Plan text (miles, like the rest of the Watch)
+
+    private struct PlanNote {
+        let text: String
+        let color: Color
+    }
+
+    private static func planTint(_ status: PlanRunStatus) -> Color {
+        if status.finished { return WatchTheme.success }
+        if status.segment.isWork { return WatchTheme.madRedBright }
+        if status.segment.isRecover || status.segment.isWalk { return WatchTheme.success }
+        return WatchTheme.warning
+    }
+
+    private static func heartColor(_ bpm: Double, segment: PlanRunSegment) -> Color {
+        guard let ceiling = segment.hrHigh else { return WatchTheme.madRedBright }
+        return bpm > ceiling + 3 ? WatchTheme.warning : WatchTheme.success
+    }
+
+    /// "INTERVAL 3/6", "JOG 3/6", "WARM UP".
+    private static func planLabel(_ status: PlanRunStatus) -> String {
+        if status.finished { return "PLAN DONE" }
+        let segment = status.segment
+        let multi = status.workCount > 1
+        if segment.isWork {
+            if multi, let n = status.workNumber { return "INTERVAL \(n)/\(status.workCount)" }
+            return "MAIN SET"
+        }
+        if segment.isRecover {
+            if multi, let n = status.workNumber { return "JOG \(n)/\(status.workCount)" }
+            return "JOG"
+        }
+        if segment.isWarmup { return "WARM UP" }
+        if segment.isCooldown { return "COOL DOWN" }
+        if segment.isWalk { return "WALK" }
+        return segment.quotedPace == nil ? "EASY" : "STEADY"
+    }
+
+    /// Time left, distance left, or time in an open-ended segment.
+    private static func planBig(_ status: PlanRunStatus) -> String {
+        if status.finished { return "Done" }
+        if let seconds = status.remainingSeconds { return clock(seconds) }
+        if let miles = status.remainingMiles { return distanceLeft(miles, segment: status.segment) }
+        return clock(status.segmentSeconds)
+    }
+
+    private static func distanceLeft(_ miles: Double, segment: PlanRunSegment) -> String {
+        if (segment.distanceMiles ?? 0) < 0.95 {
+            return "\(Int((miles * 1609.344 / 10).rounded()) * 10)m"
+        }
+        return String(format: "%.2fmi", miles)
+    }
+
+    private static func planPaceNote(_ status: PlanRunStatus, pace: Double?) -> PlanNote {
+        let segment = status.segment
+        if segment.isRecover { return PlanNote(text: "recovering", color: WatchTheme.success) }
+        guard let target = segment.quotedPace else {
+            return PlanNote(text: "easy effort", color: WatchTheme.textTertiary)
+        }
+        guard let call = PlanRunPaceCall.judge(pace: pace, segment: segment) else {
+            return PlanNote(text: "target \(clock(target))", color: WatchTheme.textTertiary)
+        }
+        switch call {
+        case .onTarget: return PlanNote(text: "on pace", color: WatchTheme.success)
+        case .fast(let drift): return PlanNote(text: "\(Int(drift.rounded()))s fast", color: WatchTheme.warning)
+        case .slow(let drift): return PlanNote(text: "\(Int(drift.rounded()))s slow", color: WatchTheme.madRedBright)
+        }
+    }
+
+    /// What to do now, or what's coming.
+    private static func planStandingLine(_ status: PlanRunStatus) -> String {
+        if status.finished { return "Plan done. Nice work" }
+        let segment = status.segment
+        if let next = status.next, next.isWork, !segment.isWork {
+            let name = status.workCount > 1 ? "Interval \(status.upcomingWorkNumber)" : "Main set"
+            if let seconds = status.remainingSeconds { return "\(name) in \(clock(seconds))" }
+            if let miles = status.remainingMiles { return "\(name) in \(distanceLeft(miles, segment: segment))" }
+            return "\(name) next"
+        }
+        return WatchWorkoutManager.intro(segment, status: status)
+    }
+
+    private static func clock(_ seconds: Double) -> String {
+        PlanRunFormat.clock(seconds)
     }
 
     // MARK: - Page 1: Now Playing

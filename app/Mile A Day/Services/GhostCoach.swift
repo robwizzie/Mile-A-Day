@@ -125,6 +125,12 @@ final class GhostCoach: NSObject, ObservableObject, AVSpeechSynthesizerDelegate 
     }
 
     private var ghostName = "your ghost"
+    /// A Run Plans session is live (`PlanRunCoachV2`): it owns the pace talk,
+    /// so the distance/pace metronome stands down. `planKeepsSplits` (easy
+    /// and long days) keeps the mile splits and milestones; a structured
+    /// session drops them so they can't land on top of a countdown.
+    private var planModeActive = false
+    private var planKeepsSplits = true
     /// The GHOST is live — lead changes, chase lines, the verdict.
     private var isRacing = false
     /// The WORKOUT is live — splits, intervals, pace state. Outlives the race.
@@ -414,6 +420,10 @@ final class GhostCoach: NSObject, ObservableObject, AVSpeechSynthesizerDelegate 
         // A completed mile is the headline of any run, so it is the one line
         // allowed past the floor: it carries two numbers you can't reconstruct
         // later (that mile's split, and the average it moved).
+        // A structured plan session (intervals, tempo): the plan coach owns
+        // every line. Seeded above, so nothing fires late if it ends.
+        if planModeActive, !planKeepsSplits { return }
+
         if let mileLine = mileSplitLine(sample) {
             // HELD rather than forced. Winning a one-mile race speaks the
             // verdict on the very tick that crosses the mile, so forcing put
@@ -445,7 +455,7 @@ final class GhostCoach: NSObject, ObservableObject, AVSpeechSynthesizerDelegate 
         // normal floor would have silently eaten every other one. Not held:
         // "you're at 1.25 miles" stops being true almost immediately, and the
         // next one is never far away.
-        if let intervalLine = intervalLine(sample) {
+        if !planModeActive, let intervalLine = intervalLine(sample) {
             say(intervalLine, urgency: .high)
             return
         }
@@ -619,9 +629,33 @@ final class GhostCoach: NSObject, ObservableObject, AVSpeechSynthesizerDelegate 
         say("You beat \(ghostName) by \(seconds(marginSeconds)). Nice.", force: true)
     }
 
+    // MARK: - Run plan mode
+
+    /// `PlanRunCoachV2` turns this on for a plan run and off at its end.
+    func setPlanMode(_ on: Bool, keepsSplits: Bool) {
+        planModeActive = on
+        planKeepsSplits = keepsSplits
+    }
+
+    /// A plan line, through the same voice, call-buzz, floor and on-screen
+    /// echo as every other line. `force` is for segment changes and
+    /// countdowns, which have to land on time; corrections respect the floor.
+    /// `interrupt` cuts off whatever is mid-sentence ("3, 2, 1, go" can't
+    /// queue behind a split). Returns false when the floor or the mute switch
+    /// held it back.
+    @discardableResult
+    func sayPlanLine(_ line: String, force: Bool, interrupt: Bool = false) -> Bool {
+        if interrupt, Self.isEnabled, synthesizer.isSpeaking {
+            synthesizer.stopSpeaking(at: .immediate)
+        }
+        return say(line, urgency: .high, force: force)
+    }
+
     func stop() {
         isRacing = false
         isActive = false
+        planModeActive = false
+        planKeepsSplits = true
         firedMilestones = []
         wasAhead = nil
         hasSeededProgress = false

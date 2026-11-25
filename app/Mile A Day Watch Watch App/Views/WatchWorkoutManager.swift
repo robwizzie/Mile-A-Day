@@ -1,6 +1,7 @@
 import CoreLocation
 import Foundation
 import HealthKit
+import WatchKit
 
 final class WatchWorkoutManager: NSObject, ObservableObject {
     // Published UI state
@@ -32,6 +33,22 @@ final class WatchWorkoutManager: NSObject, ObservableObject {
     /// instead of sitting on a screen whose numbers have stopped moving.
     @Published var endedWithoutRequest: Bool = false
 
+    /// Run Plans v2 (Mile A Day+): where the run is in today's plan. nil = not
+    /// a plan run. Walked on this manager's 1 Hz tick (not a view's), so the
+    /// change haptics still land with the wrist down. The Watch is the HR
+    /// source: `currentHeartRate` feeds the coach's HR cues.
+    @Published var planStatus: PlanRunStatus?
+    /// Smoothed pace (20 s), seconds per mile (plan runs only).
+    @Published var planPace: Double?
+    /// 15 s average heart rate (plan runs only).
+    @Published var planHeartRate: Double?
+    /// The coach's last cue, shown for a few seconds (`planCueAt`).
+    @Published var planCue: String?
+    @Published var planCueAt: Date = .distantPast
+    /// The lead ("in 10 seconds") was given; the change hasn't happened yet.
+    @Published var planCountingDown: Bool = false
+    private var planEngine: PlanRunCoachEngine?
+
     // HealthKit. The store must outlive every operation started on it — a
     // released store answers nothing, silently.
     private let healthStore = HKHealthStore()
@@ -56,6 +73,102 @@ final class WatchWorkoutManager: NSObject, ObservableObject {
     /// hard deadline after which the UI moves on regardless.
     private let forceFinalizeAfter: TimeInterval = 8
     private let endDeadlineAfter: TimeInterval = 20
+
+    // MARK: - Run plan
+
+    /// Coach this run through `day`'s segments. Call before `startWorkout`.
+    func armPlan(_ day: PlanRunDay) {
+        guard !day.segments.isEmpty else { return }
+        let engine = PlanRunCoachEngine(day: day, fewerCues: false)
+        planEngine = engine
+        planPace = nil
+        planHeartRate = nil
+        planCue = nil
+        planCountingDown = false
+        planStatus = engine.tracker.status(miles: 0, clock: 0)
+    }
+
+    /// Main-thread only; from the timer tick. Clock = the builder's elapsed
+    /// time (manual pauses excluded), never a moving clock.
+    private func tickPlan() {
+        guard var engine = planEngine else { return }
+        let bpm = currentHeartRate > 0 ? currentHeartRate : nil
+        let events = engine.tick(clock: elapsedTime, miles: distance, beltPace: nil, heartRate: bpm)
+        planEngine = engine
+        if planStatus != engine.status { planStatus = engine.status }
+        if planPace != engine.pace { planPace = engine.pace }
+        if planHeartRate != engine.heartRate { planHeartRate = engine.heartRate }
+        guard let status = engine.status else { return }
+        for event in events { cue(event, status: status) }
+    }
+
+    /// A tap at every change (and a lighter one for corrections), plus a few
+    /// words on the plan page.
+    private func cue(_ event: PlanRunEvent, status: PlanRunStatus) {
+        let device = WKInterfaceDevice.current()
+        let segment = status.segment
+        switch event {
+        case .began:
+            planCountingDown = false
+            show(Self.intro(segment, status: status))
+        case .lead(let next):
+            planCountingDown = true
+            device.play(.click)
+            show(next.isWork ? "Speed up in 10s" + (next.quotedPace.map { " · \(PlanRunFormat.clock($0))" } ?? "")
+                             : "Ease off in 10s")
+        case .go(let next):
+            device.play(next.isWork ? .start : .stop)
+            show(next.isWork ? "3, 2, 1, go" : "Ease off now")
+        case .advanced(let countedDown):
+            planCountingDown = false
+            if !countedDown { device.play(segment.isWork ? .start : .directionDown) }
+            show(Self.intro(segment, status: status))
+        case .finished:
+            planCountingDown = false
+            device.play(.success)
+            show("Plan done. Nice work")
+        case .pace(let call):
+            switch call {
+            case .onTarget: show("Right on pace")
+            case .fast:
+                device.play(.directionDown)
+                show("Ease off a touch")
+            case .slow:
+                device.play(.directionUp)
+                show("Pick it up a little")
+            }
+        case .heartRate(let call):
+            switch call {
+            case .high(_, let ceiling):
+                device.play(.directionDown)
+                show("HR high · keep under \(ceiling)")
+            case .low:
+                device.play(.directionUp)
+                show("Push a bit harder")
+            }
+        case .feel(let text):
+            show(text.isEmpty ? "Easy: you could still talk" : text)
+        }
+    }
+
+    private func show(_ text: String) {
+        planCue = text
+        planCueAt = Date()
+    }
+
+    static func intro(_ segment: PlanRunSegment, status: PlanRunStatus) -> String {
+        switch segment.kind {
+        case "work":
+            let head = status.isLastWork && status.workCount > 1 ? "Last one" : "Go"
+            return segment.quotedPace.map { "\(head) · \(PlanRunFormat.clock($0)) pace" } ?? "\(head), strong"
+        case "recover": return "Jog it out"
+        case "warmup": return "Warm up easy"
+        case "cooldown": return "Cool down easy"
+        case "walk": return "Walk"
+        default:
+            return segment.quotedPace.map { "Hold \(PlanRunFormat.clock($0))" } ?? "Easy, any pace"
+        }
+    }
 
     // MARK: - Lifecycle
 
@@ -159,6 +272,7 @@ final class WatchWorkoutManager: NSObject, ObservableObject {
                 } else if let start = self.startDate {
                     self.elapsedTime = Date().timeIntervalSince(start)
                 }
+                self.tickPlan()
             }
         }
     }

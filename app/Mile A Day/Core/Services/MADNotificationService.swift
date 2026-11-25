@@ -135,10 +135,22 @@ final class MADNotificationService: NSObject, ObservableObject {
             options: []
         )
 
+        // Run Plans v2: a suggested change for the next run. Both act in the
+        // background (no .foreground): the decision is the whole point, and
+        // the plan screen shows the result next time it opens.
+        let runPlanApply = UNNotificationAction(identifier: "APPLY", title: String(localized: "Apply"), options: [])
+        let runPlanKeep = UNNotificationAction(identifier: "KEEP", title: String(localized: "Keep my plan"), options: [])
+        let runPlanProposal = UNNotificationCategory(
+            identifier: "RUN_PLAN_PROPOSAL",
+            actions: [runPlanApply, runPlanKeep],
+            intentIdentifiers: [],
+            options: []
+        )
+
         // setNotificationCategories REPLACES the whole set — FRIEND_ACTIVITY
         // must stay in this array or the Hype button silently disappears.
         center.setNotificationCategories([
-            friendActivity, friendRequest, coauthorTag, buddyInvite,
+            friendActivity, friendRequest, coauthorTag, buddyInvite, runPlanProposal,
         ])
     }
 
@@ -581,6 +593,11 @@ extension MADNotificationService: UNUserNotificationCenterDelegate {
             await handleBuddyDeclineAction(userInfo: userInfo)
             return
         }
+        if response.notification.request.content.categoryIdentifier == "RUN_PLAN_PROPOSAL",
+           response.actionIdentifier == "APPLY" || response.actionIdentifier == "KEEP" {
+            await handleRunPlanProposalAction(userInfo: userInfo, apply: response.actionIdentifier == "APPLY")
+            return
+        }
         // BUDDY_JOIN_ACTION is .foreground and deliberately falls through to the
         // generic routing below — joining means landing in the lobby, which is
         // exactly what a normal tap on this push already does.
@@ -598,6 +615,27 @@ extension MADNotificationService: UNUserNotificationCenterDelegate {
             object: nil,
             userInfo: ["type": type, "data": data]
         )
+    }
+
+    /// Apply / Keep my plan on a run_plan_proposal push. Runs while the app
+    /// may be suspended: talks to the stateless service, then lets the
+    /// store refresh if it's alive.
+    private func handleRunPlanProposalAction(userInfo: [AnyHashable: Any], apply: Bool) async {
+        let data = userInfo["data"] as? [String: String]
+        guard let id = data?["proposal_id"], !id.isEmpty, TokenStore.hasTokens else { return }
+        do {
+            if apply {
+                _ = try await RunPlanV2Service.apply(proposalId: id)
+            } else {
+                _ = try await RunPlanV2Service.decline(proposalId: id)
+            }
+            await RunPlanV2Store.shared.refreshQuietly()
+        } catch RunPlanV2Error.proposalNotPending, RunPlanV2Error.staleProposal {
+            // Already decided (or the plan moved on): nothing to tell.
+        } catch {
+            await postLocalToast(title: String(localized: "Couldn't update your plan"),
+                                 body: String(localized: "Open Mile A Day to decide on the suggested change."))
+        }
     }
 
     /// Handles "Not now" on a buddy_invite push.

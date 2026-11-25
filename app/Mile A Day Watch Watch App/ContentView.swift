@@ -90,6 +90,10 @@ struct ContentView: View {
     /// workout was started for from its card.
     @ObservedObject private var buddy = WatchBuddyClient.shared
     @State private var buddySessionForWorkout: String?
+    /// Run Plans v2: today's session pushed by the iPhone (Mile A Day+), and
+    /// the one the next run coaches (nil = an ordinary run or walk).
+    @ObservedObject private var planStore = WatchPlanRunStore.shared
+    @State private var selectedPlan: PlanRunDay?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.isLuminanceReduced) private var isLuminanceReduced
 
@@ -156,6 +160,10 @@ struct ContentView: View {
 
                     locationToggle
 
+                    if buddy.offer == nil, let plan = planStore.today {
+                        planButton(plan)
+                    }
+
                     activityButtons
                         .padding(.bottom, 4)
                 }
@@ -177,7 +185,8 @@ struct ContentView: View {
                 startingDistance: currentDistance,
                 activityType: selectedActivityType,
                 locationType: locationType,
-                buddySessionId: buddySessionForWorkout
+                buddySessionId: buddySessionForWorkout,
+                plan: selectedPlan
             )
         }
         .onAppear {
@@ -335,6 +344,7 @@ struct ContentView: View {
             guard offer.canStart else { return }
             selectedActivityType = offer.isRun ? .running : .walking
             buddySessionForWorkout = offer.sessionId
+            selectedPlan = nil
             showWorkoutView = true
         } label: {
             VStack(alignment: .leading, spacing: 2) {
@@ -383,6 +393,47 @@ struct ContentView: View {
             .buttonStyle(WatchPressStyle())
             .accessibilityLabel("Start walk")
         }
+    }
+
+    /// "Today's plan": a run coached through the iPhone's plan segments.
+    private func planButton(_ plan: PlanRunDay) -> some View {
+        Button {
+            start(activity: .running, plan: plan)
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "calendar")
+                    .font(.system(size: 15, weight: .bold))
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 0) {
+                    Text("Today's plan")
+                        .font(.system(size: 14, weight: .bold, design: .rounded))
+                    Text(plan.title)
+                        .font(.system(size: 10, weight: .semibold, design: .rounded))
+                        .foregroundColor(WatchTheme.textSecondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .heavy))
+                    .opacity(0.7)
+                    .accessibilityHidden(true)
+            }
+            .foregroundColor(.white)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity)
+            .background(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(WatchTheme.warning.opacity(0.22))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .strokeBorder(WatchTheme.warning.opacity(0.8), lineWidth: 1)
+                    )
+            )
+        }
+        .buttonStyle(WatchPressStyle())
+        .accessibilityLabel("Start today's plan, \(plan.title)")
     }
 
     private enum ActionButtonStyle { case primary, secondary }
@@ -465,8 +516,9 @@ struct ContentView: View {
 
     // MARK: - Actions
 
-    private func start(activity: HKWorkoutActivityType) {
+    private func start(activity: HKWorkoutActivityType, plan: PlanRunDay? = nil) {
         selectedActivityType = activity
+        selectedPlan = plan
         WKInterfaceDevice.current().play(.start)
         showWorkoutView = true
     }

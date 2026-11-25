@@ -182,8 +182,20 @@ final class MADBackgroundService: NSObject, ObservableObject {
         // Perform the background work
         Task { [weak self] in
             await self?.performBackgroundSync(reason: .bgAppRefreshTask)
+            // Run Plans v2: the overnight AI pass so the morning's suggestion is
+            // ready. iOS doesn't promise this runs; when it doesn't, the first
+            // open of the day does the same work.
+            await Self.runPlanNightlyPassIfDue()
             task.setTaskCompleted(success: true)
         }
+    }
+
+    /// Between midnight and 6 AM local, once per night (the coach throttles).
+    @MainActor
+    private static func runPlanNightlyPassIfDue() async {
+        let hour = Calendar.current.component(.hour, from: Date())
+        guard hour < 6, TokenStore.hasTokens, RunPlanV2Store.shared.hasPlan else { return }
+        await RunPlanCoach.runBackgroundPass(trigger: .nightly)
     }
 
     @MainActor

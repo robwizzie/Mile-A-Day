@@ -22,6 +22,14 @@ final class WorkoutShoeChoice {
     /// default it WILL be stamped with for its activity — so the recap shows
     /// the right pair (or none) before HealthKit has handed it to the sync.
     func load() async {
+        // A plan run's shoe (Run Plans): `PlanRunShoeHandoff` is saving it as
+        // this workout's pick right now, so show it rather than race the save
+        // with a read that would still answer the activity default.
+        if !loaded, let planned = PlanRunShoeHandoff.pick(for: workoutId) {
+            shoeId = planned
+            loaded = true
+            return
+        }
         do {
             let assignment = try await ShoeService.assignment(forWorkout: workoutId, activity: activity)
             shoeId = assignment.shoe_id
