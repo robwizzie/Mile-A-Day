@@ -37,6 +37,7 @@ in the app), and peeks out from behind the Start your mile button.
 | `g-grateful` (cream note) | Family. Pie. A streak you're proud of. Walk or run one mile a day, starting Thanksgiving. Become a streaker. Free on iPhone. | Things I'm grateful for. |
 | `d-day1-37` (red, two streak cards) | Start Thursday and you're on day 37 by New Year's Day, one mile at a time. Your Flamey grows with your streak. Join the streakers. Free on iPhone. | Day 1 to Day 37 by New Year's. |
 | `t-todo` (amber, real Start your mile button) | Turkey: done. Pie: done. One mile: one tap away. Become a streaker. Free on iPhone. | Today's to-do list. |
+| `c-coal-cycle` (navy, Day 0 coal → Day 37 Flamey → back to coal) | Flamey lives on your streak. Walk or run a mile a day and he grows from a cold coal into a full blaze. Skip a day and he's back to coal, unless a streak token saves you. Become a streaker. Free on iPhone. | He lives on your streak. |
 
 Social ads (friends with nudges and hypes, the locked feed, a competition leaderboard) come next in the same layout,
 from fresh screenshots of a test account. App Store slides 02, 03, 04, 06 and 08 show real users, so they stay out of
