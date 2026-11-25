@@ -6,4 +6,7 @@ cd "$(dirname "$0")/.."
 mkdir -p website/public/desk/py/mad
 cp desk/firmware/mad/*.py website/public/desk/py/mad/
 rm -f website/public/desk/py/mad/main.py      # the board's hardware loop: not needed
+# The laundry plug script (the remote fills in the plug's key).
+mkdir -p website/public/desk/laundry
+cp desk/laundry/mad-laundry.js website/public/desk/laundry/
 echo "synced desk/firmware/mad -> website/public/desk/py/mad"

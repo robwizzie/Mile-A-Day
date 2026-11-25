@@ -32,6 +32,8 @@ def length(ev):
         return 8.5
     if kind == "dizzy":
         return 5.0
+    if kind == "laundry":
+        return 6.5
     return 7.5
 
 
@@ -589,3 +591,9 @@ def dizzy(app, b, ev, t, now, dt):
         _star(b, sx, sy, (FL_YELLOW, WHITE, FL_GOLD)[k])
     typed(b, 23, 64, 7, "WHOA!", t - 0.3, FL_GOLD, F5)
     typed(b, 23, 64, 18, "SO DIZZY", t - 0.9, RED, F3, 0.05)
+
+
+# ---------------- my washer / dryer finished (mad/laundry.py draws it) ----------------
+def laundry(app, b, ev, t, now, dt):
+    from mad import laundry as lw
+    lw.scene(app, b, ev, t, now, dt)

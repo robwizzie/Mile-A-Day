@@ -6,6 +6,7 @@ import { MAD_RED, MAD_SUCCESS } from "./theme";
 import { loadDeskEngine, type DeskEngine } from "@/lib/desk-engine";
 import { ShareClip } from "@/components/desk/share-clip";
 import { PushSettings } from "@/components/desk/push-settings";
+import { LaundrySection } from "@/components/desk/laundry";
 
 /**
  * The desk remote (/admin/desk), phone-first. Your own box(es) only,
@@ -33,6 +34,7 @@ const TEST_LABEL: Record<string, string> = {
   medal: "New medal", review: "App review", recap: "9pm recap", holiday: "Holiday",
   newyear: "New Year", countdown: "New Year countdown", lead: "Lead change",
   doodle: "Doodle", record: "Signup record", replay: "Run replay", dizzy: "Shaken (dizzy)",
+  laundry: "Laundry done",
 };
 
 type Kind = "run" | "walk";
@@ -57,6 +59,7 @@ type Feed = {
   friends_at_risk: { count: number; top: { name: string; streak: number }[] };
   rival?: { name: string; miles_today: number; miles_week: number; streak: number; mile_done: boolean } | null;
   growth?: { today: number; yesterday_same_time: number; week: number[]; dows: string; best_30: number } | null;
+  laundry?: { w: unknown; d: unknown } | null;
 };
 
 type BoxDetail = {
@@ -85,11 +88,12 @@ const STYLE_INFO: Record<string, string> = {
   GROWTH: "Signups today and this week",
   ODOMETER: "Every mile ever logged, on rolling wheels",
   SHOWCASE: "Cycles every style, with a stat show (booths and demos)",
+  LAUNDRY: "Your washer and dryer: running, time left, done",
 };
 const ACTIVITY_ICON: Record<string, string> = {
   nudge: "👉", hype: "👏", message_in: "💬", message_out: "📤", medal: "🏅",
   run: "✅", friend_run: "🏃", friend_mile: "🎉", remote: "📱", doodle_in: "🎨", doodle_out: "🖌️",
-  new_user: "🙋", interest: "📦", review: "⭐", record: "📈", lead: "👑", box_offline: "🔌",
+  new_user: "🙋", interest: "📦", review: "⭐", record: "📈", lead: "👑", box_offline: "🔌", laundry: "🧺",
 };
 const MESSAGE_MAX = 48;
 const EMOJI = ["🔥", "❤️", "👏", "🏃"];
@@ -649,6 +653,7 @@ export function DeskRemote() {
               </div>
               <div className="mt-2 grid grid-cols-2 gap-2">
                 {data.styles.map((s, i) => {
+                  if (s === "LAUNDRY" && !live.laundry) return null;   // only with laundry plugs
                   const missing = s === "VERSUS" && !live.rival ? "Needs a friend with a desk who shares runs"
                     : s === "GROWTH" && !live.growth ? "Admins only" : null;
                   return (
@@ -833,6 +838,9 @@ export function DeskRemote() {
                 </ul>
               )}
             </Section>
+
+            {/* only shows for laundry users (the server says who) */}
+            <LaundrySection say={say} Section={Section} />
 
             <FirmwareSection running={st?.firmware ?? null} reported={!!st} />
 

@@ -10,21 +10,22 @@ from mad.gfx import (BLACK, MAROON_DIM, MAROON, RED, WHITE, FL_YELLOW, GREEN,
                      fill, draw_icon, icon_width, commas, short, num, ease,
                      ease_out, art_bitmap, set_dim, upper_name)
 LAZY = ("message", "holiday", "countdown", "medal", "review", "comment", "friendmile",
-        "doodle", "lead", "replay", "dizzy")     # scenes in extra.py
-MODES = (2, 4, 5, 6, 7, 8, 9, 11)     # styles drawn by mad/modes.py (9: mad/boards.py)
+        "doodle", "lead", "replay", "dizzy", "laundry")     # scenes in extra.py
+MODES = (2, 4, 5, 6, 7, 8, 9, 12)     # styles drawn by mad/modes.py (9: mad/boards.py, 12: LIVE)
 
 STYLES = ("CLASSIC", "SPOTLIGHT", "ARCADE", "BIG", "CAMPFIRE", "RACE", "CLOCK", "VERSUS",
-          "GROWTH", "ODOMETER", "SHOWCASE")
+          "GROWTH", "ODOMETER", "SHOWCASE", "LAUNDRY")
 CLOCK = 6
 VERSUS = 7               # head to head with the other desk (a friend's real numbers)
 GROWTH = 8               # founder mode: signups (admins' desks only)
 ODOMETER = 9             # community total miles on rolling wheels
 SHOWCASE = 10            # cycles every style it can show, with a stat show between
-LIVE = 11                # not a choice: shown while the owner is out running
+LAUNDRY = 11             # the owner's washer and dryer (only with laundry plugs)
+LIVE = 12                # not a choice: shown while the owner is out running
 SHOWCASE_S = 40.0        # Showcase: seconds per style
 SHOWCASE_SHOW = 180.0    # ...and a stat show about every 3 minutes
 MASCOTS = ("RUNNER", "FLAMEY")
-FIRMWARE = 24            # this build (the remote shows it and offers newer ones)
+FIRMWARE = 26            # this build (the remote shows it and offers newer ones)
 BOOT_MIN = 3.0           # keep the logo up at least this long
 DASH_SECONDS = 25        # Classic: still dashboard time between stat shows
 T_TRANS = 1.7            # mascot wipe between screens
@@ -266,6 +267,7 @@ class App:
         self.sc_k = 0                    # Showcase: which style, since when
         self.sc_at = None
         self.sc_show = None
+        self.laundry = None              # my washer / dryer (feed, laundry plugs only)
 
     # ================= data in =================
     def set_data(self, data, live, now):
@@ -283,6 +285,7 @@ class App:
         r, g = (data.get("rival"), data.get("growth")) if feed else (None, None)
         self.rival = r if isinstance(r, dict) else None
         prev_growth, self.growth = self.growth, (g if isinstance(g, dict) else None)
+        self._laundry(data.get("laundry") if feed else None, first)
         h = data.get("hours")
         self.hours = h if isinstance(h, list) and len(h) == 24 else None
         ld = data.get("leaders") if feed else None
@@ -367,6 +370,18 @@ class App:
             else:
                 o.append(i)
         self.order = tuple(o)
+
+    def _laundry(self, lw, first):
+        """My washer / dryer. A load finishing plays "WASHER DONE!" once
+        (not at boot: that's old news)."""
+        prev, self.laundry = self.laundry, (lw if isinstance(lw, dict) else None)
+        if first or not prev or not self.laundry:
+            return
+        for k in ("w", "d"):
+            a, b = prev.get(k), self.laundry.get(k)
+            if (isinstance(a, dict) and isinstance(b, dict) and b.get("s") == "done"
+                    and a.get("s") not in ("done", "idle", "offline")):
+                self.push(("laundry", k, int(b.get("t") or -1)))
 
     def _messages(self, msgs):
         """Desk messages from Admin -> Displays: each plays once. At boot,
@@ -468,6 +483,8 @@ class App:
             return bool(self.rival and self.me)
         if st == GROWTH:
             return bool(self.growth)
+        if st == LAUNDRY:
+            return bool(self.laundry and (self.laundry.get("w") or self.laundry.get("d")))
         if st == SHOWCASE:
             return True
         return True
@@ -608,11 +625,16 @@ class App:
         """My own run, my personal records, the date (seasons, New Year)."""
         me = self.me
         date = me.get("local_date") or ""
-        if self.date and date and date != self.date and self.date.endswith("12-31"):
+        if self.date and date and date == next_day(self.date) and self.date.endswith("12-31"):
             if not self.ny_countdown:          # (the countdown already partied)
                 self.push(("newyear", int(date[:4])))
-        if date and (not self.date or date >= self.date):
-            self.date = date              # (never step back: the board rolls over itself)
+        # The server's date is the truth. The one exception: just after
+        # midnight the board has rolled over on its own and the feed may still
+        # say yesterday for a poll or two.
+        s = self.local_seconds(now)
+        lagging = s is not None and s < 300 and self.date == next_day(date)
+        if date and len(date) == 10 and not lagging:
+            self.date = date
         self.closet = wear(me.get("flamey"))
         self.apply_season()
         self._medals(me.get("medals") or ())
@@ -781,7 +803,7 @@ class App:
 
     def showcase_style(self):
         """Showcase: the style it's on now (every one this box can show)."""
-        pick = [s for s in range(SHOWCASE) if s != CLOCK and self.can_show(s)]
+        pick = [s for s in range(len(STYLES)) if s not in (CLOCK, SHOWCASE) and self.can_show(s)]
         return pick[self.sc_k % len(pick)] if pick else 0
 
     def _showcase(self, now):
@@ -819,8 +841,12 @@ class App:
             self.start_event(("countdown", 86400 - s, int(self.date[:4]) + 1), now)
             return
         m = s / 60
-        day_start = self.last_m is None or m < self.last_m      # new day
-        if self.last_m is not None and m < self.last_m and self.date:
+        # A new day only when the clock really wraps past midnight: a clock
+        # nudged back by a slow poll, or set back an hour in the fall, is not
+        # tomorrow (that once ran the box's date ahead into other holidays).
+        wrapped = self.last_m is not None and self.last_m >= 23 * 60 and m < 60
+        day_start = self.last_m is None or wrapped
+        if wrapped and self.date:
             self.date = next_day(self.date)                     # midnight, locally
             self.apply_season()
         self.last_m = m
@@ -1208,6 +1234,9 @@ class App:
             _modes().growth(self, fb, now, t)
         elif style == ODOMETER:
             _boards().odometer(self, fb, now, t)
+        elif style == LAUNDRY:
+            from mad import laundry
+            laundry.screen(self, fb, now, t)
         else:
             _modes().clock(self, fb, now, t)
 
@@ -1304,6 +1333,10 @@ class App:
             if v == 2 and getattr(self, "arcade_rest", False):
                 v = 3                                     # arcade's stat card: dress it like BIG
             decor.backdrop(self, self.fb, now, v)
+        if (self.laundry and self.mode in ("dash", "show") and not self.night
+                and self.view() not in (LAUNDRY, LIVE)):
+            from mad import laundry                       # a machine running / done
+            laundry.badge(self, self.fb, now)
         if self.toast:
             text, until = self.toast
             if now > until:

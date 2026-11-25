@@ -293,6 +293,16 @@ export const RATE_LIMIT_SPECS = {
     key: "ip",
     message: "Too many requests. Please try again in a moment.",
   },
+  laundry: {
+    // Laundry plugs post every 20 s while a machine runs, every minute
+    // otherwise: two plugs in one home use ~90 of these. Keyed by IP and
+    // applied BEFORE the key lookup, so it also caps guessing.
+    name: "LAUNDRY",
+    windowMs: 15 * MIN,
+    max: 240,
+    key: "ip",
+    message: "Too many requests. Please try again in a moment.",
+  },
   // The website's desk twin polls /public/desk every ~20 s per open tab.
   publicDesk: {
     name: "PUBLIC_DESK",
@@ -357,6 +367,7 @@ export const commentLimiter = makeLimiter(RATE_LIMIT_SPECS.comment);
 export const reportLimiter = makeLimiter(RATE_LIMIT_SPECS.report);
 export const globalUserLimiter = makeLimiter(RATE_LIMIT_SPECS.global);
 export const displayLimiter = makeLimiter(RATE_LIMIT_SPECS.display);
+export const laundryLimiter = makeLimiter(RATE_LIMIT_SPECS.laundry);
 export const publicDeskLimiter = makeLimiter(RATE_LIMIT_SPECS.publicDesk);
 export const deskInterestLimiter = makeLimiter(RATE_LIMIT_SPECS.deskInterest);
 export const webEventsLimiter = makeLimiter(RATE_LIMIT_SPECS.webEvents);

@@ -204,7 +204,7 @@ def backdrop(app, b, now, view):
             lights(b, 17, now, look)
         elif view == 2:
             lights(b, 8, now, look)
-        elif view in (5, 11):
+        elif view in (5, 12):
             lights(b, 15, now, look)
             lights(b, 31, now, look)
             lights(b, 30, now, look)
@@ -223,7 +223,7 @@ def backdrop(app, b, now, view):
         snow(b, now)                                 # light snow, everywhere
         if view == 2:
             sleigh(b, now, y=11)                     # Arcade: Santa flies over
-        if view in (5, 11):                           # snowy tracks
+        if view in (5, 12):                           # snowy tracks
             snowy_track(b)
     elif look == "HALLOWEEN":
         if view == 2:                                # Arcade: moon + bats
@@ -232,7 +232,7 @@ def backdrop(app, b, now, view):
         elif view == 4:                              # Campfire: moon + bats by the fire
             moon(b, 19, 3)
             bats(b, now, (1, 5), 23, 9.0)
-        if view in (5, 11):
+        if view in (5, 12):
             lights(b, 15, now, look)
             lights(b, 31, now, look)
             lights(b, 30, now, look)
