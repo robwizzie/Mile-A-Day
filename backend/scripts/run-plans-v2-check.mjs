@@ -298,7 +298,8 @@ const PLUS = "rp2-plus";
 const FREE = "rp2-free";
 const ADMIN = "rp2-admin";
 const AI = "rp2-ai";
-const ALL = [PLUS, FREE, ADMIN, AI];
+const SEQ = "rp2-seq";
+const ALL = [PLUS, FREE, ADMIN, AI, SEQ];
 const today = new Date().toISOString().slice(0, 10);
 const savedEnv = { key: process.env.ANTHROPIC_API_KEY };
 const month = C.currentMonth();
@@ -343,7 +344,7 @@ async function main() {
     await db.query(`INSERT INTO users (user_id, apple_sub, email, username, first_name, created_at) VALUES ($1::text, $1::text, $1::text || '@example.com', $1::text, 'RP', GREATEST(now(), $2::timestamptz))`, [id, afterCutoff]);
   }
   await db.query(`UPDATE users SET role = 'admin' WHERE user_id = $1`, [ADMIN]);
-  for (const id of [PLUS, ADMIN, AI]) {
+  for (const id of [PLUS, ADMIN, AI, SEQ]) {
     await db.query(
       `INSERT INTO plus_purchases (original_transaction_id, user_id, product_id, transaction_id, kind, ownership, environment, purchased_at)
        VALUES ($1, $2, 'mad_plus_lifetime', $1, 'lifetime', 'PURCHASED', 'Sandbox', now())`,
@@ -439,6 +440,67 @@ async function main() {
   check("today's run synced → applied (tomorrow is a walk day; today's done run untouched)", [aarAfter.status, (await S.getDays(PLUS, tomorrow, tomorrow, today))[0].kind, aarAfter.changes.map((c) => c.local_date)], ["applied", "walk", [tomorrow]]);
   const p4 = await S.createProposal(PLUS, { source: "user", kind: "adjust", title: "x", reason: "y", changes: [{ local_date: E.addDays(today, 3), spec: { kind: "walk" } }] }, today).catch((e) => e);
   if (p4?.id) await rejects("apply-after-run needs a change for today", () => S.applyAfterRun(PLUS, p4.id, today), "not_for_today");
+
+  console.log("\n— apply re-checks HARD rules on the CURRENT plan; late apply skips past days; long getDays windows");
+  await S.putProfile(SEQ, PROFILE, today);
+  const seqPlan = await S.createPlan(SEQ, { goals: [{ type: "just_improve" }], runs_per_week: 4, difficulty: 3, walk_mode: "built_in" }, today);
+  const seqId = seqPlan.plan.plan_id;
+  const W = E.weekStart(E.addDays(today, 8)); // a Monday 2–8 days out
+  const W2 = E.addDays(W, 7);
+  const dayVer = async (d) => (await db.query(`SELECT version FROM run_plan_days WHERE plan_id = $1 AND local_date = $2::date`, [seqId, d]))[0]?.version;
+  const dayOf = async (d) => (await db.query(`SELECT day FROM run_plan_days WHERE plan_id = $1 AND local_date = $2::date`, [seqId, d]))[0]?.day;
+  // Week W: every day a plain 3 mi easy run, so no hard day anywhere near Wed/Thu.
+  const easy3 = E.buildDay({ kind: "easy", distance_mi: 3 }, bctx, { phase: "rolling", week_index: 0 });
+  await db.query(
+    `UPDATE run_plan_days SET kind = 'easy', day = $4::jsonb, note = $5 WHERE plan_id = $1 AND local_date BETWEEN $2::date AND $3::date`,
+    [seqId, E.addDays(W, -1), E.addDays(W, 7), JSON.stringify(easy3), easy3.note],
+  );
+  const wed = E.addDays(W, 2);
+  const thu = E.addDays(W, 3);
+  const tempo = { kind: "tempo", distance_mi: 4, work_mi: 2 };
+  const pA = await S.createProposal(SEQ, { source: "user", kind: "adjust", title: "Wed tempo", reason: "Feeling good.", changes: [{ local_date: wed, spec: tempo }], deviation_reason: "Test." }, today);
+  const pB = await S.createProposal(SEQ, { source: "user", kind: "adjust", title: "Thu tempo", reason: "Feeling good.", changes: [{ local_date: thu, spec: tempo }], deviation_reason: "Test." }, today);
+  check("two non-overlapping proposals (Wed hard, Thu hard) are both pending", [pA.status, pB.status], ["pending", "pending"]);
+  await S.applyProposal(SEQ, pA.id, today);
+  const thuVer = await dayVer(thu);
+  let bErr = null;
+  try {
+    await S.applyProposal(SEQ, pB.id, today);
+  } catch (e) {
+    bErr = e;
+  }
+  check("second apply would make back-to-back hard days → 409 stale_proposal with the violation", [bErr?.code, bErr?.status, (bErr?.extra?.violations ?? []).some((v) => v.rule === "no_back_to_back_hard")], ["stale_proposal", 409, true]);
+  check("…refused proposal is superseded; Thursday untouched (still easy)", [(await S.getProposal(SEQ, pB.id, today)).status, await dayVer(thu), (await dayOf(thu)).is_hard], ["superseded", thuVer, false]);
+
+  // Late acceptance: proposed on W2 Mon for Mon–Thu, accepted on W2 Wed.
+  const w2 = [0, 1, 2, 3].map((i) => E.addDays(W2, i));
+  const w2Before = await Promise.all(w2.map(async (d) => [await dayVer(d), (await dayOf(d)).distance_mi]));
+  const late = await S.createProposal(SEQ, { source: "user", kind: "adjust", title: "Short week", reason: "Travel.", changes: w2.map((d) => ({ local_date: d, spec: { kind: "easy", distance_mi: 2 } })), deviation_reason: "Test." }, W2);
+  const lateApplied = await S.applyProposal(SEQ, late.id, w2[2]);
+  check("late accept → applied, only today-or-later days recorded", [lateApplied.proposal.status, lateApplied.proposal.changes.map((c) => c.local_date)], ["applied", [w2[2], w2[3]]]);
+  check("…past days (Mon, Tue) were not written", [await dayVer(w2[0]), await dayVer(w2[1])], [w2Before[0][0], w2Before[1][0]]);
+  check("…Wed, Thu were", [(await dayOf(w2[2])).distance_mi, (await dayOf(w2[3])).distance_mi, await dayVer(w2[2])], [2, 2, w2Before[2][0] + 1]);
+  const lateHist = await db.query(`SELECT detail FROM run_plan_history WHERE proposal_id = $1 AND event = 'proposal_applied'`, [late.id]);
+  check("…history records the skipped dates", lateHist[0]?.detail?.skipped_dates, [w2[0], w2[1]]);
+  await S.undoProposal(SEQ, late.id, w2[2]);
+  check("undo restores only the applied days", [
+    (await dayOf(w2[2])).distance_mi, (await dayOf(w2[3])).distance_mi, await dayVer(w2[0]), await dayVer(w2[1]),
+  ], [w2Before[2][1], w2Before[3][1], w2Before[0][0], w2Before[1][0]]);
+  const fri = E.addDays(W2, 4);
+  const allPast = await S.createProposal(SEQ, { source: "user", kind: "adjust", title: "Fri walk", reason: "Rest.", changes: [{ local_date: fri, spec: { kind: "walk" } }], deviation_reason: "Test." }, fri);
+  const friVer = await dayVer(fri);
+  await rejects("accepting after every day passed → proposal_not_pending", () => S.applyProposal(SEQ, allPast.id, E.addDays(fri, 1)), "proposal_not_pending");
+  check("…and it is expired, the day untouched", [(await S.getProposal(SEQ, allPast.id, today)).status, await dayVer(fri)], ["expired", friVer]);
+
+  // getDays 90 days back: a completed run there shows done (runs were loaded from only 60 days back).
+  const old = E.addDays(today, -90);
+  await db.query(
+    `INSERT INTO run_plan_days (plan_id, local_date, kind, day, note, version, source) VALUES ($1, $2::date, 'easy', $3::jsonb, $4, 1, 'formula')`,
+    [seqId, old, JSON.stringify(easy3), easy3.note],
+  );
+  await uploadWorkouts(SEQ, [workout("rp2-seq-old", old, 3.2)]);
+  const oldDay = (await S.getDays(SEQ, old, old, today))[0];
+  check("a 90-day-old completed run shows completed", [oldDay?.status, oldDay?.completed?.workout_ids], ["done", ["rp2-seq-old"]]);
 
   console.log("\n— HARD rules reject proposals from every source");
   const farDate = (await S.getDays(PLUS, E.addDays(today, 2), E.addDays(today, 10), today)).find((d) => d.kind !== "walk" && d.kind !== "race");

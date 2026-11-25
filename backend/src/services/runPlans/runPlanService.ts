@@ -307,7 +307,8 @@ async function loadState(userId: string, today: string, opts: { plan?: PlanRow; 
   const ctx = contextFor(plan, profile);
   const back = opts.back ?? 35;
   const ahead = opts.ahead ?? DAYS_AHEAD;
-  const runs = await loadRuns(userId, addDays(today, -60), addDays(today, ahead));
+  // At least 60 days (spike guard / fatigue history), and the whole served window.
+  const runs = await loadRuns(userId, addDays(today, -Math.max(60, back)), addDays(today, ahead));
   const profileRun = profileHistory(profile, profileAt, today);
   await materialize(ctx, today, addDays(today, ahead), [...runs, ...profileRun]);
   const [dayRows, onFoot, stepRows, grades, pending] = await Promise.all([
@@ -693,25 +694,80 @@ async function supersedeOverlapping(client: PoolClient, p: ProposalRow) {
   for (const s of sup.rows) await history(client, p.plan_id, p.user_id, "proposal_superseded", null, s.id, "The plan changed on these days", dates);
 }
 
-async function applyRow(client: PoolClient, p: ProposalRow, via: "now" | "after_run"): Promise<void> {
+/** Serializes every change to one plan's days: apply / undo take this before the proposal lock. */
+async function lockPlan(client: PoolClient, planId: string): Promise<void> {
+  await client.query(`SELECT 1 FROM run_plans WHERE plan_id = $1 FOR UPDATE`, [planId]);
+}
+
+/** Plan row lock first, then the proposal row (same order as updatePlan: plan, then proposals). */
+async function lockPlanAndProposal(client: PoolClient, userId: string, id: string): Promise<ProposalRow> {
+  if (!/^[0-9a-f-]{36}$/i.test(id)) throw new RunPlanError("proposal_not_found", 404);
+  const r = await client.query<{ plan_id: string }>(`SELECT plan_id FROM run_plan_proposals WHERE id = $1 AND user_id = $2`, [id, userId]);
+  if (!r.rows[0]) throw new RunPlanError("proposal_not_found", 404);
+  await lockPlan(client, r.rows[0].plan_id);
+  return lockProposal(client, userId, id);
+}
+
+/** The plan as it is NOW (read under the plan lock), for re-running the HARD rules at apply time. */
+async function currentValidationContext(client: PoolClient, p: ProposalRow, today: string, dates: string[]) {
+  const rows = await loadDays(p.plan_id, addDays(today, -1), addDays(dates[dates.length - 1], 40), client);
+  const [runs, prof] = await Promise.all([loadRuns(p.user_id, addDays(today, -35), addDays(today, -1)), getProfile(p.user_id)]);
+  return {
+    today,
+    days: new Map([...rows].map(([k, v]) => [k, v.day])),
+    actual: [...runs.map((r) => ({ local_date: r.local_date, distance_mi: r.distance_mi })), ...profileHistory(prof.profile, prof.updated_at, today)],
+  };
+}
+
+type ApplyOutcome = { ok: true } | { ok: false; error: RunPlanError };
+
+/**
+ * The one apply path (apply now, scheduled apply-after-run). Must run under
+ * `lockPlan`. Drops days already past (`today`, and for after-run the run day
+ * itself), re-checks the HARD rules against the CURRENT plan, then writes.
+ * A refusal is recorded on the proposal (expired / superseded) in this same
+ * transaction and returned, so the caller commits it before surfacing it.
+ * The proposal's `changes` become exactly what was written, so Undo reverts
+ * only those days.
+ */
+async function applyChecked(client: PoolClient, p: ProposalRow, today: string, via: "now" | "after_run"): Promise<ApplyOutcome> {
+  const afterRun = via === "after_run" && p.apply_after_date ? addDays(p.apply_after_date, 1) : today;
+  const floor = afterRun > today ? afterRun : today;
+  const remaining = p.changes.filter((c) => c.local_date >= floor);
+  const skipped = p.changes.filter((c) => c.local_date < floor).map((c) => c.local_date);
+  if (!remaining.length) {
+    await client.query(`UPDATE run_plan_proposals SET status = 'expired', decided_at = COALESCE(decided_at, now()) WHERE id = $1`, [p.id]);
+    await history(client, p.plan_id, p.user_id, "proposal_expired", p.source, p.id, `${p.title} (its days passed)`, [], { skipped_dates: skipped });
+    return { ok: false, error: new RunPlanError("proposal_not_pending", 409, { status: "expired" }) };
+  }
+  const dates = remaining.map((c) => c.local_date);
+  const v = validateChanges(await currentValidationContext(client, p, today, dates), remaining.map((c) => ({ local_date: c.local_date, after: c.after })));
+  if (!v.ok) {
+    await client.query(`UPDATE run_plan_proposals SET status = 'superseded', decided_at = now() WHERE id = $1`, [p.id]);
+    await history(client, p.plan_id, p.user_id, "proposal_superseded", null, p.id, "The plan changed since this was suggested", dates, { violations: v.violations });
+    return { ok: false, error: new RunPlanError("stale_proposal", 409, { local_date: v.violations[0].local_date, violations: v.violations }) };
+  }
+  const row: ProposalRow = { ...p, changes: remaining, first_date: dates[0] };
   try {
     await client.query("SAVEPOINT apply_p");
-    await writeAfter(client, p);
+    await writeAfter(client, row);
     await client.query("RELEASE SAVEPOINT apply_p");
   } catch (e) {
     await client.query("ROLLBACK TO SAVEPOINT apply_p");
     if (e instanceof RunPlanError && e.code === "stale_proposal") {
       await client.query(`UPDATE run_plan_proposals SET status = 'superseded', decided_at = now() WHERE id = $1`, [p.id]);
-      await history(client, p.plan_id, p.user_id, "proposal_superseded", null, p.id, "The day changed since this was suggested", p.changes.map((c) => c.local_date));
+      await history(client, p.plan_id, p.user_id, "proposal_superseded", null, p.id, "The day changed since this was suggested", dates);
+      return { ok: false, error: e };
     }
     throw e;
   }
   await client.query(
-    `UPDATE run_plan_proposals SET status = 'applied', decided_at = COALESCE(decided_at, now()), applied_at = now(), undo_until = now() + make_interval(hours => $2) WHERE id = $1`,
-    [p.id, UNDO_HOURS],
+    `UPDATE run_plan_proposals SET status = 'applied', changes = $3::jsonb, first_date = $4::date, decided_at = COALESCE(decided_at, now()), applied_at = now(), undo_until = now() + make_interval(hours => $2) WHERE id = $1`,
+    [p.id, UNDO_HOURS, JSON.stringify(remaining), dates[0]],
   );
-  await supersedeOverlapping(client, p);
-  await history(client, p.plan_id, p.user_id, "proposal_applied", p.source, p.id, via === "after_run" ? `${p.title} (after the run)` : p.title, p.changes.map((c) => c.local_date));
+  await supersedeOverlapping(client, row);
+  await history(client, p.plan_id, p.user_id, "proposal_applied", p.source, p.id, via === "after_run" ? `${p.title} (after the run)` : p.title, dates, skipped.length ? { skipped_dates: skipped } : null);
+  return { ok: true };
 }
 
 async function proposalResponse(userId: string, id: string, today: string) {
@@ -723,19 +779,13 @@ async function proposalResponse(userId: string, id: string, today: string) {
 }
 
 export async function applyProposal(userId: string, id: string, today: string) {
-  // A stale proposal is marked superseded (committed) before the 409 is returned.
-  let stale: RunPlanError | null = null;
-  await inTransaction(async (client) => {
-    const p = await lockProposal(client, userId, id);
+  // A refused proposal is marked expired / superseded (committed) before the 409 is returned.
+  const out = await inTransaction(async (client) => {
+    const p = await lockPlanAndProposal(client, userId, id);
     if (p.status !== "pending" && p.status !== "scheduled") throw new RunPlanError("proposal_not_pending", 409, { status: p.status });
-    try {
-      await applyRow(client, p, "now");
-    } catch (e) {
-      if (e instanceof RunPlanError && e.code === "stale_proposal") stale = e;
-      else throw e;
-    }
+    return applyChecked(client, p, today, "now");
   });
-  if (stale) throw stale;
+  if (!out.ok) throw out.error;
   return proposalResponse(userId, id, today);
 }
 
@@ -762,9 +812,10 @@ export async function declineProposal(userId: string, id: string, today: string)
 
 export async function undoProposal(userId: string, id: string, today: string) {
   await inTransaction(async (client) => {
-    const p = await lockProposal(client, userId, id);
+    const p = await lockPlanAndProposal(client, userId, id);
     if (p.status !== "applied") throw new RunPlanError("proposal_not_pending", 409, { status: p.status });
     if (!p.undo_until || Date.parse(p.undo_until) < Date.now()) throw new RunPlanError("undo_expired", 409);
+    // `changes` holds exactly the days the apply wrote (past days were dropped then).
     for (const c of p.changes) {
       if (!c.before) continue;
       const r = await client.query(
@@ -782,8 +833,12 @@ export async function undoProposal(userId: string, id: string, today: string) {
   return proposalResponse(userId, id, today);
 }
 
-/** "Apply after today's run": apply scheduled proposals for `dates` (a run synced, or the day passed). */
-async function applyScheduledFor(planId: string, dates: string[]): Promise<number> {
+/**
+ * "Apply after today's run": apply scheduled proposals for `dates` (a run
+ * synced, or the day passed). `today` is the user's local today: days before
+ * it (and the run day itself) are never written.
+ */
+async function applyScheduledFor(planId: string, dates: string[], today: string): Promise<number> {
   if (!dates.length) return 0;
   const rows = await db.query<{ id: string; user_id: string }>(
     `SELECT id, user_id FROM run_plan_proposals WHERE plan_id = $1 AND status = 'scheduled' AND apply_after_date = ANY($2::date[])`,
@@ -792,20 +847,13 @@ async function applyScheduledFor(planId: string, dates: string[]): Promise<numbe
   let n = 0;
   for (const r of rows) {
     try {
-      await inTransaction(async (client) => {
+      const out = await inTransaction(async (client) => {
+        await lockPlan(client, planId);
         const p = await lockProposal(client, r.user_id, r.id);
-        if (p.status !== "scheduled") return;
-        // Days already past keep what happened; only today-or-later days change.
-        const future = { ...p, changes: p.changes.filter((c) => c.local_date > (p.apply_after_date ?? "")) };
-        if (!future.changes.length) {
-          await client.query(`UPDATE run_plan_proposals SET status = 'expired' WHERE id = $1`, [p.id]);
-          await history(client, p.plan_id, p.user_id, "proposal_expired", p.source, p.id, `${p.title} (its days passed)`, []);
-          return;
-        }
-        await client.query(`UPDATE run_plan_proposals SET changes = $2::jsonb WHERE id = $1`, [p.id, JSON.stringify(future.changes)]);
-        await applyRow(client, future, "after_run");
-        n++;
+        if (p.status !== "scheduled") return null;
+        return applyChecked(client, p, today, "after_run");
       });
+      if (out?.ok) n++;
     } catch (e) {
       if (!(e instanceof RunPlanError)) throw e;
     }
@@ -1302,7 +1350,7 @@ async function profilePaceProposal(userId: string, today: string): Promise<Serve
 export async function runFormulaPass(userId: string, today: string, trigger: Trigger): Promise<ServedProposal[]> {
   const plan = await activePlan(userId);
   if (!plan) return [];
-  await applyScheduledFor(plan.plan_id, dateRange(addDays(today, -7), addDays(today, -1)));
+  await applyScheduledFor(plan.plan_id, dateRange(addDays(today, -7), addDays(today, -1)), today);
   const st = await loadState(userId, today, { plan });
   return runFormulaPassInState(st, trigger);
 }
@@ -1331,7 +1379,7 @@ export async function onWorkoutsUploaded(userId: string, workoutIds: string[]): 
   const dates = rows.map((r) => r.local_date).sort();
   const lt = await db.query<{ today: string }>(`SELECT ((now() AT TIME ZONE 'UTC') + ${userOffsetMinutesSql("$1")} * INTERVAL '1 minute')::date::text AS today`, [userId]);
   const today = lt[0].today > dates[dates.length - 1] ? lt[0].today : dates[dates.length - 1];
-  await applyScheduledFor(plan.plan_id, dates);
+  await applyScheduledFor(plan.plan_id, dates, today);
   const st = await loadState(userId, today, { plan });
   for (const d of dates) await serverGrade(st, d);
   await runFormulaPassInState(st, "after_run");
@@ -1517,11 +1565,13 @@ export async function applyOverseerChange(
   const today = opts.today ?? new Date().toISOString().slice(0, 10);
   const st = await loadState(userId, today);
   const p = await createProposalInState(st, { source: "overseer", kind: "adjust", title: change.title ?? "Overseer change", reason: change.reason ?? opts.summary, changes: change.changes.map((c) => ({ local_date: c.local_date, spec: c.day })), deviation_reason: change.deviation_reason ?? null, created_by: userId });
-  await inTransaction(async (client) => {
-    const row = await lockProposal(client, userId, p!.id);
-    await applyRow(client, row, "now");
-    await history(client, row.plan_id, userId, "overseer_set_plan", "overseer", row.id, opts.summary.slice(0, 500), row.changes.map((c) => c.local_date), { confirmed_in_chat: true, summary: opts.summary });
+  const out = await inTransaction(async (client) => {
+    const row = await lockPlanAndProposal(client, userId, p!.id);
+    const r = await applyChecked(client, row, today, "now");
+    if (r.ok) await history(client, row.plan_id, userId, "overseer_set_plan", "overseer", row.id, opts.summary.slice(0, 500), row.changes.map((c) => c.local_date), { confirmed_in_chat: true, summary: opts.summary });
+    return r;
   });
+  if (!out.ok) throw out.error;
   return proposalResponse(userId, p!.id, today);
 }
 
