@@ -256,10 +256,6 @@ enum RunPlanV2Service {
     }
 }
 
-extension RunPlanV2CoachContext {
-    init() {}
-}
-
 /// A response body kept undecoded (the coach context goes to the model as-is).
 struct RunPlanV2RawJSON: Decodable {
     let data: Data

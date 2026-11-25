@@ -325,7 +325,6 @@ struct RunPlanPreRunView: View {
     }
 
     private func start() {
-        // A check-in typed but never sent still reaches the coach (formula tweak only, no wait).
         if let onStart { onStart() } else { DeepLinkRouter.shared.requestOpenTracker(activity: .run) }
     }
 }

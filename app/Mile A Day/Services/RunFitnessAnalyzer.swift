@@ -1,5 +1,6 @@
 import Foundation
 import HealthKit
+import os
 
 /// Run Plans v2 fitness analysis, ON THE PHONE (build spec §3, research rules
 /// 14–18). Reads the last 100 running workouts from HealthKit with their full
@@ -137,7 +138,7 @@ final class RunFitnessAnalyzer: ObservableObject {
 // MARK: - The computation (off main)
 
 /// One run's fine-grained timeline: 10-second buckets from the start.
-private struct RunTimeline {
+struct RunFitnessTimeline {
     static let bucket: TimeInterval = 10
 
     let start: Date
@@ -153,7 +154,7 @@ private struct RunTimeline {
     var fine: Bool
 }
 
-private struct SteadySegment {
+struct RunFitnessSegment {
     let seconds: TimeInterval
     let meters: Double
     let avgHR: Double?
@@ -163,7 +164,7 @@ private struct SteadySegment {
     var paceSPerMile: Double { meters > 0 ? seconds / (meters / 1609.344) : .infinity }
 }
 
-private struct Effort {
+struct RunFitnessEffort {
     let meters: Double
     let seconds: Double
     let date: Date
@@ -186,16 +187,16 @@ struct RunFitnessComputation: Sendable {
     func run() async throws -> RunPlanV2FitnessProfile {
         let now = Date()
         let workouts = try await fetchRuns()
-        var timelines: [RunTimeline] = []
+        var timelines: [RunFitnessTimeline] = []
         // 4 runs at a time: HealthKit queues queries anyway; this keeps
         // memory flat (a run is ~360 buckets per hour).
         var index = 0
         while index < workouts.count {
             try Task.checkCancellation()
             let slice = Array(workouts[index..<min(index + 4, workouts.count)])
-            let built = try await withThrowingTaskGroup(of: RunTimeline?.self) { group -> [RunTimeline] in
+            let built = try await withThrowingTaskGroup(of: RunFitnessTimeline?.self) { group -> [RunFitnessTimeline] in
                 for w in slice { group.addTask { try? await timeline(for: w) } }
-                var out: [RunTimeline] = []
+                var out: [RunFitnessTimeline] = []
                 for try await t in group { if let t { out.append(t) } }
                 return out
             }
@@ -255,21 +256,34 @@ struct RunFitnessComputation: Sendable {
     }
 
     private final class SeriesBox: @unchecked Sendable {
-        var points: [(start: Date, end: Date, value: Double)] = []
-        var finished = false
+        private let lock = OSAllocatedUnfairLock()
+        private var _points: [(start: Date, end: Date, value: Double)] = []
+        private var finished = false
+
+        var count: Int { lock.lock(); defer { lock.unlock() }; return _points.count }
+        var points: [(start: Date, end: Date, value: Double)] { lock.lock(); defer { lock.unlock() }; return _points }
+        func append(_ p: (start: Date, end: Date, value: Double)) { lock.lock(); _points.append(p); lock.unlock() }
+        /// True exactly once: whoever gets it resumes the continuation.
+        func finish() -> Bool {
+            lock.lock(); defer { lock.unlock() }
+            if finished { return false }
+            finished = true
+            return true
+        }
     }
 
-    /// Every value in [start, end], series samples expanded.
+    /// Every value in [start, end], series samples expanded. A 20 s
+    /// watchdog stops a query that never reports `done`.
     private func series(_ id: HKQuantityTypeIdentifier, unit: HKUnit, start: Date, end: Date,
                         cap: Int = 20_000) async throws -> [(start: Date, end: Date, value: Double)] {
         guard let type = HKQuantityType.quantityType(forIdentifier: id) else { return [] }
         let predicate = HKQuery.predicateForSamples(withStart: start, end: end, options: [])
         let box = SeriesBox()
+        let store = self.store
         return try await withCheckedThrowingContinuation { cont in
             let q = HKQuantitySeriesSampleQuery(quantityType: type, predicate: predicate) { query, quantity, interval, _, done, error in
-                if box.finished { return }
                 if let error {
-                    box.finished = true
+                    guard box.finish() else { return }
                     // "No data" is a successful empty answer, not a failure.
                     if let hk = error as? HKError, hk.code == .errorNoData {
                         cont.resume(returning: [])
@@ -278,24 +292,29 @@ struct RunFitnessComputation: Sendable {
                     }
                     return
                 }
-                if let quantity, let interval, box.points.count < cap {
-                    box.points.append((interval.start, interval.end, quantity.doubleValue(for: unit)))
+                if let quantity, let interval, box.count < cap {
+                    box.append((interval.start, interval.end, quantity.doubleValue(for: unit)))
                 }
-                if done || box.points.count >= cap {
-                    box.finished = true
+                if done || box.count >= cap {
+                    guard box.finish() else { return }
                     if !done { store.stop(query) }
                     cont.resume(returning: box.points)
                 }
             }
             store.execute(q)
+            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 20) {
+                guard box.finish() else { return }
+                store.stop(q)
+                cont.resume(returning: box.points)
+            }
         }
     }
 
-    private func timeline(for workout: HKWorkout) async throws -> RunTimeline {
+    private func timeline(for workout: HKWorkout) async throws -> RunFitnessTimeline {
         let start = workout.startDate
         let end = workout.endDate
         let span = max(end.timeIntervalSince(start), 1)
-        let n = max(1, Int((span / RunTimeline.bucket).rounded(.up)))
+        let n = max(1, Int((span / RunFitnessTimeline.bucket).rounded(.up)))
         var meters = [Double](repeating: 0, count: n)
         let distance = try await series(.distanceWalkingRunning, unit: .meter(), start: start, end: end)
         // Fine = samples short enough to see a walk break in.
@@ -307,14 +326,14 @@ struct RunFitnessComputation: Sendable {
             let pe = min(max(p.end.timeIntervalSince(start), ps), span)
             let len = pe - ps
             if len <= 0 {
-                let i = min(n - 1, Int(ps / RunTimeline.bucket))
+                let i = min(n - 1, Int(ps / RunFitnessTimeline.bucket))
                 meters[i] += p.value
                 continue
             }
             var t = ps
             while t < pe {
-                let i = min(n - 1, Int(t / RunTimeline.bucket))
-                let bucketEnd = min(Double(i + 1) * RunTimeline.bucket, pe)
+                let i = min(n - 1, Int(t / RunFitnessTimeline.bucket))
+                let bucketEnd = min(Double(i + 1) * RunFitnessTimeline.bucket, pe)
                 let part = max(bucketEnd - t, 0)
                 meters[i] += p.value * part / len
                 if bucketEnd <= t { break }
@@ -330,13 +349,13 @@ struct RunFitnessComputation: Sendable {
             for s in samples where s.value >= 40 && s.value <= 230 {
                 let t = s.start.timeIntervalSince(start)
                 guard t >= 0, t <= span else { continue }
-                let i = min(n - 1, Int(t / RunTimeline.bucket))
+                let i = min(n - 1, Int(t / RunFitnessTimeline.bucket))
                 sums[i] += s.value
                 counts[i] += 1
             }
             for i in 0..<n where counts[i] > 0 { hr[i] = sums[i] / Double(counts[i]) }
         }
-        return RunTimeline(start: start, localDate: RunPlanV2Date.key(for: start), indoor: workout.isIndoorWorkout,
+        return RunFitnessTimeline(start: start, localDate: RunPlanV2Date.key(for: start), indoor: workout.isIndoorWorkout,
                            miles: workout.madDistanceMiles, duration: workout.madDuration,
                            meters: meters, hr: hr, fine: fine)
     }
@@ -382,7 +401,7 @@ struct RunFitnessComputation: Sendable {
 
     // MARK: Analysis
 
-    static func profile(from runs: [RunTimeline], workouts: [HKWorkout], age: Int?,
+    static func profile(from runs: [RunFitnessTimeline], workouts: [HKWorkout], age: Int?,
                         restingDaily: [String: Double], hrvDaily: [String: Double],
                         firstEver: Date?, now: Date) -> RunPlanV2FitnessProfile {
         var p = RunPlanV2FitnessProfile()
@@ -470,7 +489,7 @@ struct RunFitnessComputation: Sendable {
         }
 
         // Steady segments (rule 17) and run/walk habits.
-        var segments: [SteadySegment] = []
+        var segments: [RunFitnessSegment] = []
         var walkBreakRuns = 0
         var fineRuns = 0
         var runStretches: [Double] = []
@@ -520,8 +539,8 @@ struct RunFitnessComputation: Sendable {
         // Best efforts (fastest contiguous stretch covering each distance).
         let targets: [(String, Double)] = [("mile", 1609.344), ("5k", 5000), ("10k", 10000),
                                            ("half", 21097.5), ("marathon", 42195)]
-        var bests: [String: Effort] = [:]
-        var recentBests: [Effort] = []
+        var bests: [String: RunFitnessEffort] = [:]
+        var recentBests: [RunFitnessEffort] = []
         for r in runs where r.fine {
             for (key, m) in targets {
                 guard let e = fastest(r, meters: m) else { continue }
@@ -589,7 +608,7 @@ struct RunFitnessComputation: Sendable {
 
     /// Highest HR held over two adjacent 10-s buckets (a spike in one bucket
     /// is usually a strap artefact).
-    private static func cleanMaxHR(_ r: RunTimeline) -> Double? {
+    private static func cleanMaxHR(_ r: RunFitnessTimeline) -> Double? {
         var best: Double?
         for i in 1..<max(r.hr.count, 1) {
             guard let a = r.hr[i - 1], let b = r.hr[i], abs(a - b) <= 6 else { continue }
@@ -600,7 +619,7 @@ struct RunFitnessComputation: Sendable {
     }
 
     private struct StretchResult {
-        var segments: [SteadySegment] = []
+        var segments: [RunFitnessSegment] = []
         var walkBreaks = 0
         var runStretches: [Double] = []
         var walkStretches: [Double] = []
@@ -609,8 +628,8 @@ struct RunFitnessComputation: Sendable {
     /// Splits a run into running and walking stretches (30-s smoothed speed),
     /// then keeps running stretches ≥ 3 min after the first 5 min (rule 16) as
     /// steady segments, trimmed where pace wanders off the stretch's median.
-    private static func analyzeStretches(_ r: RunTimeline) -> StretchResult {
-        let b = RunTimeline.bucket
+    private static func analyzeStretches(_ r: RunFitnessTimeline) -> StretchResult {
+        let b = RunFitnessTimeline.bucket
         let n = r.meters.count
         guard n >= 6 else { return StretchResult() }
         var smooth = [Double](repeating: 0, count: n)
@@ -672,7 +691,7 @@ struct RunFitnessComputation: Sendable {
                     drift = (e2 / e1 - 1) * 100
                 }
             }
-            out.segments.append(SteadySegment(seconds: seconds, meters: meters, avgHR: avgHR, driftPct: drift,
+            out.segments.append(RunFitnessSegment(seconds: seconds, meters: meters, avgHR: avgHR, driftPct: drift,
                                               date: r.start.addingTimeInterval(Double(bestFrom) * b)))
         }
         return out
@@ -680,7 +699,7 @@ struct RunFitnessComputation: Sendable {
 
     /// Fastest contiguous stretch of a run covering `meters` (two pointers
     /// over the buckets). Nil when the run is shorter.
-    private static func fastest(_ r: RunTimeline, meters target: Double) -> Effort? {
+    private static func fastest(_ r: RunFitnessTimeline, meters target: Double) -> RunFitnessEffort? {
         let m = r.meters
         guard m.reduce(0, +) >= target else { return nil }
         var best: Double = .infinity
@@ -696,18 +715,18 @@ struct RunFitnessComputation: Sendable {
                 // Prorate the last bucket so a window isn't charged 10 s for a metre.
                 let over = sum - target
                 let lastFrac = m[hi] > 0 ? min(over / m[hi], 1) : 0
-                let t = Double(hi - lo + 1) * RunTimeline.bucket - lastFrac * RunTimeline.bucket
+                let t = Double(hi - lo + 1) * RunFitnessTimeline.bucket - lastFrac * RunFitnessTimeline.bucket
                 best = min(best, t)
             }
         }
         guard best.isFinite else { return nil }
         // Implausible (faster than 3:30/mi): a GPS jump, not an effort.
         guard best / (target / mile) >= 210 else { return nil }
-        return Effort(meters: target, seconds: best, date: r.start, localDate: r.localDate, indoor: r.indoor)
+        return RunFitnessEffort(meters: target, seconds: best, date: r.start, localDate: r.localDate, indoor: r.indoor)
     }
 
-    private static func bestDistance(_ r: RunTimeline, seconds: Double) -> Double? {
-        let k = Int(seconds / RunTimeline.bucket)
+    private static func bestDistance(_ r: RunFitnessTimeline, seconds: Double) -> Double? {
+        let k = Int(seconds / RunFitnessTimeline.bucket)
         guard r.meters.count >= k, k > 0 else { return nil }
         var sum = r.meters[0..<k].reduce(0, +)
         var best = sum
