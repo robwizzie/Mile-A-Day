@@ -25,3 +25,5 @@ Call to action: Download (or Learn more to the landing page until the Meta app i
 
 Notification text on card 6 is the app's real copy ("… poked your Flamey", "… is nudging you to get your mile in
 today", "… hyped your daily mile"); names are samples. Card 7 is cropped from the real Feed screen to the locked tiles, the unlock bar and a locked post only. No real users appear.
+
+Optional caption closer: "Mile A Day started as a bet between two best friends. Now it's yours." (The full origin story runs as its own ad: `../founder/`.)
