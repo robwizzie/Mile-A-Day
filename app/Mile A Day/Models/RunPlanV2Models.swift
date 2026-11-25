@@ -895,6 +895,15 @@ struct RunPlanV2DayChange: Codable, Equatable, Hashable, Sendable {
     var after: RunPlanV2DaySpec
     /// `/coach/options` only: the day those numbers compute to (not sent).
     var day: RunPlanV2Day? = nil
+
+    enum CodingKeys: String, CodingKey { case local_date, after, day }
+
+    /// Requests carry only the date and the spec.
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(local_date, forKey: .local_date)
+        try c.encode(after, forKey: .after)
+    }
 }
 
 struct RunPlanV2InitialDay: Codable, Equatable, Hashable, Sendable {

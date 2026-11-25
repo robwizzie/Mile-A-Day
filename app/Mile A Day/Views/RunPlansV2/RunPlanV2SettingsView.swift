@@ -312,12 +312,9 @@ struct RunPlanShoesEditor: View {
     }
 }
 
-/// Settings › Workouts › Run plan: the plan's settings, or plan home's
-/// "build my plan" when there's no plan yet.
+/// Settings › Workouts › Run plan: plan home (its toolbar holds the plan
+/// settings). Always the same view, so `hasPlan` flipping mid-setup never
+/// tears down the setup cover it presents.
 struct RunPlanSettingsEntry: View {
-    @ObservedObject private var store = RunPlanV2Store.shared
-
-    var body: some View {
-        if store.hasPlan { RunPlanV2SettingsView() } else { RunPlanHomeView() }
-    }
+    var body: some View { RunPlanHomeView() }
 }

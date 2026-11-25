@@ -605,6 +605,7 @@ final class RunPlanV2Store: ObservableObject {
 
     /// Sign-out: the cached plan belongs to the account we're leaving.
     func reset() {
+        PlanRunWatchSync.clearForSignOut()
         clearPlanState(clearCache: false)
         status = nil
         loaded = false

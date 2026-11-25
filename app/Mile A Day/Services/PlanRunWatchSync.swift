@@ -26,8 +26,19 @@ enum PlanRunWatchSync {
             .sink { current in update(current: current) }
     }
 
+    /// Sign-out: the plan belongs to the account we're leaving.
+    static func clearForSignOut() {
+        ahead = []
+        lastFetch = nil
+        set(nil)
+    }
+
     static func update(current: RunPlanV2Current?) {
         guard let current else {
+            // Cold launch publishes nil before the cache/server answer: that
+            // isn't "no plan", so keep the Watch's saved copy. Sign-out clears
+            // it via `clearForSignOut()`.
+            guard RunPlanV2Store.shared.loaded else { return }
             ahead = []
             lastFetch = nil
             set(nil)

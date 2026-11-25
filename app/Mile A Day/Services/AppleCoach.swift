@@ -309,11 +309,12 @@ enum AppleCoachPrompt {
                 }
             }
             out.append("Goals: \(goals.joined(separator: "; "))")
-            out.append("Plan: week \(p.week_index ?? 1), phase \(p.phase ?? "?"), \(p.runs_per_week ?? 0) runs/week, "
-                       + "difficulty \(p.difficulty ?? 2)/4, walk days \(p.walk_mode ?? "built_in"), "
-                       + "week target \(String(format: "%.1f", p.weekly_target_mi ?? 0)) mi, "
-                       + "hard sessions/week \(p.hard_sessions_per_week ?? 0)"
-                       + (p.target_date.map { ", race date \($0)" } ?? ""))
+            var line = "Plan: week \(p.week_index ?? 1), phase \(p.phase ?? "?"), \(p.runs_per_week ?? 0) runs/week, "
+            line += "difficulty \(p.difficulty ?? 2)/4, walk days \(p.walk_mode ?? "built_in"), "
+            line += "week target \(String(format: "%.1f", p.weekly_target_mi ?? 0)) mi, "
+            line += "hard sessions/week \(p.hard_sessions_per_week ?? 0)"
+            if let td = p.target_date { line += ", race date \(td)" }
+            out.append(line)
             if let notes = p.coach_notes, !notes.isEmpty {
                 out.append("Runner's notes for the coach: \(notes.prefix(wide ? 2000 : 400))")
             }
@@ -523,20 +524,37 @@ struct GetOptionsTool: Tool {
             to_date: arguments.to_date.isEmpty ? nil : arguments.to_date)
         do {
             let result = try await RunPlanV2Service.coachOptions(req)
-            let text = result.options.enumerated().map { i, o in
-                "\(i + 1). \(o.label ?? "option"): " + o.changes.map { c in
-                    if let day = c.day { return AppleCoachPrompt.line(day) }
-                    return "\(c.local_date) \(c.after.kind) " + [c.after.distance_mi.map { String(format: "%.2f mi", $0) },
-                                                                 c.after.reps.map { "\($0) reps" }].compactMap { $0 }.joined(separator: " ")
-                }.joined(separator: "; ") + (o.checks?.text.map { " (\($0))" } ?? "")
-                    + (o.deviations.isEmpty ? "" : " [needs a deviation_reason: " + o.deviations.compactMap(\.message).joined(separator: "; ") + "]")
-            }.joined(separator: "\n")
+            var lines: [String] = []
+            for (i, o) in result.options.enumerated() {
+                lines.append(Self.describe(index: i, option: o))
+            }
+            let text = lines.joined(separator: "\n")
             recorder.tool(name, ok: true, summary: text)
             return text.isEmpty ? "No options for that day." : text
         } catch {
             recorder.tool(name, ok: false, summary: "\(error)")
             return "No options available (\((error as? RunPlanV2Error)?.message ?? "error"))."
         }
+    }
+
+    private static func describe(change c: RunPlanV2DayChange) -> String {
+        if let day = c.day { return AppleCoachPrompt.line(day) }
+        var parts: [String] = [c.local_date, c.after.kind]
+        if let mi = c.after.distance_mi { parts.append(String(format: "%.2f mi", mi)) }
+        if let reps = c.after.reps { parts.append("\(reps) reps") }
+        return parts.joined(separator: " ")
+    }
+
+    private static func describe(index: Int, option o: RunPlanV2Option) -> String {
+        let changes: [String] = o.changes.map { (c: RunPlanV2DayChange) -> String in describe(change: c) }
+        var s = "\(index + 1). \(o.label ?? "option"): "
+        s += changes.joined(separator: "; ")
+        if let t = o.checks?.text { s += " (\(t))" }
+        if !o.deviations.isEmpty {
+            let msgs: [String] = o.deviations.compactMap { (d: RunPlanV2Deviation) -> String? in d.message }
+            s += " [needs a deviation_reason: \(msgs.joined(separator: "; "))]"
+        }
+        return s
     }
 }
 
@@ -656,6 +674,9 @@ struct ProposeChangeTool: Tool {
         } catch let e as RunPlanV2Error {
             recorder.tool(name, ok: false, summary: e.message)
             return AppleCoachPrompt.violations(e) ?? "Couldn't propose that (\(e.message))."
+        } catch {
+            recorder.tool(name, ok: false, summary: "\(error)")
+            return "Couldn't propose that right now."
         }
     }
 }
@@ -944,7 +965,10 @@ struct AppleCoachEngine {
         await recorder.upload(kind: .planBuild, trigger: .setup, model: m.name, input: input,
                               output: result.map { "\($0.local_date) \($0.day.kind) \($0.day.distance_mi ?? 0)" }.joined(separator: "\n"),
                               error: nil, dailyLimitHit: false, proposalIds: [])
-        return initial.isEmpty ? nil : result
+        // Notes alone still go in (flushed once the plan exists); with no day
+        // changes the formula draft is sent as-is.
+        if initial.isEmpty && notes.isEmpty { return nil }
+        return result
     }
 
     /// Notes written during the plan build, saved once the plan exists.

@@ -78,10 +78,14 @@ enum RunPlanCoach {
                     if #available(iOS 26.0, *) { await AppleCoachEngine.flushSetupNotes() }
                     #endif
                     return
-                } catch RunPlanV2Error.hardRuleViolation, RunPlanV2Error.deviationReasonRequired {
-                    // Fall through to the formula draft.
+                } catch RunPlanV2Error.hardRuleViolation, RunPlanV2Error.deviationReasonRequired, RunPlanV2Error.invalid {
+                    // The server refused the AI build: fall through to the formula draft.
                 }
             }
+            #if canImport(FoundationModels)
+            // Notes written for a rejected build may describe days that won't exist.
+            if #available(iOS 26.0, *) { AppleCoachEngine.pendingSetupNotes = [] }
+            #endif
             request.initial_days = nil
             request.source = "formula"
             try await store.create(request)

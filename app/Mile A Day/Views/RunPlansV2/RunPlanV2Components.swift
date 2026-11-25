@@ -299,7 +299,7 @@ struct RPV2TierBadge: View {
                 .lineLimit(1)
                 .fixedSize()
         }
-        .foregroundStyle(ai ? .white : .white.opacity(0.8))
+        .foregroundStyle(ai ? Color.white : Color.white.opacity(0.8))
         .padding(.horizontal, 8)
         .padding(.vertical, 3)
         .background {
