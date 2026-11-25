@@ -2,6 +2,7 @@ import { PostgresService } from "./DbService.js";
 import { TODAY_ET_DATE_SQL } from "./dailyResetTime.js";
 import { getTodayMiles } from "./workoutService.js";
 import { getGrowth, getRival, latestReviews, listDeskBoxes } from "./displayService.js";
+import { pruneLaundryLoads } from "./laundryService.js";
 import { getState, pruneDeskPushLog, pushConfigured, pushTo, pushToAdmins, setState } from "./deskPushService.js";
 
 const db = PostgresService.getInstance();
@@ -12,7 +13,13 @@ const db = PostgresService.getInstance();
  * in desk_push_state, so a restart never repeats or floods: a key it has
  * never seen is only recorded (no push) the first time.
  */
+let lastLaundryPrune = 0;
+
 export async function runDeskPushChecks(): Promise<void> {
+  if (Date.now() - lastLaundryPrune > 3600_000) {
+    lastLaundryPrune = Date.now();
+    await pruneLaundryLoads().catch(() => undefined);
+  }
   if (!pushConfigured()) return;
   await pruneDeskPushLog();
   const subs = await db.query<{ user_id: string; kinds: string[] }>(

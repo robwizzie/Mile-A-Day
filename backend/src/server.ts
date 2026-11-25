@@ -45,6 +45,7 @@ import {
 } from "./middleware/rateLimit.js";
 import adminRoutes, { adminAuthRouter } from "./routes/adminRoutes.js";
 import displayRoutes from "./routes/displayRoutes.js";
+import laundryRoutes from "./routes/laundryRoutes.js";
 import { mountMcpConnector } from "./mcp/index.js";
 import { mountCoachMcp } from "./coachMcp/index.js";
 import { startCompetitionCron } from "./cron/competitionCron.js";
@@ -354,6 +355,8 @@ app.use("/store", storePublicRouter);
 app.use("/admin/auth", adminAuthRouter);
 // Desk display feed: its own per-device key, never a user JWT (see displayService).
 app.use("/display", displayRoutes);
+// Laundry plugs (washer / dryer power readings): their own per-plug key.
+app.use("/laundry", laundryRoutes);
 // MCP database connector (src/mcp): its own OAuth sign-in, never an app JWT.
 // Mounts nothing unless MCP_ALLOWED_USERS is set.
 mountMcpConnector(app);

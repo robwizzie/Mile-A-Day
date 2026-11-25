@@ -277,7 +277,8 @@ async function main() {
   const body = await res.json();
 
   // ── exact whitelist ──
-  check("top-level fields", Object.keys(body).sort(), ["alerts", "commands", "comments", "community", "desk", "doodles", "friends_at_risk", "friends_finished", "friends_miles", "friends_running", "growth", "hours", "leaders", "me", "messages", "reviews", "rival", "v"]);
+  check("top-level fields", Object.keys(body).sort(), ["alerts", "commands", "comments", "community", "desk", "doodles", "friends_at_risk", "friends_finished", "friends_miles", "friends_running", "growth", "hours", "laundry", "leaders", "me", "messages", "reviews", "rival", "v"]);
+  check("no laundry plugs → laundry null", body.laundry, null);
   check("community fields", Object.keys(body.community).sort(), [
     "active_7d", "badges_today", "hypes_today", "longest_streak", "miles_7d", "miles_today",
     "miles_yesterday_same_time", "new_friends_today", "nudges_today", "out_running_now",
@@ -513,7 +514,7 @@ async function main() {
   check("…and the owner can't touch the admin's", (await post(`desk/box/${adminBox}/settings`, { style: 1 }, OWNER)).status, 404);
   check("unknown box → 404", (await admin("desk/box/00000000-0000-0000-0000-000000000000")).status, 404);
   check("garbage box id → 404", (await admin("desk/box/x';drop")).status, 404);
-  check("bad style → 400", (await post(`desk/box/${ownerBox}/settings`, { style: 11 }, OWNER)).status, 400);
+  check("bad style → 400", (await post(`desk/box/${ownerBox}/settings`, { style: 12 }, OWNER)).status, 400);
   check("nothing to set → 400", (await post(`desk/box/${ownerBox}/settings`, {}, OWNER)).status, 400);
   check("style string → 400", (await post(`desk/box/${ownerBox}/settings`, { style: "2" }, OWNER)).status, 400);
   check("set owner's box", (await (await post(`desk/box/${ownerBox}/settings`, { style: 2, mascot: 0 }, OWNER)).json()).settings,

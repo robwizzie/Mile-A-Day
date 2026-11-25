@@ -24,6 +24,12 @@ import {
   adminDeskPushTest,
 } from "../controllers/displayController.js";
 import {
+  adminLaundry,
+  adminLaundryEmptied,
+  adminLaundryPlug,
+  adminLaundryRevoke,
+} from "../controllers/laundryController.js";
+import {
   verifyAppleWeb,
   overview,
   milesByDay,
@@ -117,6 +123,11 @@ adminRouter.post("/desk/push/subscribe", adminDeskPushSubscribe);
 adminRouter.post("/desk/push/kinds", adminDeskPushKinds);
 adminRouter.post("/desk/push/unsubscribe", adminDeskPushUnsubscribe);
 adminRouter.post("/desk/push/test", adminDeskPushTest);
+// Laundry plugs: the signed-in admin's own (and only with a desk of their own).
+adminRouter.get("/desk/laundry", adminLaundry);
+adminRouter.post("/desk/laundry/plug", adminLaundryPlug);
+adminRouter.post("/desk/laundry/plug/:id/revoke", adminLaundryRevoke);
+adminRouter.post("/desk/laundry/:machine/emptied", adminLaundryEmptied);
 adminRouter.get("/miles-by-day", milesByDay);
 adminRouter.get("/engagement", engagement);
 adminRouter.get("/signups-by-day", signupsByDay);

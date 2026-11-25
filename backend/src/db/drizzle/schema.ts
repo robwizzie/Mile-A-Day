@@ -3973,6 +3973,73 @@ export const deskPushLog = pgTable(
   ],
 );
 
+// Laundry on the desk (services/laundryService.ts): a smart plug under the
+// washer or dryer, with its own key (only the SHA-256 kept, like display
+// keys). `state` is the engine's memory: the current load and what it has
+// learned about this machine's loads. One live plug per person per machine.
+export const laundryPlugs = pgTable(
+  "laundry_plugs",
+  {
+    id: uuid().defaultRandom().primaryKey().notNull(),
+    userId: text("user_id").notNull(),
+    machine: varchar({ length: 16 }).notNull(),
+    keyHash: varchar("key_hash", { length: 64 }).notNull(),
+    keyPrefix: varchar("key_prefix", { length: 16 }).notNull(),
+    state: jsonb(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true, mode: "string" }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true, mode: "string" }),
+  },
+  (table) => [
+    unique("laundry_plugs_key_hash_key").on(table.keyHash),
+    index("idx_laundry_plugs_user").using("btree", table.userId.asc().nullsLast()),
+    uniqueIndex("laundry_plugs_one_live")
+      .using("btree", table.userId.asc().nullsLast(), table.machine.asc().nullsLast())
+      .where(sql`(revoked_at IS NULL)`),
+    foreignKey({
+      columns: [table.userId],
+      foreignColumns: [users.userId],
+      name: "laundry_plugs_user_id_fkey",
+    }).onDelete("cascade"),
+    check("laundry_plugs_machine_check", sql`machine IN ('washer', 'dryer')`),
+  ],
+);
+
+// Finished loads (for the remote's history and tuning the engine from real
+// power traces). Pruned after 60 days.
+export const laundryLoads = pgTable(
+  "laundry_loads",
+  {
+    id: uuid().defaultRandom().primaryKey().notNull(),
+    userId: text("user_id").notNull(),
+    plugId: uuid("plug_id").notNull(),
+    machine: varchar({ length: 16 }).notNull(),
+    startedAt: timestamp("started_at", { withTimezone: true, mode: "string" }).notNull(),
+    endedAt: timestamp("ended_at", { withTimezone: true, mode: "string" }).notNull(),
+    seconds: integer().notNull(),
+    trace: text().default("").notNull(),
+  },
+  (table) => [
+    index("idx_laundry_loads_user").using(
+      "btree",
+      table.userId.asc().nullsLast(),
+      table.endedAt.desc().nullsFirst(),
+    ),
+    foreignKey({
+      columns: [table.userId],
+      foreignColumns: [users.userId],
+      name: "laundry_loads_user_id_fkey",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.plugId],
+      foreignColumns: [laundryPlugs.id],
+      name: "laundry_loads_plug_id_fkey",
+    }).onDelete("cascade"),
+  ],
+);
+
 /**
  * MCP database connector (src/mcp). Six tables, all ROW LEVEL SECURITY with no
  * policies: the connector's own database roles (pg_read_all_data, plus row

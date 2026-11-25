@@ -15,3 +15,11 @@ The LED desk counters (Adafruit Matrix Portal M4 + 64x32 panel).
 - The phone remote (mileaday.run/admin/desk) draws a box's real screen by
   running this same `mad` code in MicroPython WebAssembly. After changing
   `firmware/mad`, run `desk/sync-preview.sh` (CI checks they match).
+- `laundry/mad-laundry.js` — the script for a laundry plug (Shelly Plug US
+  Gen4 under the washer or dryer). It sends the plug's power readings every
+  20–60 s to `POST /laundry/report` with the plug's own key; the server
+  (`backend/src/services/laundryEngine.ts`) works out the stage, time left and
+  "done" for the owner's desk (LAUNDRY style, corner badge, done scene), remote
+  and phone. The remote (Laundry → Set up) makes the key and hands out this
+  script with it filled in. Real loads are kept 60 days in `laundry_loads`
+  (with their power trace) for tuning the engine's thresholds.

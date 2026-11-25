@@ -792,6 +792,13 @@
       "when": 1795640148530,
       "tag": "0112_coach_mcp",
       "breakpoints": true
+    },
+    {
+      "idx": 113,
+      "version": "7",
+      "when": 1795648669027,
+      "tag": "0113_laundry",
+      "breakpoints": true
     }
   ]
 }
