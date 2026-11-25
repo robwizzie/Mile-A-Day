@@ -476,6 +476,13 @@ jobs:
       # plan, propose stays pending, notes saved, every call audited.
       - name: Overseer tools check
         run: node scripts/overseer-check.mjs
+      # Coach MCP (src/coachMcp, the runner's own Claude at mileaday.run/mcp):
+      # the full OAuth sign-in through the website's own rewrite table
+      # (website/next.config.mjs), Plus checked at sign-in, refresh and every
+      # call, tools scoped to the signed-in runner, propose_change PENDING only
+      # (source user_claude), and neither connector accepting the other's tokens.
+      - name: Coach MCP check
+        run: node scripts/coach-mcp-check.mjs
 
   website:
     name: Website (lint + build)

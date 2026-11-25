@@ -1219,6 +1219,14 @@ export async function recordCheckin(userId: string, body: any, today: string) {
   };
 }
 
+/** Counted runs (and optionally walks) in [from, to], ≤ 120 days, with splits. User-facing coach MCP `get_runs`. */
+export async function getRuns(userId: string, from: string, to: string, includeWalks = false): Promise<ActualRun[]> {
+  if (!isIsoDate(from) || !isIsoDate(to)) throw new RunPlanError("invalid_today", 400, { field: "from/to" });
+  if (from > to) [from, to] = [to, from];
+  if ((Date.parse(to) - Date.parse(from)) / 86_400_000 > MAX_RANGE_DAYS) throw new RunPlanError("range_too_large", 400, { max_days: MAX_RANGE_DAYS });
+  return loadRuns(userId, from, to, includeWalks);
+}
+
 export async function listCheckins(userId: string, from: string, to: string) {
   return db.query(
     `SELECT id, local_date::text AS local_date, time_available_min, energy, soreness, go_further_mi, text, coach_mode, proposal_id, created_at

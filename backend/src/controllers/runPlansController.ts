@@ -12,6 +12,7 @@ import {
   uploadAiCalls,
 } from "../services/runPlans/coachSettings.js";
 import { ANTHROPIC_KINDS, AnthropicKind, runAnthropicCoach } from "../services/runPlans/anthropicCoach.js";
+import { coachConnectionStatus, revokeCoachTokens } from "../services/runPlans/coachConnection.js";
 
 /**
  * Run Plans v2 (Mile A Day+). Contract: /p/mad-run-plans-api. Self-scoped on
@@ -188,3 +189,8 @@ export const coachAnthropic = wrap(async (req) => {
   if (b.message != null && (typeof b.message !== "string" || b.message.length > 2000)) throw new BadRequest("invalid_checkin");
   return runAnthropicCoach(req.userId!, { today: todayOf(req), kind: b.kind as AnthropicKind, message: b.message ?? null, checkin_id: typeof b.checkin_id === "string" && /^[0-9a-f-]{36}$/i.test(b.checkin_id) ? b.checkin_id : null });
 });
+
+/** GET /run-plans/claude — is the runner's own Claude (coach MCP) connected? No Plus gate: it's their sign-in. */
+export const claudeConnection = wrap(async (req) => coachConnectionStatus(req.userId!));
+/** DELETE /run-plans/claude — revoke every coach MCP sign-in for the user (works after Plus lapses too). */
+export const revokeClaude = wrap(async (req) => ({ ok: true, revoked: await revokeCoachTokens(req.userId!) }));

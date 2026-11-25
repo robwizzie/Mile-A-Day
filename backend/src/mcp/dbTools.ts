@@ -145,7 +145,8 @@ export async function checkRoleBoundary(kind: Kind): Promise<string | null> {
              has_schema_privilege('public', 'CREATE') AS can_create,
              (SELECT count(*)::int FROM pg_class
                WHERE relnamespace = 'public'::regnamespace AND relkind = 'r'
-                 AND relname LIKE 'mcp\\_%' AND NOT relrowsecurity) AS unprotected,
+                 AND (relname LIKE 'mcp\\_%' OR relname LIKE 'coach\\_mcp\\_%')
+                 AND NOT relrowsecurity) AS unprotected,
              current_setting('track_counts')::boolean AS track_counts,
              -- CASE, not AND: the planner may test a non-sequence first, and that errors.
              (SELECT count(*)::int FROM pg_class

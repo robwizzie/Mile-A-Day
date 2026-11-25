@@ -8,6 +8,10 @@ import * as c from "../controllers/runPlansController.js";
 const router = Router();
 
 router.get("/status", c.status);
+// The runner's own Claude (coach MCP): status + revoke, outside the Plus gate
+// so a lapsed member can still disconnect.
+router.get("/claude", c.claudeConnection);
+router.delete("/claude", c.revokeClaude);
 
 router.use(c.requirePlus);
 router.get("/fitness-profile", c.getProfile);
