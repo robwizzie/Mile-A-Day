@@ -19,6 +19,11 @@ class AppDelegate: NSObject, UIApplicationDelegate {
         // a pending notification response on cold launch.
         _ = MADNotificationService.shared
 
+        // Run Plans v2: create the store at launch so its MAD_WorkoutsUploaded
+        // observer sees EVERY workout sync (background ones included), not
+        // only those after a plan screen happened to mount.
+        Task { @MainActor in _ = RunPlanV2Store.shared }
+
         // HealthKit step-count observer — start after UIApplication is ready.
         DailyStepsSyncService.shared.start()
 

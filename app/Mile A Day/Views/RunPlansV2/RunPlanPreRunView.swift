@@ -325,6 +325,13 @@ struct RunPlanPreRunView: View {
     }
 
     private func start() {
-        if let onStart { onStart() } else { DeepLinkRouter.shared.requestOpenTracker(activity: .run) }
+        if let onStart {
+            onStart()
+            return
+        }
+        // From the plan screen: arm today's plan so the tracker starts the
+        // plan run directly (the check-in already happened here).
+        if let today = store.today { PlanRunCoachV2.shared.arm(day: today) }
+        DeepLinkRouter.shared.requestOpenTracker(activity: .run)
     }
 }
