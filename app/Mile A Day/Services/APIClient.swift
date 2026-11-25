@@ -1,4 +1,26 @@
 import Foundation
+import os
+
+/// Captures the status and body of a failed request for callers whose error
+/// bodies carry more than `{ "error": code }` (Run Plans: 422 `violations`,
+/// 409 `status`). Opt in with `APIErrorBodySink.$current.withValue(sink) { … }`;
+/// nothing changes for anyone else.
+final class APIErrorBodySink: @unchecked Sendable {
+    @TaskLocal static var current: APIErrorBodySink?
+
+    private let lock = OSAllocatedUnfairLock()
+    private var _status: Int?
+    private var _body: Data?
+
+    func record(status: Int, body: Data) {
+        lock.lock(); defer { lock.unlock() }
+        _status = status
+        _body = body
+    }
+
+    var status: Int? { lock.lock(); defer { lock.unlock() }; return _status }
+    var body: Data? { lock.lock(); defer { lock.unlock() }; return _body }
+}
 
 /// Centralized API client with automatic token refresh
 class APIClient {
@@ -172,6 +194,13 @@ class APIClient {
         
         print("[APIClient] 📊 \(method.rawValue) \(endpoint) - Status: \(httpResponse.statusCode)")
         
+        // A caller that needs a failure's full body (the run plan's 422
+        // `violations`, 409 `status`) reads it from the task-local sink;
+        // every other caller sees exactly the errors below.
+        if !(200...299).contains(httpResponse.statusCode), let sink = APIErrorBodySink.current {
+            sink.record(status: httpResponse.statusCode, body: data)
+        }
+
         // Handle different status codes
         switch httpResponse.statusCode {
         case 200...299:
