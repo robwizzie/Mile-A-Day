@@ -4414,3 +4414,405 @@ export const webEvents = pgTable(
     index("idx_web_events_kind_created_at").on(table.kind, table.createdAt),
   ],
 ).enableRLS();
+
+// ─── Run Plans v2 (Mile A Day+; services/runPlans) ─────────────────────────
+// Every plan change is a PROPOSAL the user decides (run_plan_proposals); the
+// days table only ever moves by applying one (or the user's own settings
+// edit, or the admin's overseer `set_plan` on their own plan). Owner-only:
+// nothing outside services/runPlans and the admin Coach tab reads these.
+
+/** One plan per user at a time (`status = 'active'`); archived plans stay for history. */
+export const runPlans = pgTable(
+  "run_plans",
+  {
+    planId: uuid("plan_id").defaultRandom().primaryKey().notNull(),
+    userId: text("user_id").notNull(),
+    status: text().default("active").notNull(),
+    goals: jsonb().notNull(),
+    targetDate: date("target_date", { mode: "string" }),
+    runsPerWeek: smallint("runs_per_week").notNull(),
+    difficulty: smallint().notNull(),
+    walkMode: text("walk_mode").notNull(),
+    fixedWalkDays: jsonb("fixed_walk_days").default([]).notNull(),
+    coachNotes: text("coach_notes").default("").notNull(),
+    // { easy|long|tempo|intervals|race|walk: shoe_id | null }
+    shoeAssignments: jsonb("shoe_assignments").default({}).notNull(),
+    startDate: date("start_date", { mode: "string" }).notNull(),
+    // The fitness the plan was built from (profile snapshot + derived paces).
+    baseline: jsonb().notNull(),
+    source: text().default("formula").notNull(),
+    lastOpenDate: date("last_open_date", { mode: "string" }),
+    lastNightlyDate: date("last_nightly_date", { mode: "string" }),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+    archivedAt: timestamp("archived_at", { withTimezone: true, mode: "string" }),
+  },
+  (table) => [
+    uniqueIndex("run_plans_one_active_per_user")
+      .on(table.userId)
+      .where(sql`status = 'active'`),
+    foreignKey({
+      columns: [table.userId],
+      foreignColumns: [users.userId],
+      name: "run_plans_user_id_fkey",
+    }).onDelete("cascade"),
+    check("run_plans_status_check", sql`status IN ('active', 'archived')`),
+    check("run_plans_runs_per_week_check", sql`runs_per_week BETWEEN 1 AND 7`),
+    check("run_plans_difficulty_check", sql`difficulty BETWEEN 1 AND 4`),
+    check(
+      "run_plans_walk_mode_check",
+      sql`walk_mode IN ('built_in', 'fixed', 'flexible')`,
+    ),
+  ],
+);
+
+/** One row per plan day. `day` = the engine's Day (title, distance, segments[]). */
+export const runPlanDays = pgTable(
+  "run_plan_days",
+  {
+    planId: uuid("plan_id").notNull(),
+    localDate: date("local_date", { mode: "string" }).notNull(),
+    kind: text().notNull(),
+    day: jsonb().notNull(),
+    note: text(),
+    noteSource: text("note_source").default("template").notNull(),
+    version: integer().default(1).notNull(),
+    source: text().default("formula").notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.planId, table.localDate],
+      name: "run_plan_days_pkey",
+    }),
+    foreignKey({
+      columns: [table.planId],
+      foreignColumns: [runPlans.planId],
+      name: "run_plan_days_plan_id_fkey",
+    }).onDelete("cascade"),
+  ],
+);
+
+/** The phone's compact fitness profile (never raw samples). */
+export const runFitnessProfiles = pgTable(
+  "run_fitness_profiles",
+  {
+    userId: text("user_id").primaryKey().notNull(),
+    profile: jsonb().notNull(),
+    computedAt: timestamp("computed_at", { withTimezone: true, mode: "string" }),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.userId],
+      foreignColumns: [users.userId],
+      name: "run_fitness_profiles_user_id_fkey",
+    }).onDelete("cascade"),
+  ],
+).enableRLS();
+
+/** Every suggested change, from any source; nothing applies without a decision. */
+export const runPlanProposals = pgTable(
+  "run_plan_proposals",
+  {
+    id: uuid().defaultRandom().primaryKey().notNull(),
+    planId: uuid("plan_id").notNull(),
+    userId: text("user_id").notNull(),
+    source: text().notNull(),
+    kind: text().notNull(),
+    status: text().default("pending").notNull(),
+    title: text().notNull(),
+    reason: text().notNull(),
+    goalImpact: jsonb("goal_impact"),
+    // [{ local_date, before, after, before_version }]
+    changes: jsonb().notNull(),
+    checks: jsonb().notNull(),
+    firstDate: date("first_date", { mode: "string" }).notNull(),
+    applyAfterDate: date("apply_after_date", { mode: "string" }),
+    // Formula proposals carry a dedupe key so a re-run doesn't repeat them.
+    dedupeKey: text("dedupe_key"),
+    aiCallId: uuid("ai_call_id"),
+    createdBy: text("created_by"),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+    decidedAt: timestamp("decided_at", { withTimezone: true, mode: "string" }),
+    appliedAt: timestamp("applied_at", { withTimezone: true, mode: "string" }),
+    undoUntil: timestamp("undo_until", { withTimezone: true, mode: "string" }),
+    // Claimed by the notification cron (once per proposal).
+    notifiedAt: timestamp("notified_at", { withTimezone: true, mode: "string" }),
+  },
+  (table) => [
+    index("idx_run_plan_proposals_plan_status").on(table.planId, table.status),
+    index("idx_run_plan_proposals_pending_notify")
+      .on(table.firstDate)
+      .where(sql`status = 'pending' AND notified_at IS NULL`),
+    uniqueIndex("run_plan_proposals_dedupe")
+      .on(table.planId, table.dedupeKey)
+      .where(sql`dedupe_key IS NOT NULL`),
+    foreignKey({
+      columns: [table.planId],
+      foreignColumns: [runPlans.planId],
+      name: "run_plan_proposals_plan_id_fkey",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.userId],
+      foreignColumns: [users.userId],
+      name: "run_plan_proposals_user_id_fkey",
+    }).onDelete("cascade"),
+    check(
+      "run_plan_proposals_source_check",
+      sql`source IN ('formula', 'apple', 'anthropic', 'overseer', 'user_claude', 'user')`,
+    ),
+    check(
+      "run_plan_proposals_status_check",
+      sql`status IN ('pending', 'scheduled', 'applied', 'declined', 'superseded', 'undone', 'expired')`,
+    ),
+  ],
+);
+
+/** Plan history: every proposal, decision and direct change. */
+export const runPlanHistory = pgTable(
+  "run_plan_history",
+  {
+    id: bigserial({ mode: "number" }).primaryKey().notNull(),
+    planId: uuid("plan_id").notNull(),
+    userId: text("user_id").notNull(),
+    at: timestamp({ withTimezone: true, mode: "string" }).defaultNow().notNull(),
+    event: text().notNull(),
+    source: text(),
+    proposalId: uuid("proposal_id"),
+    summary: text().notNull(),
+    dates: jsonb().default([]).notNull(),
+    detail: jsonb(),
+  },
+  (table) => [
+    index("idx_run_plan_history_plan_at").on(table.planId, table.at),
+    foreignKey({
+      columns: [table.planId],
+      foreignColumns: [runPlans.planId],
+      name: "run_plan_history_plan_id_fkey",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.userId],
+      foreignColumns: [users.userId],
+      name: "run_plan_history_user_id_fkey",
+    }).onDelete("cascade"),
+  ],
+);
+
+/** Pre-run check-ins (all fields optional). `text` is read only by the coach model. */
+export const runPlanCheckins = pgTable(
+  "run_plan_checkins",
+  {
+    id: uuid().defaultRandom().primaryKey().notNull(),
+    userId: text("user_id").notNull(),
+    planId: uuid("plan_id").notNull(),
+    localDate: date("local_date", { mode: "string" }).notNull(),
+    timeAvailableMin: smallint("time_available_min"),
+    energy: smallint(),
+    soreness: smallint(),
+    goFurtherMi: doublePrecision("go_further_mi"),
+    text: text(),
+    coachMode: boolean("coach_mode"),
+    proposalId: uuid("proposal_id"),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("idx_run_plan_checkins_user_date").on(table.userId, table.localDate),
+    foreignKey({
+      columns: [table.userId],
+      foreignColumns: [users.userId],
+      name: "run_plan_checkins_user_id_fkey",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.planId],
+      foreignColumns: [runPlans.planId],
+      name: "run_plan_checkins_plan_id_fkey",
+    }).onDelete("cascade"),
+    check("run_plan_checkins_energy_check", sql`energy BETWEEN 0 AND 10`),
+    check("run_plan_checkins_soreness_check", sql`soreness BETWEEN 0 AND 10`),
+  ],
+);
+
+/** Post-run grade (research rule 24), one per plan day. */
+export const runPlanGrades = pgTable(
+  "run_plan_grades",
+  {
+    planId: uuid("plan_id").notNull(),
+    localDate: date("local_date", { mode: "string" }).notNull(),
+    userId: text("user_id").notNull(),
+    workoutId: varchar("workout_id", { length: 255 }),
+    score: smallint().notNull(),
+    completion: smallint().notNull(),
+    onTarget: smallint("on_target").notNull(),
+    consistency: smallint().notNull(),
+    source: text().notNull(),
+    summary: text(),
+    summarySource: text("summary_source").default("template").notNull(),
+    inputs: jsonb(),
+    gradedAt: timestamp("graded_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.planId, table.localDate],
+      name: "run_plan_grades_pkey",
+    }),
+    foreignKey({
+      columns: [table.planId],
+      foreignColumns: [runPlans.planId],
+      name: "run_plan_grades_plan_id_fkey",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.userId],
+      foreignColumns: [users.userId],
+      name: "run_plan_grades_user_id_fkey",
+    }).onDelete("cascade"),
+    check("run_plan_grades_source_check", sql`source IN ('phone', 'server')`),
+  ],
+);
+
+/**
+ * Every AI Coach call: Apple calls uploaded by the phone, Anthropic calls
+ * recorded by the server with tokens and cost. Health-derived: admins only,
+ * swept after 90 days (`sweepAiCallLogs`).
+ */
+export const coachAiCalls = pgTable(
+  "coach_ai_calls",
+  {
+    id: uuid().defaultRandom().primaryKey().notNull(),
+    userId: text("user_id").notNull(),
+    provider: text().notNull(),
+    kind: text().notNull(),
+    trigger: text(),
+    model: text(),
+    clientCallId: text("client_call_id"),
+    startedAt: timestamp("started_at", { withTimezone: true, mode: "string" }),
+    latencyMs: integer("latency_ms"),
+    input: text(),
+    output: text(),
+    toolCalls: jsonb("tool_calls"),
+    tokensIn: integer("tokens_in"),
+    tokensOut: integer("tokens_out"),
+    tokensCached: integer("tokens_cached"),
+    tokensCacheWrite: integer("tokens_cache_write"),
+    costUsd: doublePrecision("cost_usd"),
+    error: text(),
+    dailyLimitHit: boolean("daily_limit_hit").default(false).notNull(),
+    proposalIds: jsonb("proposal_ids").default([]).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("idx_coach_ai_calls_created").on(table.createdAt),
+    index("idx_coach_ai_calls_user_created").on(table.userId, table.createdAt),
+    uniqueIndex("coach_ai_calls_client_id")
+      .on(table.userId, table.clientCallId)
+      .where(sql`client_call_id IS NOT NULL`),
+    foreignKey({
+      columns: [table.userId],
+      foreignColumns: [users.userId],
+      name: "coach_ai_calls_user_id_fkey",
+    }).onDelete("cascade"),
+    check("coach_ai_calls_provider_check", sql`provider IN ('apple', 'anthropic')`),
+  ],
+).enableRLS();
+
+/** Per-user AI Coach mode (no row = 'apple'), set from the admin site. */
+export const coachSettings = pgTable(
+  "coach_settings",
+  {
+    userId: text("user_id").primaryKey().notNull(),
+    aiMode: text("ai_mode").default("apple").notNull(),
+    userOptOut: boolean("user_opt_out").default(false).notNull(),
+    anthropicConsentAt: timestamp("anthropic_consent_at", {
+      withTimezone: true,
+      mode: "string",
+    }),
+    lastAnthropicRunAt: timestamp("last_anthropic_run_at", {
+      withTimezone: true,
+      mode: "string",
+    }),
+    updatedBy: text("updated_by"),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.userId],
+      foreignColumns: [users.userId],
+      name: "coach_settings_user_id_fkey",
+    }).onDelete("cascade"),
+    check("coach_settings_ai_mode_check", sql`ai_mode IN ('off', 'apple', 'anthropic')`),
+  ],
+);
+
+/** Small global switches (key → jsonb value). Run Plans uses `coach`. */
+export const appSettings = pgTable("app_settings", {
+  key: text().primaryKey().notNull(),
+  value: jsonb().notNull(),
+  updatedBy: text("updated_by"),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" })
+    .defaultNow()
+    .notNull(),
+});
+
+/** Anthropic spend per calendar month (UTC), the counter that stops at the cap. */
+export const coachSpendMonthly = pgTable("coach_spend_monthly", {
+  month: varchar({ length: 7 }).primaryKey().notNull(),
+  spentUsd: doublePrecision("spent_usd").default(0).notNull(),
+  calls: integer().default(0).notNull(),
+  warnedLowAt: timestamp("warned_low_at", { withTimezone: true, mode: "string" }),
+  warnedHighAt: timestamp("warned_high_at", { withTimezone: true, mode: "string" }),
+  stoppedAt: timestamp("stopped_at", { withTimezone: true, mode: "string" }),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" })
+    .defaultNow()
+    .notNull(),
+});
+
+/** Review notes from the overseer (admin's Claude) or an admin, shown on the Coach tab. */
+export const coachReviewNotes = pgTable(
+  "coach_review_notes",
+  {
+    id: uuid().defaultRandom().primaryKey().notNull(),
+    userId: text("user_id"),
+    planId: uuid("plan_id"),
+    proposalId: uuid("proposal_id"),
+    body: text().notNull(),
+    status: text().default("open").notNull(),
+    source: text().default("admin").notNull(),
+    authorId: text("author_id"),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true, mode: "string" }),
+  },
+  (table) => [
+    index("idx_coach_review_notes_status").on(table.status, table.createdAt),
+    foreignKey({
+      columns: [table.userId],
+      foreignColumns: [users.userId],
+      name: "coach_review_notes_user_id_fkey",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.authorId],
+      foreignColumns: [users.userId],
+      name: "coach_review_notes_author_id_fkey",
+    }).onDelete("set null"),
+    check("coach_review_notes_status_check", sql`status IN ('open', 'resolved')`),
+  ],
+);
