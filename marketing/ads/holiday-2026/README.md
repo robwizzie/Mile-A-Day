@@ -26,6 +26,16 @@ Feed 1080×1350 (`*-feed.png`) and Stories/Reels 1080×1920 (`*-story.png`, text
 | `3-backup` (green) | Streak Save token | Life happens. Streak tokens cover a missed day so one bad day doesn't end your streak. Join the streakers. Free on iPhone. | Miss a day? We've got you. |
 | `4-closet` (navy) | Flamey colours you unlock | Every streak medal unlocks a new look for your Flamey. Join the streakers. Free on iPhone. | Streak longer. Look better. |
 
+### Alternates (no phone, text-led)
+
+Same rules, different shape, to test against the phone-layout ads above.
+
+| Ad | Primary text | Headline |
+|---|---|---|
+| `g-grateful` (cream note) | Family. Pie. A streak you're proud of. Walk or run one mile a day, starting Thanksgiving. Become a streaker. Free on iPhone. | Things I'm grateful for. |
+| `d-day1-37` (red, two streak cards) | Start Thursday and you're on day 37 by New Year's Day, one mile at a time. Join the streakers. Free on iPhone. | Day 1 to Day 37 by New Year's. |
+| `t-todo` (amber, real Start your mile button) | Turkey: done. Pie: done. One mile: one tap away. Become a streaker. Free on iPhone. | Today's to-do list. |
+
 Social ads (friends with nudges and hypes, the locked feed, a competition leaderboard) come next in the same layout,
 from fresh screenshots of a test account. App Store slides 02, 03, 04, 06 and 08 show real users, so they stay out of
 paid ads. Copy avoids anything about the viewer's body or weight (Meta personal-attributes policy) and leaves
