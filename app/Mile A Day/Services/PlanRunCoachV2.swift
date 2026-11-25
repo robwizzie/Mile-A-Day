@@ -29,12 +29,9 @@ final class PlanRunCoachV2 {
 
     // MARK: Settings
 
-    /// Coach mode (spoken plan cues), set on the pre-run screen. Default on.
-    static let coachModeKey = "planRunCoachModeV2"
-    static var coachModeOn: Bool {
-        UserDefaults.standard.object(forKey: coachModeKey) as? Bool ?? true
-    }
-    static func setCoachMode(_ on: Bool) { UserDefaults.standard.set(on, forKey: coachModeKey) }
+    /// Coach mode (spoken plan cues): the pre-run screen's toggle
+    /// (`RunPlanCoachMode`, remembered). Default on.
+    static var coachModeOn: Bool { RunPlanCoachMode.isOn }
 
     /// "Fewer cues": longer gaps, fewer corrections, no on-pace confirmations.
     static let fewerCuesKey = "planRunFewerCuesV2"

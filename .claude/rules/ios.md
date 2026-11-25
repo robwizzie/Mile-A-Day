@@ -202,6 +202,20 @@ Details: docs/conventions/ios.md § Mile A Day+
 - Paywall layout follows `PlusPaywallView.Layout`: onboarding = A/B arm (`PlusPaywallVariant.current`, mirrors server `paywallVariantFor`), tokens/at-risk = `.streak`, Closet = `.closet`, Settings = `.flamey`; log views via `PlusTelemetry`; `PlusStreakCard` hosts its sheet on the always-present VStack.
 - Preview a Plus look via `PlusLookShowcase.look(_:)` (fixed non-holiday date, no signup date); founders read `status.source == "founding"` → `FoundingRunnerCard`; token numbers in `PlusTokenComparison` mirror backend targets.
 - Monthly Flames are `color` items with `FlameyUnlock.month(n)` (server-granted); their art is palette + `FlameyMonthlyFX` INSIDE his outline (never a new silhouette) plus a bare-tip crown (`FlameyArt.monthCrown`, counted in `crest`); progress comes only from the closet's `monthly_flames` (`FlameyMonthlyStore`).
+- Run-plan run time: segment walking + cue timing live in `PlanRunCoachEngine` (HealthKitManager.swift, shared with the Watch); phone words in `PlanRunLines`, voice only via `GhostCoach.sayPlanLine`; segment clock = `elapsedTime`, never `raceClockSeconds`; treadmill = belt speed (`TreadmillLink.speedKmh`), never control the belt.
+- `PlanRunCoachV2`: `arm` (wizard `PlanRunModeOption` / plan screen) → `begin(allowed: raceGhost == nil, workoutKey:)` → `update` on the tracker tick → `end` before `stopTracking()` → `workoutSaved` with `recapWorkoutId` → `stop`; mid-run relaunch resumes only via `resume(workoutKey:)` (`planRunCoachSnapshotV2`).
+- Plan cues: countdown 10 s + "3, 2, 1" (ETA from smoothed pace on distance blocks), 20 s pace window + band dead band + gaps/caps, no HR cue in a run's first 5 min / a block's first 90 s / reps < 2 min, easy > 45 min holds HR; keys `planRunCoachModeV2`, `planRunFewerCuesV2`.
+- Watch plan days ride the app context as `PlanRunDay.contextKey` from the PERSISTED `MADWatchBridge.planRunJSON` (`PlanRunWatchSync`, a week keyed by date, today = `isForToday`); apply only from a full context (`flameyOwned` present), never the watch-face userInfo.
+- Plan shoe: `PlanRunShoeHandoff.assign` → `ShoeService.setShoe` on the saved workout; `WorkoutShoeChoice.load` shows the handoff pick before reading; grade = `POST /run-plans/grades` from `PlanRunSegmentStats` on `MAD_WorkoutsUploaded`, then `RunPlanPostRunView` from `PlanRunRecapCard`.
+
+## Run Plans v2
+Details: docs/conventions/ios.md § Run Plans v2
+- Wire types are `RunPlanV2*` (`Models/RunPlanV2Models.swift`, lenient `@RunPlanV2Number/Int/Bool/List`, every wrapped field defaulted); add fields, never rename (the live coach + Watch build on them); errors only as `RunPlanV2Error` (bodies via `APIErrorBodySink`).
+- State lives in `RunPlanV2Store.shared` (`today`, `week`, `pendingProposals`, `suggestions`, `coachTier`); every coach job goes through `RunPlanCoach` (formula / `AppleCoach` / server Anthropic), never a view calling a model.
+- Nothing changes without a yes: the phone only SUBMITS proposals (`POST /proposals`, source `apple`/`user`); every number comes from a server tool (`/coach/options`, `build-day`, `validate`, `estimate`); log every model call (`AppleCoachCallRecorder.upload`).
+- PCC (`PrivateCloudComputeLanguageModel`) stays behind `AppleCoach.privateCloudComputeEntitled` + `compiler(>=6.4)`: without the managed entitlement the first prompt is a fatal error.
+- Heart rate / resting HR / HRV / DOB are asked only from setup (`RunFitnessAnalyzer.requestAccess`), never added to `healthKitReadTypes`; raw samples never leave the phone, only `RunPlanV2FitnessProfile`.
+- Embed `RunPlanPreRunView(onStart:)` / `RunPlanPostRunView(workoutId:)`; coach mode is `RunPlanCoachMode.isOn`; pushes route via `NotificationDestination.runPlanProposal` + `RUN_PLAN_PROPOSAL` (`APPLY`/`KEEP`), declared as `ClientFeatures.runPlansV2`.
 
 ## Auth / Session
 Details: docs/conventions/ios.md § Auth / Session

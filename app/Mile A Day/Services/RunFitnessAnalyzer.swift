@@ -106,8 +106,9 @@ final class RunFitnessAnalyzer: ObservableObject {
         let key = uploadedPrefix + userId
         if !force, UserDefaults.standard.string(forKey: key) == profile.computed_at { return }
         do {
-            _ = try await RunPlanV2Service.uploadFitnessProfile(profile)
+            let result = try await RunPlanV2Service.uploadFitnessProfile(profile)
             UserDefaults.standard.set(profile.computed_at, forKey: key)
+            result.proposals.forEach { RunPlanV2Store.shared.absorb($0) }
         } catch {
             // Next refresh retries.
         }

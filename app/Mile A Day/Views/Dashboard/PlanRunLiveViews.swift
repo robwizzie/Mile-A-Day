@@ -38,7 +38,7 @@ struct PlanRunModeOption: View {
     let onStart: () -> Void
 
     @ObservedObject private var store = RunPlanV2Store.shared
-    @State private var preRunDay: RunPlanV2Day?
+    @State private var showPreRun = false
 
     /// Today's plan day, when it can be run now. The server's `today` only
     /// counts when it IS today (a cached read after midnight is yesterday's).
@@ -70,19 +70,34 @@ struct PlanRunModeOption: View {
                 if PlanRunCoachV2.shared.armedDay?.date == day.local_date {
                     onStart()
                 } else {
-                    preRunDay = day
+                    showPreRun = true
                 }
             }
-            .sheet(item: $preRunDay) { picked in
-                RunPlanPreRunView(day: picked) { chosen in
-                    guard PlanRunCoachV2.shared.arm(day: chosen) else { return }
-                    preRunDay = nil
-                    // After the sheet is gone, so the wizard's slide is seen.
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { onStart() }
+            .sheet(isPresented: $showPreRun) {
+                NavigationStack {
+                    // Its Start fires after the check-in's proposal was
+                    // applied or kept, so the store's `today` is the final day.
+                    RunPlanPreRunView(onStart: startFromPreRun)
+                        .toolbar {
+                            ToolbarItem(placement: .topBarLeading) {
+                                Button("Cancel") { showPreRun = false }
+                            }
+                        }
                 }
                 .madTypeCap(.madCardCap)
             }
         }
+    }
+
+    private func startFromPreRun() {
+        guard let today = store.today, today.local_date == RunPlanV2Date.todayKey(),
+              PlanRunCoachV2.shared.arm(day: today) else {
+            showPreRun = false
+            return
+        }
+        showPreRun = false
+        // After the sheet is gone, so the wizard's slide is seen.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { onStart() }
     }
 
     private func subtitle(_ day: RunPlanV2Day) -> String {
@@ -577,7 +592,6 @@ struct PlanRunRecapCard: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .disabled(run.state == .waiting)
             .onChange(of: run.state) { _, state in
                 if case .graded = state, !autoOpened {
                     autoOpened = true
@@ -585,8 +599,12 @@ struct PlanRunRecapCard: View {
                 }
             }
             .sheet(isPresented: $showPostRun) {
-                RunPlanPostRunView(workoutId: workoutId)
-                    .madTypeCap(.madCardCap)
+                // It polls for the grade itself, so it opens fine while
+                // the upload is still on its way.
+                NavigationStack {
+                    RunPlanPostRunView(workoutId: workoutId, onDone: { showPostRun = false })
+                }
+                .madTypeCap(.madCardCap)
             }
         }
     }

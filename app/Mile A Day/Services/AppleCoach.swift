@@ -525,9 +525,11 @@ struct GetOptionsTool: Tool {
             let result = try await RunPlanV2Service.coachOptions(req)
             let text = result.options.enumerated().map { i, o in
                 "\(i + 1). \(o.label ?? "option"): " + o.changes.map { c in
-                    "\(c.local_date) \(c.after.kind) " + [c.after.distance_mi.map { String(format: "%.2f mi", $0) },
-                                                          c.after.reps.map { "\($0) reps" }].compactMap { $0 }.joined(separator: " ")
+                    if let day = c.day { return AppleCoachPrompt.line(day) }
+                    return "\(c.local_date) \(c.after.kind) " + [c.after.distance_mi.map { String(format: "%.2f mi", $0) },
+                                                                 c.after.reps.map { "\($0) reps" }].compactMap { $0 }.joined(separator: " ")
                 }.joined(separator: "; ") + (o.checks?.text.map { " (\($0))" } ?? "")
+                    + (o.deviations.isEmpty ? "" : " [needs a deviation_reason: " + o.deviations.compactMap(\.message).joined(separator: "; ") + "]")
             }.joined(separator: "\n")
             recorder.tool(name, ok: true, summary: text)
             return text.isEmpty ? "No options for that day." : text

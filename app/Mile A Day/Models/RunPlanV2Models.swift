@@ -537,6 +537,8 @@ struct RunPlanV2FitnessProfile: Codable, Equatable, Hashable, Sendable {
 struct RunPlanV2FitnessProfileEnvelope: Codable, Equatable, Sendable {
     var profile: RunPlanV2FitnessProfile?
     var updated_at: String?
+    /// PUT only: a new VDOT may produce a `pace_update` proposal.
+    @RunPlanV2List var proposals: [RunPlanV2Proposal] = []
 }
 
 // MARK: - Plan (§3)
@@ -773,6 +775,9 @@ struct RunPlanV2Day: Codable, Equatable, Hashable, Sendable, Identifiable {
     var grade: RunPlanV2Grade?
     @RunPlanV2List var pending_proposal_ids: [String] = []
     @RunPlanV2Int var version: Int? = nil
+    /// The DaySpec this day was built from (contract change, Nov 25): send it
+    /// back, edited, as a proposal's `after`.
+    var spec: RunPlanV2DaySpec? = nil
 
     var id: String { local_date ?? "\(kind ?? "day")-\(title ?? "")" }
     var dateKey: String { local_date ?? "" }
@@ -851,8 +856,13 @@ struct RunPlanV2DaySpec: Codable, Equatable, Hashable, Sendable {
 
     var dayKind: RunPlanV2DayKind { RunPlanV2DayKind(raw: kind) }
 
-    /// The spec that reproduces a served day (for "keep this day, tweak one thing").
+    /// The spec that reproduces a served day (for "keep this day, tweak one
+    /// thing"): the server's own `spec` when it sent one, else rebuilt.
     init(day: RunPlanV2Day) {
+        if let spec = day.spec {
+            self = spec
+            return
+        }
         let kind = day.dayKind
         self.kind = kind.rawValue
         self.note = nil
@@ -883,6 +893,8 @@ struct RunPlanV2DaySpec: Codable, Equatable, Hashable, Sendable {
 struct RunPlanV2DayChange: Codable, Equatable, Hashable, Sendable {
     var local_date: String
     var after: RunPlanV2DaySpec
+    /// `/coach/options` only: the day those numbers compute to (not sent).
+    var day: RunPlanV2Day? = nil
 }
 
 struct RunPlanV2InitialDay: Codable, Equatable, Hashable, Sendable {
@@ -940,6 +952,8 @@ struct RunPlanV2Proposal: Codable, Equatable, Hashable, Sendable, Identifiable {
     @RunPlanV2List var changes: [RunPlanV2ProposalChange] = []
     var checks: RunPlanV2Checks?
     @RunPlanV2Bool var affects_next_run: Bool? = nil
+    /// A pace update also moves the plan's paces for days generated later.
+    var plan_patch: RunPlanV2ProposalPlanPatch?
     var first_date: String?
     var created_at: String?
     var decided_at: String?
@@ -959,6 +973,12 @@ struct RunPlanV2Proposal: Codable, Equatable, Hashable, Sendable, Identifiable {
         return until > now
     }
     func touches(_ localDate: String) -> Bool { changes.contains { $0.local_date == localDate } }
+}
+
+/// `proposal.plan_patch`: `{"pace_factor"?, "vdot"?}` or null.
+struct RunPlanV2ProposalPlanPatch: Codable, Equatable, Hashable, Sendable {
+    @RunPlanV2Number var pace_factor: Double? = nil
+    @RunPlanV2Number var vdot: Double? = nil
 }
 
 struct RunPlanV2ProposalRequest: Codable, Equatable, Sendable {
@@ -1241,6 +1261,7 @@ struct RunPlanV2Option: Codable, Equatable, Hashable, Sendable {
     var label: String?
     @RunPlanV2List var changes: [RunPlanV2DayChange] = []
     var checks: RunPlanV2Checks?
+    @RunPlanV2List var deviations: [RunPlanV2Deviation] = []
 }
 
 struct RunPlanV2OptionsResult: Codable, Equatable, Sendable {
