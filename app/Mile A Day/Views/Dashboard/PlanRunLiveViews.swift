@@ -58,6 +58,27 @@ struct PlanRunModeOption: View {
     }
 
     var body: some View {
+        // The sheet hangs off a node that outlives the card: a check-in
+        // proposal that turns today into a walk day (or anything else that
+        // drops `day`) must not dismiss the check-in it came from.
+        content
+            .sheet(isPresented: $showPreRun) {
+                NavigationStack {
+                    // Its Start fires after the check-in's proposal was
+                    // applied or kept, so the store's `today` is the final day.
+                    RunPlanPreRunView(onStart: startFromPreRun)
+                        .toolbar {
+                            ToolbarItem(placement: .topBarLeading) {
+                                Button("Cancel") { showPreRun = false }
+                            }
+                        }
+                }
+                .madTypeCap(.madCardCap)
+            }
+    }
+
+    @ViewBuilder
+    private var content: some View {
         if let day {
             WizardOptionCard(
                 leading: { WizardOptionGlyph(icon: "calendar", width: 46) },
@@ -73,27 +94,19 @@ struct PlanRunModeOption: View {
                     showPreRun = true
                 }
             }
-            .sheet(isPresented: $showPreRun) {
-                NavigationStack {
-                    // Its Start fires after the check-in's proposal was
-                    // applied or kept, so the store's `today` is the final day.
-                    RunPlanPreRunView(onStart: startFromPreRun)
-                        .toolbar {
-                            ToolbarItem(placement: .topBarLeading) {
-                                Button("Cancel") { showPreRun = false }
-                            }
-                        }
-                }
-                .madTypeCap(.madCardCap)
-            }
+        } else if showPreRun {
+            Color.clear.frame(height: 0)
         }
     }
 
     private func startFromPreRun() {
-        guard let today = store.today, today.local_date == RunPlanV2Date.todayKey(),
-              PlanRunCoachV2.shared.arm(day: today) else {
-            showPreRun = false
-            return
+        // The check-in may have changed today (shorter, or a walk day). Only
+        // a runnable day arms the coach; either way the runner asked to start,
+        // so the run starts (an unarmed one is an ordinary tracked run).
+        if let today = store.today, today.local_date == RunPlanV2Date.todayKey(), today.offersPlanRun {
+            PlanRunCoachV2.shared.arm(day: today)
+        } else {
+            PlanRunCoachV2.shared.disarm()
         }
         showPreRun = false
         // After the sheet is gone, so the wizard's slide is seen.
