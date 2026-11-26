@@ -2046,9 +2046,27 @@ struct DashboardView: View {
         if gettingStartedReady, !gettingStartedDismissed, !gettingStartedGraduated {
             let items = gettingStartedItems
             if items.contains(where: { !$0.isDone }) {
-                GettingStartedChecklistCard(items: items) {
-                    withAnimation(.easeInOut(duration: 0.25)) {
-                        gettingStartedDismissed = true
+                VStack(spacing: 12) {
+                    // First thing a new account sees: one card, two doors
+                    // (invite / pick a friend) to a Streak Standoff. Hides
+                    // itself once dismissed, used, or a competition exists.
+                    StreakStandoffStarterCard(
+                        eligible: competitionService.competitions.isEmpty,
+                        style: dashboardStyle,
+                        username: userManager.currentUser.username,
+                        friends: friendService.friends,
+                        onFindFriends: {
+                            NotificationCenter.default.post(
+                                name: NSNotification.Name("MAD_SwitchTab"),
+                                object: nil,
+                                userInfo: ["tab": 3]
+                            )
+                        }
+                    )
+                    GettingStartedChecklistCard(items: items) {
+                        withAnimation(.easeInOut(duration: 0.25)) {
+                            gettingStartedDismissed = true
+                        }
                     }
                 }
                 .transition(.opacity.combined(with: .move(edge: .top)))

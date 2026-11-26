@@ -35,6 +35,27 @@ struct CompetitionPreset: Identifiable, Hashable {
     /// Targets only: end on a point target rather than a fixed duration.
     let targetsUseFirstTo: Bool
 
+    /// The friend-to-friend default, opened directly by a friend's profile
+    /// and the new-user starter card (`StreakStandoffStarterCard`). Declared
+    /// on its own so those doors don't look it up by id string.
+    static let streakStandoff = CompetitionPreset(
+        id: "streak_standoff",
+        title: "Streak Standoff",
+        blurb: "A mile a day, three lives each.",
+        systemImage: "flame.fill",
+        type: .streaks,
+        goal: 1.0,
+        unit: .miles,
+        interval: .day,
+        activities: [.run, .walk],
+        // Streak LIVES, not a point target — createCompetition sends
+        // `lives: isStreaks ? firstTo : nil`, so leaving this at 0 would
+        // create a competition nobody survives their first missed day in.
+        firstTo: 3,
+        durationHours: nil,
+        targetsUseFirstTo: false
+    )
+
     static let all: [CompetitionPreset] = [
         CompetitionPreset(
             id: "week_of_miles",
@@ -64,23 +85,7 @@ struct CompetitionPreset: Identifiable, Hashable {
             durationHours: nil,
             targetsUseFirstTo: false
         ),
-        CompetitionPreset(
-            id: "streak_standoff",
-            title: "Streak Standoff",
-            blurb: "A mile a day, three lives each.",
-            systemImage: "flame.fill",
-            type: .streaks,
-            goal: 1.0,
-            unit: .miles,
-            interval: .day,
-            activities: [.run, .walk],
-            // Streak LIVES, not a point target — createCompetition sends
-            // `lives: isStreaks ? firstTo : nil`, so leaving this at 0 would
-            // create a competition nobody survives their first missed day in.
-            firstTo: 3,
-            durationHours: nil,
-            targetsUseFirstTo: false
-        ),
+        streakStandoff,
         CompetitionPreset(
             id: "race_to_20",
             title: "Race to 20",

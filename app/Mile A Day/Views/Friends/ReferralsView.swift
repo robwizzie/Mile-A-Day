@@ -1,5 +1,20 @@
 import SwiftUI
 
+/// The one invite a user sends a friend who isn't on the app yet: their public
+/// profile link plus how to credit them at sign-up (the referee picks the
+/// referrer in `ReferrerPicker`). Shared by `ReferralsView` and the dashboard's
+/// `StreakStandoffStarterCard` so the two can't drift.
+enum ReferralInvite {
+    static func url(username: String) -> URL {
+        let path = username.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? username
+        return URL(string: "https://mileaday.run/u/\(path)") ?? URL(string: "https://mileaday.run")!
+    }
+
+    static func message(username: String) -> String {
+        String(localized: "Join me on Mile A Day! When you sign up, choose \"Friend or family\" and pick @\(username).")
+    }
+}
+
 /// Everything about referrals in one place: how it works, what you've earned,
 /// how each friend is doing, and who to ask when something looks wrong.
 struct ReferralsView: View {
@@ -57,8 +72,8 @@ struct ReferralsView: View {
             }
             if let username = status.username {
                 ShareLink(
-                    item: URL(string: "https://mileaday.run/u/\(username)")!,
-                    message: Text("Join me on Mile A Day! When you sign up, choose \"Friend or family\" and pick @\(username).")
+                    item: ReferralInvite.url(username: username),
+                    message: Text(ReferralInvite.message(username: username))
                 ) {
                     Text("Invite a friend")
                         .madFont(size: 16, weight: .bold, design: .rounded)
