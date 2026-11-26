@@ -573,7 +573,7 @@ export interface ServedProposal {
   apply_after_date: string | null;
 }
 function serveProposal(p: ProposalRow, nextRunDate: string | null = null): ServedProposal {
-  const { plan_patch, ...checks } = p.checks ?? {};
+  const { plan_patch, dropped_days: _dropped, ...checks } = p.checks ?? {};
   return {
     id: p.id,
     plan_id: p.plan_id,
@@ -749,21 +749,90 @@ async function writeAfter(client: PoolClient, p: ProposalRow): Promise<void> {
       [p.plan_id, JSON.stringify({ ...(patch.pace_factor != null ? { pace_factor: patch.pace_factor } : {}), ...(patch.vdot != null ? { vdot: patch.vdot } : {}) })],
     );
   }
-  if (patch?.goals) await writeGoalPatch(client, p, { goals: patch.goals, target_date: patch.target_date ?? null, phase_start: patch.phase_start ?? null });
+  if (patch?.goals) await applyGoalPatch(client, p, { goals: patch.goals, target_date: patch.target_date ?? null, phase_start: patch.phase_start ?? null });
+}
+
+/** A future day the promotion dropped, exactly as it was (Undo puts it back, version-checked). */
+interface DroppedDay {
+  local_date: string;
+  kind: string;
+  day: Day;
+  note: string | null;
+  note_source: string;
+  version: number;
+  source: string;
+}
+const lastChangeDate = (p: ProposalRow) => p.changes.map((c) => c.local_date).sort().pop()!;
+
+async function setPlanGoals(client: PoolClient, planId: string, g: { goals: Goal[]; target_date: string | null; phase_start: string | null }) {
+  await client.query(
+    `UPDATE run_plans SET goals = $2::jsonb, target_date = $3::date, baseline = baseline || $4::jsonb, updated_at = now() WHERE plan_id = $1`,
+    [planId, JSON.stringify(g.goals), g.target_date, JSON.stringify({ phase_start: g.phase_start })],
+  );
 }
 
 /**
- * Goal promotion (apply) or its undo: new goals + phase start, and the days
- * after the proposal's last change are dropped so `materialize` regenerates
- * them for the new goals (pending proposals on them are superseded).
+ * Goal promotion apply: new goals + phase start. Every day after the
+ * proposal's last change is SNAPSHOTTED (contents + version) into the
+ * proposal's `checks.dropped_days`, then dropped so `materialize`
+ * regenerates it for the new primary. Undo restores the snapshot.
  */
-async function writeGoalPatch(client: PoolClient, p: ProposalRow, g: { goals: Goal[]; target_date: string | null; phase_start: string | null }) {
-  await client.query(
-    `UPDATE run_plans SET goals = $2::jsonb, target_date = $3::date, baseline = baseline || $4::jsonb, updated_at = now() WHERE plan_id = $1`,
-    [p.plan_id, JSON.stringify(g.goals), g.target_date, JSON.stringify({ phase_start: g.phase_start })],
+async function applyGoalPatch(client: PoolClient, p: ProposalRow, g: { goals: Goal[]; target_date: string | null; phase_start: string | null }) {
+  await setPlanGoals(client, p.plan_id, g);
+  const last = lastChangeDate(p);
+  const dropped = await client.query<DroppedDay>(
+    `DELETE FROM run_plan_days WHERE plan_id = $1 AND local_date > $2::date
+     RETURNING local_date::text AS local_date, kind, day, note, note_source, version, source`,
+    [p.plan_id, last],
   );
-  const last = p.changes.map((c) => c.local_date).sort().pop()!;
-  await client.query(`DELETE FROM run_plan_days WHERE plan_id = $1 AND local_date > $2::date`, [p.plan_id, last]);
+  await client.query(`UPDATE run_plan_proposals SET checks = checks || jsonb_build_object('dropped_days', $2::jsonb) WHERE id = $1`, [
+    p.id,
+    JSON.stringify(dropped.rows.sort((a, b) => a.local_date.localeCompare(b.local_date))),
+  ]);
+  await supersedeAfter(client, p, last, "Your goals changed");
+}
+
+/**
+ * Goal promotion undo (under the plan lock): the days after the window must
+ * still be the untouched regenerated ones (version 1) — any accepted change
+ * since → `undo_conflict`, nothing written. Snapshot days (from `today` on)
+ * come back with a bumped version; regenerated days the old plan didn't have
+ * are removed. Then the old goals.
+ */
+async function undoGoalPatch(client: PoolClient, p: ProposalRow, today: string, g: { goals: Goal[]; target_date: string | null; phase_start: string | null }) {
+  const last = lastChangeDate(p);
+  const floor = today > last ? today : addDays(last, 1);
+  const snap = ((p.checks as any)?.dropped_days ?? []) as DroppedDay[];
+  const cur = await client.query<{ local_date: string; version: number }>(
+    `SELECT local_date::text AS local_date, version FROM run_plan_days WHERE plan_id = $1 AND local_date >= $2::date FOR UPDATE`,
+    [p.plan_id, floor],
+  );
+  const changed = cur.rows.find((r) => r.version !== 1);
+  if (changed) throw new RunPlanError("undo_conflict", 409, { local_date: changed.local_date });
+  const have = new Set(cur.rows.map((r) => r.local_date));
+  const back = snap.filter((d) => d.local_date >= floor);
+  for (const d of back) {
+    const vals = [p.plan_id, d.local_date, d.kind, JSON.stringify(d.day), d.note, d.note_source, d.source, d.version + 1];
+    const r = have.has(d.local_date)
+      ? await client.query(
+          `UPDATE run_plan_days SET kind = $3, day = $4::jsonb, note = $5, note_source = $6, source = $7, version = GREATEST(version, $8::int) + 1, updated_at = now()
+            WHERE plan_id = $1 AND local_date = $2::date AND version = 1`,
+          vals,
+        )
+      : await client.query(
+          `INSERT INTO run_plan_days (plan_id, local_date, kind, day, note, note_source, source, version) VALUES ($1, $2::date, $3, $4::jsonb, $5, $6, $7, $8) ON CONFLICT (plan_id, local_date) DO NOTHING`,
+          vals,
+        );
+    if (r.rowCount === 0) throw new RunPlanError("undo_conflict", 409, { local_date: d.local_date });
+  }
+  const snapDates = new Set(back.map((d) => d.local_date));
+  const extra = cur.rows.filter((r) => !snapDates.has(r.local_date)).map((r) => r.local_date);
+  if (extra.length) await client.query(`DELETE FROM run_plan_days WHERE plan_id = $1 AND local_date = ANY($2::date[]) AND version = 1`, [p.plan_id, extra]);
+  await setPlanGoals(client, p.plan_id, g);
+  await supersedeAfter(client, p, last, "Goal change undone");
+}
+
+async function supersedeAfter(client: PoolClient, p: ProposalRow, last: string, why: string) {
   const sup = await client.query<{ id: string }>(
     `UPDATE run_plan_proposals q SET status = 'superseded', decided_at = now()
       WHERE plan_id = $1 AND id <> $2 AND status IN ('pending', 'scheduled')
@@ -771,7 +840,7 @@ async function writeGoalPatch(client: PoolClient, p: ProposalRow, g: { goals: Go
       RETURNING id`,
     [p.plan_id, p.id, last],
   );
-  for (const r of sup.rows) await history(client, p.plan_id, p.user_id, "proposal_superseded", null, r.id, "Your goals changed", []);
+  for (const r of sup.rows) await history(client, p.plan_id, p.user_id, "proposal_superseded", null, r.id, why, []);
 }
 const noteSourceFor = (src: string, c: StoredChange) =>
   c.after.note && c.after.note !== c.before?.note && ["apple", "anthropic", "overseer", "user_claude"].includes(src) ? src : "template";
@@ -912,6 +981,11 @@ export async function undoProposal(userId: string, id: string, today: string) {
     // Restoring the old days must still pass the HARD rules against the plan as it is now
     // (e.g. A eased Tue, B then made Wed hard: undoing A would put two hard days in a row).
     const restore = p.changes.filter((c) => c.before && c.local_date >= today).map((c) => ({ local_date: c.local_date, after: c.before! }));
+    // A goal promotion also restores the future days it dropped (snapshot).
+    if (p.kind === "goal_promotion") {
+      const last = lastChangeDate(p);
+      for (const d of ((p.checks as any)?.dropped_days ?? []) as DroppedDay[]) if (d.local_date > last && d.local_date >= today) restore.push({ local_date: d.local_date, after: d.day });
+    }
     if (restore.length) {
       const v = validateChanges(await currentValidationContext(client, p, today, restore.map((c) => c.local_date)), restore);
       if (!v.ok) throw new RunPlanError("undo_conflicts_with_plan", 409, { local_date: v.violations[0].local_date, violations: v.violations });
@@ -937,7 +1011,7 @@ export async function undoProposal(userId: string, id: string, today: string) {
     if (prev) {
       const { goals: pg, target_date: pt, phase_start: ps, ...base } = prev;
       if (Object.keys(base).length) await client.query(`UPDATE run_plans SET baseline = baseline || $2::jsonb, updated_at = now() WHERE plan_id = $1`, [p.plan_id, JSON.stringify(base)]);
-      if (pg) await writeGoalPatch(client, p, { goals: pg, target_date: pt ?? null, phase_start: ps ?? null });
+      if (pg) await undoGoalPatch(client, p, today, { goals: pg, target_date: pt ?? null, phase_start: ps ?? null });
     }
     await client.query(`UPDATE run_plan_proposals SET status = 'undone', undo_until = NULL WHERE id = $1`, [id]);
     await history(client, p.plan_id, p.user_id, "proposal_undone", p.source, p.id, `Undid: ${p.title}`, p.changes.map((c) => c.local_date));
@@ -1455,14 +1529,15 @@ function serveEffort(r: EffortRow): ServedEffort {
 }
 
 /** Per-type calibration from the user's last 30 rated runs of each type (oldest first). */
-export async function effortCalibration(userId: string): Promise<Calibration[]> {
+/** `excludeWorkoutId`: leave that run's own rating out (the offset applied TO a run never includes it). */
+export async function effortCalibration(userId: string, excludeWorkoutId: string | null = null): Promise<Calibration[]> {
   const rows = await db.query<{ effort_type: EffortType; raw_guess: number; user_rating: number }>(
     `SELECT effort_type, raw_guess, user_rating FROM (
         SELECT effort_type, raw_guess, user_rating, rated_at, workout_id,
                row_number() OVER (PARTITION BY effort_type ORDER BY rated_at DESC, workout_id DESC) AS rn
-          FROM run_effort_ratings WHERE user_id = $1 AND user_rating IS NOT NULL) x
+          FROM run_effort_ratings WHERE user_id = $1 AND user_rating IS NOT NULL AND ($2::text IS NULL OR workout_id <> $2)) x
       WHERE rn <= 30 ORDER BY rated_at, workout_id`,
-    [userId],
+    [userId, excludeWorkoutId],
   );
   return EFFORT_TYPES.map((t) => calibrationFrom(t, rows.filter((r) => r.effort_type === t).map((r) => ({ raw_guess: Number(r.raw_guess), user_rating: r.user_rating }))));
 }
@@ -1492,18 +1567,22 @@ async function storeEffort(st: PlanState, body: any, today: string): Promise<{ e
     throw e;
   }
   const type = effortTypeFor(runType)!;
-  const calibration = await effortCalibration(st.plan.user_id);
+  // First submission wins: the guess the runner saw is what their rating is compared with,
+  // so a re-send never rewrites raw_guess / offset / guess (or anything else).
+  const existing = await db.query<EffortRow>(`SELECT ${EFFORT_COLS} FROM run_effort_ratings WHERE user_id = $1 AND workout_id = $2`, [st.plan.user_id, wid]);
+  if (existing[0]) return { effort: serveEffort(existing[0]), calibration: await effortCalibration(st.plan.user_id) };
+  const calibration = await effortCalibration(st.plan.user_id, wid);
   const g = servedGuess(raw, calibration.find((c) => c.effort_type === type) ?? null);
   const rows = await db.query<EffortRow>(
     `INSERT INTO run_effort_ratings (user_id, plan_id, workout_id, local_date, run_type, effort_type, features, raw_guess, offset_applied, guess)
      VALUES ($1, $2, $3, $4::date, $5, $6, $7::jsonb, $8, $9, $10)
-     ON CONFLICT (user_id, workout_id) DO UPDATE SET plan_id = EXCLUDED.plan_id, local_date = EXCLUDED.local_date, run_type = EXCLUDED.run_type,
-       effort_type = EXCLUDED.effort_type, features = EXCLUDED.features, raw_guess = EXCLUDED.raw_guess,
-       offset_applied = EXCLUDED.offset_applied, guess = EXCLUDED.guess, updated_at = now()
+     ON CONFLICT (user_id, workout_id) DO NOTHING
      RETURNING ${EFFORT_COLS}`,
     [st.plan.user_id, st.plan.plan_id, wid, date, runType, type, JSON.stringify(features), Math.round(raw * 10) / 10, g.offset, g.guess],
   );
-  return { effort: serveEffort(rows[0]), calibration };
+  // Lost a race with a concurrent first submission: serve that one.
+  const row = rows[0] ?? (await db.query<EffortRow>(`SELECT ${EFFORT_COLS} FROM run_effort_ratings WHERE user_id = $1 AND workout_id = $2`, [st.plan.user_id, wid]))[0];
+  return { effort: serveEffort(row), calibration };
 }
 
 /** POST /run-plans/effort — the phone's raw guess + features; served guess = raw + calibration. */

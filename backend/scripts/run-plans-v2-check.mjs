@@ -806,6 +806,8 @@ async function main() {
   check("rated 8 vs guess 6 → effort_fatigue proposal for the next hard day", [rt.effort.user_rating, rt.effort.delta, rt.proposals.map((p) => p.kind), rt.proposals[0]?.changes[0].local_date], [8, 2, ["effort_fatigue"], futureHard?.local_date]);
   check("…pending; the plan days did not change", [rt.proposals[0]?.status, (await daysSnapshot(GOAL)) === daysBeforeRating], ["pending", true]);
   check("re-rating the same run doesn't repeat the proposal", (await S.rateEffort(GOAL, "rp2-g-y", { rating: 8, today }, today)).proposals.length, 0);
+  const resent = await S.submitEffort(GOAL, { local_date: yday, workout_id: "rp2-g-y", raw_guess: 9.5, run_type: "intervals", features: { has_hr: false } }, today);
+  check("re-sending a rated run's effort keeps the first guess (raw, offset, guess, type) and the rating", [resent.effort.raw_guess, resent.effort.guess, resent.effort.offset, resent.effort.run_type, resent.effort.user_rating, resent.effort.delta], [6.4, 6, 0, "easy", 8, 2]);
   await rejects("rating must be 1–10", () => S.rateEffort(GOAL, "rp2-g-y", { rating: 0 }, today), "invalid_effort");
   const g = await S.submitGrade(GOAL, { local_date: yday, workout_id: "rp2-g-y2", actual_distance_mi: 3, effort: { raw_guess: 5, features: { has_hr: false, duration_s: 1800 } } }, today);
   check("POST /grades with effort → grade + effort for that workout", [typeof g.grade.score, g.effort?.workout_id, g.effort?.guess, g.effort?.reason], ["number", "rp2-g-y2", 5, "No heart rate, so this is from pace and time."]);
@@ -842,7 +844,16 @@ async function main() {
   const curA = await S.getCurrent(GOAL, today);
   check("primary estimate shows achieved", [curA.plan.goals[0].estimate.achieved, curA.plan.goals[0].estimate.achieved_by?.workout_id], [true, "rp2-g-half"]);
   check("the pass doesn't propose it twice", (await S.runFormulaPass(GOAL, today, "first_open")).filter((p) => p.kind === "goal_promotion").length, 0);
+  // A customized session beyond the promotion's 14-day window, accepted before the promotion.
+  const farDay = (await S.getDays(GOAL, E.addDays(today, 16), E.addDays(today, 27), today)).find((d) => d.kind === "easy" || d.kind === "long");
+  const custom = await S.createProposal(GOAL, { source: "user", kind: "adjust", title: "Custom far day", reason: "Mine.", changes: [{ local_date: farDay.local_date, spec: { kind: farDay.kind, distance_mi: 1.5 } }] }, today);
+  await S.applyProposal(GOAL, custom.id, today);
+  const farBefore = (await S.getDays(GOAL, farDay.local_date, farDay.local_date, today))[0];
+  check("fixture: the far day is customized (1.5 mi, version 2)", [farBefore.distance_mi >= 1.5 && farBefore.distance_mi < 2, farBefore.version], [true, 2]);
   const apP = await S.applyProposal(GOAL, promo.id, today);
+  const snapRow = await db.query(`SELECT checks->'dropped_days' AS dd FROM run_plan_proposals WHERE id = $1`, [promo.id]);
+  const snapFar = snapRow[0].dd.find((d) => d.local_date === farDay.local_date);
+  check("apply snapshots every dropped future day (contents + version)", [snapFar?.version, snapFar?.day.distance_mi === farBefore.distance_mi, "dropped_days" in apP.proposal.checks], [2, true, false]);
   const curB = await S.getCurrent(GOAL, today);
   check("apply → the 5K is the primary, its own phases from tomorrow", [apP.proposal.status, curB.plan.goals.map((x) => [x.distance, x.role]), curB.plan.target_date], ["applied", [["5k", "primary"]], null]);
   const after28 = await S.getDays(GOAL, E.addDays(today, 1), E.addDays(today, 27), today);
@@ -850,6 +861,20 @@ async function main() {
   await S.undoProposal(GOAL, promo.id, today);
   const curC = await S.getCurrent(GOAL, today);
   check("undo → both goals back, half primary", curC.plan.goals.map((x) => [x.distance, x.role]), [["half", "primary"], ["5k", "secondary"]]);
+  const farAfter = (await S.getDays(GOAL, farDay.local_date, farDay.local_date, today))[0];
+  check("…and the customized far day is back exactly (version bumped)", [farAfter.distance_mi, farAfter.title, farAfter.version > 2], [farBefore.distance_mi, farBefore.title, true]);
+  check("…28 days still materialized", (await S.getDays(GOAL, today, E.addDays(today, 27), today)).length, 28);
+  // Undo refuses when a day after the window changed since the promotion (nothing written).
+  await db.query(`UPDATE run_plan_proposals SET dedupe_key = NULL WHERE id = $1`, [promo.id]);
+  const promo2 = (await S.runFormulaPass(GOAL, today, "first_open")).find((p) => p.kind === "goal_promotion");
+  await S.applyProposal(GOAL, promo2.id, today);
+  const far2 = (await S.getDays(GOAL, E.addDays(today, 16), E.addDays(today, 27), today)).find((d) => d.kind === "easy" || d.kind === "long");
+  const later = await S.createProposal(GOAL, { source: "user", kind: "adjust", title: "Later change", reason: "Mine.", changes: [{ local_date: far2.local_date, spec: { kind: far2.kind, distance_mi: 1.25 } }] }, today);
+  await S.applyProposal(GOAL, later.id, today);
+  const beforeConflict = await daysSnapshot(GOAL);
+  await rejects("undo after a later accepted change beyond the window → undo_conflict", () => S.undoProposal(GOAL, promo2.id, today), "undo_conflict");
+  const curD = await S.getCurrent(GOAL, today);
+  check("…nothing written: days and goals unchanged, the later change kept", [(await daysSnapshot(GOAL)) === beforeConflict, curD.plan.goals.map((x) => x.distance), (await S.getProposal(GOAL, promo2.id, today)).status], [true, ["5k"], "applied"]);
 }
 
 main()
