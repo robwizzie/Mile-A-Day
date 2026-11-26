@@ -799,6 +799,13 @@
       "when": 1795648669027,
       "tag": "0113_laundry",
       "breakpoints": true
+    },
+    {
+      "idx": 114,
+      "version": "7",
+      "when": 1795668849006,
+      "tag": "0114_run_effort_ratings",
+      "breakpoints": true
     }
   ]
 }

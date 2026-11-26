@@ -4867,6 +4867,58 @@ export const runPlanGrades = pgTable(
 );
 
 /**
+ * Post-run effort guess (RPE 1–10) and the runner's correction, one per
+ * workout. The phone computes `raw_guess` from HR samples (never uploaded);
+ * `guess` = raw + the user's calibration offset for `effort_type` at submit
+ * time. Calibration is derived from the rated rows (EWMA). Health-derived.
+ */
+export const runEffortRatings = pgTable(
+  "run_effort_ratings",
+  {
+    id: uuid().defaultRandom().primaryKey().notNull(),
+    userId: text("user_id").notNull(),
+    planId: uuid("plan_id"),
+    workoutId: varchar("workout_id", { length: 255 }).notNull(),
+    localDate: date("local_date", { mode: "string" }).notNull(),
+    runType: text("run_type").notNull(),
+    effortType: text("effort_type").notNull(),
+    features: jsonb().default({}).notNull(),
+    rawGuess: doublePrecision("raw_guess").notNull(),
+    offsetApplied: doublePrecision("offset_applied").default(0).notNull(),
+    guess: smallint().notNull(),
+    userRating: smallint("user_rating"),
+    ratedAt: timestamp("rated_at", { withTimezone: true, mode: "string" }),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("run_effort_ratings_user_workout").on(table.userId, table.workoutId),
+    index("idx_run_effort_ratings_user_date").on(table.userId, table.localDate),
+    index("idx_run_effort_ratings_user_type_rated")
+      .on(table.userId, table.effortType, table.ratedAt)
+      .where(sql`user_rating IS NOT NULL`),
+    foreignKey({
+      columns: [table.userId],
+      foreignColumns: [users.userId],
+      name: "run_effort_ratings_user_id_fkey",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.planId],
+      foreignColumns: [runPlans.planId],
+      name: "run_effort_ratings_plan_id_fkey",
+    }).onDelete("cascade"),
+    check("run_effort_ratings_effort_type_check", sql`effort_type IN ('easy', 'long', 'quality')`),
+    check("run_effort_ratings_raw_guess_check", sql`raw_guess BETWEEN 1 AND 10`),
+    check("run_effort_ratings_guess_check", sql`guess BETWEEN 1 AND 10`),
+    check("run_effort_ratings_user_rating_check", sql`user_rating IS NULL OR user_rating BETWEEN 1 AND 10`),
+  ],
+).enableRLS();
+
+/**
  * Every AI Coach call: Apple calls uploaded by the phone, Anthropic calls
  * recorded by the server with tokens and cost. Health-derived: admins only,
  * swept after 90 days (`sweepAiCallLogs`).
