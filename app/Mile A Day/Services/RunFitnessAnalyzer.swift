@@ -24,7 +24,7 @@ final class RunFitnessAnalyzer: ObservableObject {
     @Published private(set) var failed = false
 
     private var task: Task<RunPlanV2FitnessProfile?, Never>?
-    private let cachePrefix = "runPlanV2FitnessProfile|"
+    private let cachePrefix = "runPlanV2FitnessProfileV2|"
     private let uploadedPrefix = "runPlanV2FitnessUploadedAt|"
     static let accessAskedKey = "runPlanV2HRAccessAsked"
     /// Recompute at most this often unless a new run invalidates it.
@@ -305,9 +305,16 @@ struct RunFitnessComputation: Sendable {
     /// Every value in [start, end], series samples expanded. A 20 s
     /// watchdog stops a query that never reports `done` and fails the read.
     private func series(_ id: HKQuantityTypeIdentifier, unit: HKUnit, start: Date, end: Date,
+                        source: HKSource? = nil,
                         cap: Int = 20_000) async throws -> [(start: Date, end: Date, value: Double)] {
         guard let type = HKQuantityType.quantityType(forIdentifier: id) else { return [] }
-        let predicate = HKQuery.predicateForSamples(withStart: start, end: end, options: [])
+        let window = HKQuery.predicateForSamples(withStart: start, end: end, options: [])
+        // Distance is written by EVERY device that measured the run (iPhone
+        // and Watch both), so an unfiltered sum counts it twice: only the
+        // device that recorded the workout counts.
+        let predicate: NSPredicate = source.map {
+            NSCompoundPredicate(andPredicateWithSubpredicates: [window, HKQuery.predicateForObjects(from: $0)])
+        } ?? window
         let box = SeriesBox()
         let store = self.store
         return try await withCheckedThrowingContinuation { cont in
@@ -348,7 +355,11 @@ struct RunFitnessComputation: Sendable {
         let span = max(end.timeIntervalSince(start), 1)
         let n = max(1, Int((span / RunFitnessTimeline.bucket).rounded(.up)))
         var meters = [Double](repeating: 0, count: n)
-        let distance = try await series(.distanceWalkingRunning, unit: .meter(), start: start, end: end)
+        var distance = try await series(.distanceWalkingRunning, unit: .meter(), start: start, end: end,
+                                        source: workout.sourceRevision.source)
+        if distance.isEmpty {
+            distance = try await series(.distanceWalkingRunning, unit: .meter(), start: start, end: end)
+        }
         // Fine = samples short enough to see a walk break in.
         let durations = distance.map { $0.end.timeIntervalSince($0.start) }.sorted()
         let median = durations.isEmpty ? .infinity : durations[durations.count / 2]
@@ -371,6 +382,15 @@ struct RunFitnessComputation: Sendable {
                 if bucketEnd <= t { break }
                 t = bucketEnd
             }
+        }
+        // The workout's own total is the truth: if the samples still add up
+        // to more (another source slipped in), scale them down to it so
+        // every pace keeps its real size.
+        let totalMeters = workout.madDistanceMiles * 1609.344
+        let sampled = meters.reduce(0, +)
+        if totalMeters > 0, sampled > totalMeters * 1.1 {
+            let k = totalMeters / sampled
+            for i in 0..<n { meters[i] *= k }
         }
         var hr = [Double?](repeating: nil, count: n)
         if includeHR {
