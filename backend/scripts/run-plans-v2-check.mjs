@@ -64,17 +64,35 @@ check("easy band is slower than marathon pace", paces.easy_s[0] > paces.marathon
 check("never 220 − age: no HR data ⇒ no zones", E.hrBandsFor({ age: 40 }).easy_ceiling, null);
 check("Karvonen ceiling from max + resting", E.hrBandsFor({ has_hr: true, max_hr: 190, resting_hr: 60 }).easy_ceiling, 151);
 
-console.log("\n— runs/week + difficulty → hard sessions (rule 3)");
+console.log("\n— runs/week + experience → hard sessions (rule 3); difficulty never changes them");
 const G5 = settings().goals;
-check("Steady, 4 runs, experienced → 1", E.hardSessionsFor(4, 2, "experienced", G5), 1);
-check("Push, 4 runs → 2", E.hardSessionsFor(4, 3, "experienced", G5), 2);
-check("All in, 6 runs → cap 3", E.hardSessionsFor(6, 4, "experienced", G5), 3);
-check("All in, 4 runs → 2 (runs limit)", E.hardSessionsFor(4, 4, "experienced", G5), 2);
-check("Easy does it → 0 (strides)", E.hardSessionsFor(5, 1, "experienced", G5), 0);
-check("new runner → 0", E.hardSessionsFor(5, 4, "new", G5), 0);
-check("novice → max 1", E.hardSessionsFor(5, 4, "novice", G5), 1);
-check("1 run/week → 0", E.hardSessionsFor(1, 4, "experienced", G5), 0);
-check("calorie goal → ≤ 1 interval session (rule 22)", E.hardSessionsFor(6, 4, "experienced", [{ type: "burn_calories", weekly_minutes: 150 }]), 1);
+check("1–3 runs → 1", [1, 2, 3].map((n) => E.hardSessionsFor(n, "experienced", G5)), [1, 1, 1]);
+check("4–5 runs → 2", [4, 5].map((n) => E.hardSessionsFor(n, "experienced", G5)), [2, 2]);
+check("6–7 runs → 2, 3 only when experienced", [E.hardSessionsFor(6, "novice", G5), E.hardSessionsFor(7, null, G5), E.hardSessionsFor(6, "experienced", G5), E.hardSessionsFor(7, "experienced", G5)], [1, 2, 3, 3]);
+check("new runner → 0 (strides)", E.hardSessionsFor(5, "new", G5), 0);
+check("novice → max 1", E.hardSessionsFor(5, "novice", G5), 1);
+check("calorie primary → ≤ 1 interval session (rule 22)", E.hardSessionsFor(6, "experienced", [{ type: "burn_calories", weekly_minutes: 150 }]), 1);
+{
+  // Same runs/week, effort 1 vs 4: identical hard days, more miles and reps at 4 (spec §2.3).
+  const P25 = { ...PROFILE, weekly_miles_4w: 25, longest_run_30d_mi: 8 };
+  const gen = (diff) => E.generateDays({ settings: settings({ difficulty: diff, runs_per_week: 5 }), profile: P25, paces, hr }, D0, E.addDays(D0, 55), [{ local_date: "2026-11-20", distance_mi: 8 }]);
+  const d1 = gen(1), d4 = gen(4);
+  const hardDates = (ds) => ds.filter((d) => d.day.is_hard).map((d) => d.local_date);
+  check("effort 1 vs 4 (5 runs/week): the same hard days, every week", hardDates(d1), hardDates(d4));
+  const miles = (ds) => Math.round(ds.reduce((a, d) => a + d.day.distance_mi, 0));
+  check("effort 4 runs more miles over 8 weeks than effort 1", miles(d4) > miles(d1) * 1.15, true);
+  const reps = (ds) => ds.filter((d) => d.day.kind === "intervals").reduce((a, d) => a + d.day.spec.reps, 0);
+  const work = (ds) => ds.filter((d) => d.day.kind === "tempo").reduce((a, d) => a + d.day.spec.work_mi, 0);
+  check("effort 4 has more interval reps / tempo work per session", reps(d4) > reps(d1) || work(d4) > work(d1), true);
+  const longest = (ds) => Math.max(...ds.filter((d) => d.day.kind === "long").map((d) => d.day.distance_mi));
+  check("effort 4 builds a longer long run", longest(d4) > longest(d1), true);
+  const sz1 = E.sessionSizes(30, "5k", 1, "rolling"), sz4 = E.sessionSizes(30, "5k", 4, "rolling");
+  check("30 mi week, 5K: 800m reps 3 at effort 1 vs 4 at effort 4 (VO2 ≤ 8% of the week)", [sz1.reps, sz4.reps, sz4.reps * sz4.rep_mi <= 30 * 0.08], [3, 4, true]);
+  const w1 = E.planWeeks(settings({ difficulty: 1 }), P25, paces, 8), w4 = E.planWeeks(settings({ difficulty: 4 }), P25, paces, 8);
+  check("planWeeks: hard per week identical at effort 1 and 4", w1.map((w) => w.hard), w4.map((w) => w.hard));
+  const vi = E.volumeInfo({ settings: settings({ difficulty: 3 }), profile: P25, paces, hr }, 0);
+  check("volume summary for Push: growth 10%, long-run target, text", [vi.label, vi.weekly_growth_pct, vi.long_run_target_mi > 0, vi.text.startsWith("Push: weekly miles grow up to ~10% a week")], ["Push", 10, true, true]);
+}
 
 console.log("\n— generated plans pass their own HARD rules (every runs/week × difficulty × walk mode)");
 let genBad = [];
@@ -292,6 +310,89 @@ let specErr = null;
 try { E.buildDay({ kind: "easy", distance_mi: 400 }, bctx); } catch (e) { specErr = e.code; }
 check("absurd spec rejected", specErr, "invalid_day_spec");
 
+console.log("\n— goals: primary + secondary (spec §2.1)");
+{
+  const roles = E.validateGoals([{ type: "distance_time", distance: "half", target_s: 9439, role: "primary" }, { type: "distance_time", distance: "5k", target_s: 1199, role: "secondary", target_date: null }]);
+  check("roles kept as sent", roles.map((g) => [g.distance, g.role]), [["half", "primary"], ["5k", "secondary"]]);
+  let err = null;
+  try { E.validateGoals([{ type: "just_improve", role: "primary" }, { type: "distance_time", distance: "5k", role: "primary" }]); } catch (e) { err = e.code; }
+  check("two primaries → invalid_goals", err, "invalid_goals");
+  err = null;
+  try { E.validateGoals([{ type: "just_improve", role: "primary" }, { type: "distance_time", distance: "5k", role: "secondary" }, { type: "burn_calories", role: "secondary" }]); } catch (e) { err = e.code; }
+  check("three goals with roles → invalid_goals", err, "invalid_goals");
+  err = null;
+  try { E.validateGoals([{ type: "distance_time", distance: "5k", role: "secondary" }]); } catch (e) { err = e.code; }
+  check("no primary → invalid_goals", err, "invalid_goals");
+  check("legacy (no roles): the longest race is primary, the next goal secondary", E.validateGoals([{ type: "distance_time", distance: "5k" }, { type: "distance_time", distance: "half" }, { type: "just_improve" }]).map((g) => g.role), ["secondary", "primary", null]);
+  check("legacy [5K, just improve]: 5K primary", E.validateGoals([{ type: "just_improve" }, { type: "distance_time", distance: "5k" }]).map((g) => g.role), ["secondary", "primary"]);
+  check("the PRIMARY shapes the plan, even when the secondary is longer", E.focusOf([{ type: "distance_time", distance: "5k", distance_mi: 3.11, role: "primary" }, { type: "distance_time", distance: "half", distance_mi: 13.11, role: "secondary" }]), "5k");
+}
+
+console.log("\n— per-goal estimates (speed vs endurance limiter, checkpoints)");
+const TD = "2026-11-25";
+const v26 = E.vdotFromRace(E.DISTANCE_MI["5k"], 1560);
+const P26 = E.normalizeProfile({ ...PROFILE, vdot: Math.round(v26 * 10) / 10, longest_run_30d_mi: 8, weekly_miles_4w: 15 });
+const est = (goal, o = {}) => E.goalEstimate(goal, 0, { vdot: P26.vdot, profile: P26, today: TD, easy_pace_s: 700, ...o });
+const halfGoal = { type: "distance_time", distance: "half", distance_mi: 13.11, target_s: Math.round(720 * 13.1094), role: "primary", target_date: null };
+const he = est(halfGoal);
+check("half at 12:00/mi, 5K 26:00, longest 8 mi → endurance-limited, ~5–7 weeks", [he.limiter, he.weeks, he.speed_weeks, he.long_run_needed_mi], ["endurance", [5, 7], [0, 0], 11]);
+check("…'5K ~26:00 ≈ half ~2:00' and the projected date ~6 weeks out", [/^5K 2[56]:\d\d ≈ half (1:5\d|2:0\d):\d\d$/.test(he.now_label), he.projected_date, he.feasibility], [true, E.addDays(TD, 42), null]);
+check("…its text names the gap", /speed is already there.*longest run 8 mi.*11 mi/.test(he.text), true);
+const fe = est({ type: "distance_time", distance: "5k", distance_mi: 3.11, target_s: 1199, role: "secondary", target_date: null });
+check("…text: 'a big jump', in months", /big jump: roughly \d+–\d+ months/.test(fe.text), true);
+check("5K sub-20 from 26:00 → speed-limited, roughly a year (≤ 1 VDOT point per 2–3 weeks)", [fe.limiter, fe.weeks[0] >= 30, fe.weeks[1] <= 60], ["speed", true, true]);
+check("…checkpoints sub-24, then sub-22", fe.checkpoints.map((c) => c.label), ["sub-24 5K", "sub-22 5K"]);
+check("…checkpoints in order, before the goal", fe.checkpoints.every((c, i, a) => c.eta_week > 0 && c.eta_week < fe.weeks[1] && (i === 0 || c.eta_week > a[i - 1].eta_week)), true);
+check("dated half in 3 weeks → unlikely; in 10 weeks → on track", [est({ ...halfGoal, target_date: E.addDays(TD, 21) }).feasibility, est({ ...halfGoal, target_date: E.addDays(TD, 70) }).feasibility], ["unlikely", "on_track"]);
+check("plan.checkpoints: primary's then secondary's, with goal_index", E.checkpointsFor([he, { ...fe, goal_index: 1 }]).map((c) => [c.goal_index, c.label]), [[1, "sub-24 5K"], [1, "sub-22 5K"]]);
+check("spike-rule endurance steps: 8 → 11 mi = 4 steps + 1 cutback", E.enduranceWeeks(8, 11), [5, 7]);
+const run = (d, mi, secs) => ({ workout_id: `a-${d}-${mi}`, local_date: d, workout_type: "running", distance_mi: mi, duration_s: secs, moving_s: null });
+check("achieved: a run ≥ the distance, at pace × distance ≤ target", E.goalAchievement(halfGoal, [run("2026-12-20", 13.2, 9000)], P26, "2026-11-25")?.seconds, Math.round((9000 * E.DISTANCE_MI.half) / 13.2));
+check("not achieved: too slow, too short, or before the plan", [E.goalAchievement(halfGoal, [run("2026-12-20", 13.2, 9900)], P26, "2026-11-25"), E.goalAchievement(halfGoal, [run("2026-12-20", 12, 6000)], P26, "2026-11-25"), E.goalAchievement(halfGoal, [run("2026-11-01", 13.2, 8000)], P26, "2026-11-25")], [null, null, null]);
+
+console.log("\n— the secondary gets ≤ 1 speed session a week, inside the hard-session count");
+{
+  const G2 = [{ type: "distance_time", distance: "half", distance_mi: 13.11, target_s: 9439, role: "primary", target_date: null }, { type: "distance_time", distance: "5k", distance_mi: 3.11, target_s: 1199, role: "secondary", target_date: null }];
+  const P = { ...P26, weekly_miles_4w: 20 };
+  const gen = (rpw) => E.generateDays({ settings: settings({ goals: G2, runs_per_week: rpw }), profile: P, paces, hr }, D0, E.addDays(D0, 27), [{ local_date: "2026-11-20", distance_mi: 8 }]);
+  const byWeek = (ds) => [0, 1, 2, 3].map((w) => ds.filter((d) => d.day.week_index === w));
+  const five = byWeek(gen(5));
+  const fullWeeks = five.filter((wk) => wk.filter((d) => d.day.is_hard).length >= 2);
+  check("5 runs: every 2-hard week has exactly one secondary session", fullWeeks.length > 0 && fullWeeks.every((wk) => wk.filter((d) => d.day.spec.for_goal === "secondary").length === 1), true);
+  check("…it's 800m intervals (5K speed) and still only 2 hard days", fullWeeks.every((wk) => { const s2 = wk.find((d) => d.day.spec.for_goal === "secondary"); return s2.day.kind === "intervals" && s2.day.spec.rep_mi === 0.5 && wk.filter((d) => d.day.is_hard).length === 2; }), true);
+  const three = byWeek(gen(3));
+  check("3 runs (1 hard): the secondary gets strides on an easy day, the hard day stays the primary's", three.every((wk) => wk.filter((d) => d.day.is_hard && d.day.spec.for_goal === "secondary").length === 0 && wk.filter((d) => d.day.spec.for_goal === "secondary" && d.day.kind === "easy" && d.day.spec.strides).length <= 1) && three.some((wk) => wk.some((d) => d.day.spec.for_goal === "secondary")), true);
+  const v = E.validateChanges({ today: D0, days: new Map(gen(5).map((d) => [d.local_date, d.day])), actual: [{ local_date: "2026-11-20", distance_mi: 8 }] }, gen(5).map((d) => ({ local_date: d.local_date, after: d.day })));
+  check("plans with a secondary pass the HARD rules", v.violations, []);
+}
+
+console.log("\n— shoes: run types only, never walk days");
+check("assignable types", [...E.SHOE_RUN_TYPES], ["easy", "long", "tempo", "intervals", "race"]);
+check("walk day → no shoe type; calibration → race shoe", [E.shoeRunTypeFor("walk"), E.shoeRunTypeFor("calibration"), E.shoeRunTypeFor("long")], [null, "race", "long"]);
+
+console.log("\n— effort guess (RPE) calibration and signals (spec §9)");
+{
+  check("2 ratings: calibration not applied yet", E.calibrationFrom("quality", [{ raw_guess: 6, user_rating: 8 }, { raw_guess: 6, user_rating: 8 }]).applied, false);
+  const cal = E.calibrationFrom("quality", [{ raw_guess: 6, user_rating: 8 }, { raw_guess: 5, user_rating: 7 }, { raw_guess: 6.5, user_rating: 8.5 }]);
+  check("3 ratings +2 each → offset +2, applied", [cal.offset, cal.samples, cal.applied], [2, 3, true]);
+  check("served guess = raw + offset, clamped 1–10", [E.servedGuess(6.4, cal).guess, E.servedGuess(9.5, cal).guess, E.servedGuess(6.4, null).guess], [8, 10, 6]);
+  check("EWMA leans to recent ratings", E.calibrationFrom("easy", [{ raw_guess: 5, user_rating: 5 }, { raw_guess: 5, user_rating: 5 }, { raw_guess: 5, user_rating: 9 }]).offset, 1.2);
+  check("offset capped at ±4", E.calibrationFrom("easy", [{ raw_guess: 1, user_rating: 10 }]).offset, 4);
+  check("labels", [1, 4, 6, 7, 9, 10].map(E.rpeLabel), ["very easy", "easy", "moderate", "hard", "very hard", "max"]);
+  check("reason from features", E.effortReason(E.normalizeEffortFeatures({ has_hr: true, avg_hr_zone: 3.4, peak_hr_zone: 5, pace_vs_predicted_pct: -5 }), "intervals"), "HR reached zone 5 on the hard parts, pace was 5% faster than your fitness predicts.");
+  let ferr = null;
+  try { E.normalizeEffortFeatures({ time_in_zones_s: [1, 2, 3] }); } catch (e) { ferr = e.code; }
+  check("features: time_in_zones_s must be 5 numbers", ferr, "invalid_effort");
+  const ectx = actx({ days: mwk2, today: E.addDays(D0, -1) });
+  const fat = E.effortFatigueProposal(ectx, { workout_id: "w", local_date: E.addDays(D0, -1), effort_type: "easy", guess: 6, user_rating: 8 });
+  check("rated 8 vs guess 6 → lighter next hard day (fewer reps, gentler pace), proposal kind effort_fatigue", [fat?.kind, fat?.changes[0].local_date, fat?.changes[0].after.spec.reps < 5, fat?.changes[0].after.spec.pace_factor > 1], ["effort_fatigue", D0, true, true]);
+  check("rated 7 vs guess 6 → no signal", E.effortFatigueProposal(ectx, { workout_id: "w", local_date: E.addDays(D0, -1), effort_type: "easy", guess: 6, user_rating: 7 }), null);
+  const r = (g, u, t = "easy") => ({ workout_id: `x${g}${u}`, local_date: D0, effort_type: t, guess: g, user_rating: u });
+  check("3 of the last 4 rated ≥ 2 below → progression signal", [E.progressionSignal([r(6, 4), r(6, 6), r(6, 3), r(5, 3)], "easy"), E.progressionSignal([r(6, 4), r(6, 6), r(6, 5), r(5, 3)], "easy"), E.progressionSignal([r(6, 4), r(6, 4), r(6, 4)], "long")], [true, false, false]);
+  const prog = E.effortProgressionProposal(actx({ days: mwk2, today: E.addDays(D0, -1) }), "easy", "w9");
+  check("progression → paces 3% faster for the coming days (rule 20 step)", [prog?.kind, prog?.plan_patch?.pace_factor, prog?.changes.every((c) => c.after.spec.pace_factor === 0.97)], ["effort_progression", 0.97, true]);
+}
+
 // ─── S. Service (DB) ──────────────────────────────────────────────────────
 
 const PLUS = "rp2-plus";
@@ -299,7 +400,8 @@ const FREE = "rp2-free";
 const ADMIN = "rp2-admin";
 const AI = "rp2-ai";
 const SEQ = "rp2-seq";
-const ALL = [PLUS, FREE, ADMIN, AI, SEQ];
+const GOAL = "rp2-goal";
+const ALL = [PLUS, FREE, ADMIN, AI, SEQ, GOAL];
 const today = new Date().toISOString().slice(0, 10);
 const savedEnv = { key: process.env.ANTHROPIC_API_KEY };
 const month = C.currentMonth();
@@ -344,7 +446,7 @@ async function main() {
     await db.query(`INSERT INTO users (user_id, apple_sub, email, username, first_name, created_at) VALUES ($1::text, $1::text, $1::text || '@example.com', $1::text, 'RP', GREATEST(now(), $2::timestamptz))`, [id, afterCutoff]);
   }
   await db.query(`UPDATE users SET role = 'admin' WHERE user_id = $1`, [ADMIN]);
-  for (const id of [PLUS, ADMIN, AI, SEQ]) {
+  for (const id of [PLUS, ADMIN, AI, SEQ, GOAL]) {
     await db.query(
       `INSERT INTO plus_purchases (original_transaction_id, user_id, product_id, transaction_id, kind, ownership, environment, purchased_at)
        VALUES ($1, $2, 'mad_plus_lifetime', $1, 'lifetime', 'PURCHASED', 'Sandbox', now())`,
@@ -659,6 +761,95 @@ async function main() {
   const note = await Admin.createReviewNote(ADMIN, { user_id: PLUS, body: "Adjustment ignored the spike margin." }, "overseer");
   check("review note created (source overseer) and listed", [(await Admin.listReviewNotes("open")).some((n) => n.id === note.id), note.source], [true, "overseer"]);
   check("plans list for the overseer", (await Admin.listRunPlansForAdmin()).some((p) => p.user_id === PLUS), true);
+
+  console.log("\n— service: primary + secondary goals, estimates, shoes, effort setting");
+  const v26s = Math.round(E.vdotFromRace(E.DISTANCE_MI["5k"], 1560) * 10) / 10;
+  await S.putProfile(GOAL, { ...PROFILE, vdot: v26s, longest_run_30d_mi: 8, longest_run_mi: 8, weekly_miles_4w: 18 }, today);
+  const G2 = [{ type: "distance_time", distance: "half", target_s: 9439, role: "primary" }, { type: "distance_time", distance: "5k", target_s: 1199, role: "secondary", target_date: null }];
+  await rejects("two primaries → invalid_goals", () => S.previewPlan(GOAL, { goals: [{ ...G2[0] }, { ...G2[1], role: "primary" }], runs_per_week: 5, difficulty: 3, walk_mode: "built_in" }, today), "invalid_goals");
+  await rejects("secondary date < 14 days after the start → invalid_target_date", () => S.previewPlan(GOAL, { goals: [G2[0], { ...G2[1], target_date: E.addDays(today, 7) }], runs_per_week: 5, difficulty: 3, walk_mode: "built_in" }, today), "invalid_target_date");
+  await rejects("plan target_date contradicting the primary's → invalid_target_date", () => S.previewPlan(GOAL, { goals: [{ ...G2[0], target_date: E.addDays(today, 70) }, G2[1]], target_date: E.addDays(today, 80), runs_per_week: 5, difficulty: 3, walk_mode: "built_in" }, today), "invalid_target_date");
+  const legacyDate = await S.previewPlan(GOAL, { goals: [{ type: "distance_time", distance: "half" }], target_date: E.addDays(today, 70), runs_per_week: 4, difficulty: 2, walk_mode: "built_in" }, today);
+  check("legacy plan-level target_date becomes the primary's", [legacyDate.plan.target_date, legacyDate.plan.goals[0].role, legacyDate.plan.goals[0].target_date], [E.addDays(today, 70), "primary", E.addDays(today, 70)]);
+  const gp = await S.createPlan(GOAL, { goals: G2, runs_per_week: 5, difficulty: 3, walk_mode: "built_in", shoe_assignments: { easy: null, walk: "not-a-shoe" } }, today);
+  check("served goals carry role, target_date and an estimate", gp.plan.goals.map((g) => [g.role, g.target_date, g.estimate.limiter]), [["primary", null, "endurance"], ["secondary", null, "speed"]]);
+  check("primary estimate: ~5–7 weeks, projected date served; secondary checkpoints sub-24, sub-22", [gp.plan.goals[0].estimate.weeks, typeof gp.plan.goals[0].estimate.projected_date, gp.plan.goals[1].estimate.checkpoints.map((c) => c.label)], [[5, 7], "string", ["sub-24 5K", "sub-22 5K"]]);
+  check("plan.checkpoints (legacy) derived from the estimates", gp.plan.checkpoints.map((c) => [c.goal_index, c.label]), [[1, "sub-24 5K"], [1, "sub-22 5K"]]);
+  check("a sent walk shoe is ignored (no invalid_shoe) and walk is served null", [gp.plan.shoe_assignments.walk, "walk" in gp.plan.shoe_assignments], [null, true]);
+  check("5 runs → 2 hard sessions; volume summary served", [gp.plan.hard_sessions_per_week, gp.plan.volume.label, gp.plan.volume.weekly_growth_pct], [2, "Push", 10]);
+  const gdays = await S.getDays(GOAL, today, E.addDays(today, 27), today);
+  check("the 5K secondary has its session in the plan (for_goal: secondary)", gdays.some((d) => d.spec.for_goal === "secondary"), true);
+  check("walk days have no shoe", gdays.filter((d) => d.kind === "walk").every((d) => d.shoe === null), true);
+  const eased = await S.updatePlan(GOAL, { difficulty: 1 }, today);
+  check("difficulty 4 → 1 keeps the hard-session count", [eased.plan.hard_sessions_per_week, eased.plan.volume.label], [2, "Easy does it"]);
+  await S.updatePlan(GOAL, { difficulty: 3 }, today);
+  const shoeRow = await db.query(`SELECT shoe_assignments FROM run_plans WHERE user_id = $1 AND status = 'active'`, [GOAL]);
+  check("stored assignments never hold walk", "walk" in shoeRow[0].shoe_assignments, false);
+
+  console.log("\n— effort guess: submit, rate, calibrate, signals (proposals only)");
+  // Fixture: yesterday is a plan day with a run (so a grade + effort can be posted for it).
+  const yday = E.addDays(today, -1);
+  const futureHard = (await S.getDays(GOAL, E.addDays(today, 1), E.addDays(today, 13), today)).find((d) => d.kind === "intervals" || d.kind === "tempo");
+  await db.query(`UPDATE run_plans SET start_date = $2::date WHERE user_id = $1 AND status = 'active'`, [GOAL, yday]);
+  await db.query(
+    `INSERT INTO run_plan_days (plan_id, local_date, kind, day, note, source) SELECT plan_id, $2::date, 'easy', $3::jsonb, NULL, 'formula' FROM run_plans WHERE user_id = $1 AND status = 'active'`,
+    [GOAL, yday, JSON.stringify(E.buildDay({ kind: "easy", distance_mi: 3 }, bctx))],
+  );
+  await uploadWorkouts(GOAL, [workout("rp2-g-y", yday, 3)]);
+  await rejects("raw_guess out of range → invalid_effort", () => S.submitEffort(GOAL, { local_date: yday, workout_id: "rp2-g-y", raw_guess: 11 }, today), "invalid_effort");
+  await rejects("unknown workout → effort_not_found", () => S.getEffort(GOAL, "nope"), "effort_not_found");
+  const e1 = await S.submitEffort(GOAL, { local_date: yday, workout_id: "rp2-g-y", raw_guess: 6.4, features: { has_hr: true, avg_hr_zone: 2.1, peak_hr_zone: 3, pace_vs_predicted_pct: 1, duration_s: 1900, walk_fraction: 0 } }, today);
+  check("run type from the plan day, guess = raw (no calibration yet)", [e1.effort.run_type, e1.effort.effort_type, e1.effort.raw_guess, e1.effort.guess, e1.effort.guess_label, e1.effort.user_rating], ["easy", "easy", 6.4, 6, "moderate", null]);
+  check("all three calibration types listed", e1.calibration.map((c) => [c.effort_type, c.applied]), [["easy", false], ["long", false], ["quality", false]]);
+  const daysBeforeRating = await daysSnapshot(GOAL);
+  const rt = await S.rateEffort(GOAL, "rp2-g-y", { rating: 8, today }, today);
+  check("rated 8 vs guess 6 → effort_fatigue proposal for the next hard day", [rt.effort.user_rating, rt.effort.delta, rt.proposals.map((p) => p.kind), rt.proposals[0]?.changes[0].local_date], [8, 2, ["effort_fatigue"], futureHard?.local_date]);
+  check("…pending; the plan days did not change", [rt.proposals[0]?.status, (await daysSnapshot(GOAL)) === daysBeforeRating], ["pending", true]);
+  check("re-rating the same run doesn't repeat the proposal", (await S.rateEffort(GOAL, "rp2-g-y", { rating: 8, today }, today)).proposals.length, 0);
+  await rejects("rating must be 1–10", () => S.rateEffort(GOAL, "rp2-g-y", { rating: 0 }, today), "invalid_effort");
+  const g = await S.submitGrade(GOAL, { local_date: yday, workout_id: "rp2-g-y2", actual_distance_mi: 3, effort: { raw_guess: 5, features: { has_hr: false, duration_s: 1800 } } }, today);
+  check("POST /grades with effort → grade + effort for that workout", [typeof g.grade.score, g.effort?.workout_id, g.effort?.guess, g.effort?.reason], ["number", "rp2-g-y2", 5, "No heart rate, so this is from pace and time."]);
+  // Easy runs repeatedly rated 2+ easier than guessed → progression proposal.
+  const progs = [];
+  for (const [i, raw] of [[3, 6], [4, 6], [5, 6]]) {
+    await S.submitEffort(GOAL, { local_date: yday, workout_id: `rp2-g-e${i}`, run_type: "easy", raw_guess: raw }, today);
+    progs.push(...(await S.rateEffort(GOAL, `rp2-g-e${i}`, { rating: 3 }, today)).proposals);
+  }
+  check("3 of the last 4 easy runs rated ≥ 2 below → one effort_progression proposal (paces 3% faster)", [progs.map((p) => p.kind), progs[0]?.plan_patch?.pace_factor], [["effort_progression"], 0.97]);
+  const cals = await S.effortCalibration(GOAL);
+  const easyCal = cals.find((c) => c.effort_type === "easy");
+  check("easy calibration now applied and negative", [easyCal.applied, easyCal.offset < -1, easyCal.samples], [true, true, 4]);
+  const e6 = await S.submitEffort(GOAL, { local_date: yday, workout_id: "rp2-g-e6", run_type: "easy", raw_guess: 6 }, today);
+  check("next easy guess is shifted by the calibration", [e6.effort.offset === easyCal.offset, e6.effort.guess, Math.round(6 + easyCal.offset)], [true, Math.round(6 + easyCal.offset), e6.effort.guess]);
+  const listed = await S.listEfforts(GOAL, E.addDays(today, -7), today);
+  check("GET /effort lists them newest first with calibration", [listed.efforts.length, listed.calibration.length], [6, 3]);
+  const ctxE = await S.getCoachContext(GOAL, today);
+  check("coach context carries recent ratings, calibration and signals", [ctxE.effort.recent.length, ctxE.effort.calibration.length, typeof ctxE.effort.signals.fatigue, Boolean(ctxE.goals[0].estimate)], [6, 3, "boolean", true]);
+  const adm = await Admin.coachUserDetail(GOAL);
+  check("admin drilldown includes ratings + calibration", [adm.efforts.length, adm.effort_calibration.length, adm.efforts.some((e) => e.user_rating === 8)], [6, 3, true]);
+  const ce = await callCtl(Ctl.rateEffort, GOAL, { params: { workoutId: "rp2-g-y" }, body: { rating: 7, today } });
+  check("POST /effort/:workoutId/rating via the controller", [ce.status, ce.body?.effort?.user_rating], [200, 7]);
+  const cg = await callCtl(Ctl.getEffort, GOAL, { params: { workoutId: "nope" }, method: "GET" });
+  check("GET /effort/:workoutId unknown → 404 effort_not_found", [cg.status, cg.body?.error], [404, "effort_not_found"]);
+
+  console.log("\n— primary achieved → proposal to promote the secondary");
+  const goalDaysBefore = await daysSnapshot(GOAL);
+  await uploadWorkouts(GOAL, [workout("rp2-g-half", today, 13.2)]); // 13.2 mi at 10:00/mi ⇒ a 2:11 half, under 2:37
+  const pp = await S.runFormulaPass(GOAL, today, "first_open");
+  const promo = pp.find((p) => p.kind === "goal_promotion");
+  check("goal_promotion proposed (pending), with the new goals in plan_patch", [promo?.status, promo?.plan_patch?.goals?.map((x) => [x.distance, x.role])], ["pending", [["5k", "primary"]]]);
+  check("…the plan days did not change", (await daysSnapshot(GOAL)) === goalDaysBefore, true);
+  const curA = await S.getCurrent(GOAL, today);
+  check("primary estimate shows achieved", [curA.plan.goals[0].estimate.achieved, curA.plan.goals[0].estimate.achieved_by?.workout_id], [true, "rp2-g-half"]);
+  check("the pass doesn't propose it twice", (await S.runFormulaPass(GOAL, today, "first_open")).filter((p) => p.kind === "goal_promotion").length, 0);
+  const apP = await S.applyProposal(GOAL, promo.id, today);
+  const curB = await S.getCurrent(GOAL, today);
+  check("apply → the 5K is the primary, its own phases from tomorrow", [apP.proposal.status, curB.plan.goals.map((x) => [x.distance, x.role]), curB.plan.target_date], ["applied", [["5k", "primary"]], null]);
+  const after28 = await S.getDays(GOAL, E.addDays(today, 1), E.addDays(today, 27), today);
+  check("days after the change window regenerate for the new primary (no secondary sessions)", [after28.length, after28.some((d) => d.spec.for_goal === "secondary")], [27, false]);
+  await S.undoProposal(GOAL, promo.id, today);
+  const curC = await S.getCurrent(GOAL, today);
+  check("undo → both goals back, half primary", curC.plan.goals.map((x) => [x.distance, x.role]), [["half", "primary"], ["5k", "secondary"]]);
 }
 
 main()

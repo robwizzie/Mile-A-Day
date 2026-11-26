@@ -37,6 +37,10 @@ router.post("/open", c.open);
 router.post("/checkins", c.checkin);
 router.get("/checkins", c.listCheckins);
 router.post("/grades", c.grade);
+router.post("/effort", c.submitEffort);
+router.get("/effort", c.listEfforts);
+router.get("/effort/:workoutId", c.getEffort);
+router.post("/effort/:workoutId/rating", c.rateEffort);
 
 router.patch("/coach/settings", c.patchCoachSettings);
 router.post("/coach/anthropic-consent", c.anthropicConsent);

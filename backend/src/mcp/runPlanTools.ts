@@ -108,7 +108,8 @@ export function registerRunPlanTools(server: McpServer, caller: Caller, can: (sc
       title: "One plan's full history",
       description:
         "A user's active plan in full: the plan, fitness profile, days (6 weeks back, 4 ahead, with status and grades), " +
-        "every proposal with its before/after days, checks and decision, check-ins, grades and the plan history log. " +
+        "every proposal with its before/after days, checks and decision, check-ins, grades, post-run effort ratings " +
+        "(guess vs the runner's RPE, `efforts`) with per-type calibration (`effort_calibration`), goal estimates and the plan history log. " +
         "Health-derived data: admins only, don't paste it anywhere else.",
       inputSchema: { user: z.string().min(1).max(80).describe("Username (with or without @) or user_id.") },
       annotations: { readOnlyHint: true, openWorldHint: false },

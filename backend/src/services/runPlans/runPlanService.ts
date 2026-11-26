@@ -37,6 +37,7 @@ import {
   dateRange,
   dayStatus,
   estimateFor,
+  formatDuration,
   fatigueSignals,
   focusOf,
   generateDays,
@@ -62,6 +63,29 @@ import {
   walkDayProposals,
   weekStart,
   weekdayIndex,
+  withRoles,
+  primaryGoal,
+  secondaryGoal,
+  goalEstimate,
+  goalAchievement,
+  GoalEstimate,
+  volumeInfo,
+  VolumeInfo,
+  EFFORT_TYPES,
+  EffortType,
+  EffortFeatures,
+  Calibration,
+  RatedEffort,
+  calibrationFrom,
+  effortTypeFor,
+  effortReason,
+  effortFatigueProposal,
+  effortProgressionProposal,
+  normalizeEffortFeatures,
+  progressionSignal,
+  rpeLabel,
+  servedGuess,
+  DAY_KINDS,
 } from "./engine.js";
 import { AiStatus, getAiStatus } from "./coachSettings.js";
 
@@ -122,6 +146,8 @@ interface Baseline {
   pace_factor: number;
   experience: FitnessProfile["experience"];
   profile_at: string | null;
+  /** Phases restart here after a goal promotion (null/absent = start_date). */
+  phase_start?: string | null;
 }
 const PLAN_COLS = `plan_id, user_id, status, goals, target_date::text AS target_date, runs_per_week, difficulty, walk_mode,
   fixed_walk_days, coach_notes, shoe_assignments, start_date::text AS start_date, baseline, source,
@@ -227,14 +253,15 @@ async function loadRuns(userId: string, from: string, to: string, onFoot = false
 // ─── Plan context (settings, paces, days) ─────────────────────────────────
 
 export function settingsOf(p: PlanRow): PlanSettings {
+  const goals = withRoles(p.goals ?? []);
   return {
-    goals: p.goals,
-    target_date: p.target_date,
+    goals,
+    target_date: primaryGoal(goals).target_date ?? p.target_date,
     runs_per_week: p.runs_per_week,
     difficulty: p.difficulty,
     walk_mode: p.walk_mode,
     fixed_walk_days: p.fixed_walk_days ?? [],
-    start_date: p.start_date,
+    start_date: p.baseline.phase_start && p.baseline.phase_start > p.start_date ? p.baseline.phase_start : p.start_date,
     pace_factor: p.baseline.pace_factor ?? 1,
   };
 }
@@ -352,18 +379,20 @@ function adaptContext(st: PlanState): AdaptContext {
 
 // ─── Served shapes ────────────────────────────────────────────────────────
 
+export type ServedGoal = Goal & { current_s: number | null; role: Goal["role"]; target_date: string | null; estimate: GoalEstimate };
 export interface ServedPlan {
   plan_id: string;
   status: string;
-  goals: (Goal & { current_s: number | null })[];
+  goals: ServedGoal[];
   target_date: string | null;
   runs_per_week: number;
   difficulty: number;
   walk_mode: WalkMode;
   fixed_walk_days: number[];
   coach_notes: string;
-  shoe_assignments: Record<ShoeRunType, string | null>;
+  shoe_assignments: Record<ShoeRunType | "walk", string | null>;
   hard_sessions_per_week: number;
+  volume: VolumeInfo;
   start_date: string;
   week_index: number;
   phase: string;
@@ -372,29 +401,47 @@ export interface ServedPlan {
   created_at: string;
   updated_at: string;
 }
-function servePlan(ctx: PlanContext, today: string): ServedPlan {
+/** Goals with roles, dates and estimates (achievement checked against `runs` since the phase start). */
+function serveGoals(ctx: PlanContext, today: string, runs: ActualRun[] | null): ServedGoal[] {
+  const vdot = ctx.gen.paces.vdot / (ctx.plan.baseline.pace_factor ?? 1);
+  const easy = Math.round((ctx.gen.paces.easy_s[0] + ctx.gen.paces.easy_s[1]) / 2);
+  return ctx.settings.goals.map((g, i) => {
+    const achieved = runs && g.role ? goalAchievement(g, runs, ctx.profile, ctx.settings.start_date) : null;
+    return {
+      ...g,
+      role: g.role ?? null,
+      target_date: g.target_date ?? null,
+      current_s: g.type === "distance_time" ? estimateFor(vdot, goalDistanceMi(g) ?? 3.10686) : null,
+      estimate: goalEstimate(g, i, { vdot, profile: ctx.profile, today, easy_pace_s: easy, achieved }),
+    };
+  });
+}
+
+function servePlan(ctx: PlanContext & { runs?: ActualRun[] }, today: string): ServedPlan {
   const p = ctx.plan;
-  const w = Math.max(0, Math.floor((Date.parse(weekStart(today)) - Date.parse(weekStart(p.start_date))) / (7 * 86_400_000)));
+  const w = Math.max(0, Math.floor((Date.parse(weekStart(today)) - Date.parse(weekStart(ctx.settings.start_date))) / (7 * 86_400_000)));
   const weeks = planWeeks(ctx.settings, ctx.gen.profile, ctx.gen.paces, w + 1);
   const wk = weeks[Math.min(w, weeks.length - 1)];
-  const vdot = ctx.gen.paces.vdot / (p.baseline.pace_factor ?? 1);
+  const goals = serveGoals(ctx, today, ctx.runs ?? null);
   return {
     plan_id: p.plan_id,
     status: p.status,
-    goals: p.goals.map((g) => ({ ...g, current_s: g.type === "distance_time" ? estimateFor(vdot, goalDistanceMi(g) ?? 3.10686) : null })),
-    target_date: p.target_date,
+    goals,
+    target_date: ctx.settings.target_date,
     runs_per_week: p.runs_per_week,
     difficulty: p.difficulty,
     walk_mode: p.walk_mode,
     fixed_walk_days: p.fixed_walk_days ?? [],
     coach_notes: p.coach_notes,
-    shoe_assignments: Object.fromEntries(SHOE_RUN_TYPES.map((t) => [t, p.shoe_assignments?.[t] ?? null])) as Record<ShoeRunType, string | null>,
-    hard_sessions_per_week: hardSessionsFor(p.runs_per_week, p.difficulty, ctx.gen.profile?.experience ?? null, p.goals),
+    // Walk days never get a shoe: `walk` is always served null (old decoders keep the key).
+    shoe_assignments: { ...(Object.fromEntries(SHOE_RUN_TYPES.map((t) => [t, p.shoe_assignments?.[t] ?? null])) as Record<ShoeRunType, string | null>), walk: null },
+    hard_sessions_per_week: hardSessionsFor(p.runs_per_week, ctx.gen.profile?.experience ?? null, ctx.settings.goals),
+    volume: volumeInfo(ctx.gen, w),
     start_date: p.start_date,
     week_index: w,
     phase: wk?.phase ?? "rolling",
     weekly_target_mi: wk?.volume_mi ?? 0,
-    checkpoints: checkpointsFor(p.goals, vdot, p.difficulty),
+    checkpoints: checkpointsFor(goals.map((g) => g.estimate)),
     created_at: p.created_at,
     updated_at: p.updated_at,
   };
@@ -439,7 +486,8 @@ async function serveDays(st: PlanState, from: string, to: string): Promise<Serve
     const miles = runs.reduce((a, r) => a + r.distance_mi, 0);
     const secs = runs.reduce((a, r) => a + (r.moving_s ?? r.duration_s), 0);
     const g = st.grades.get(d);
-    const shoeId = st.plan.shoe_assignments?.[shoeRunTypeFor(row.day.kind)] ?? null;
+    const shoeType = shoeRunTypeFor(row.day.kind);
+    const shoeId = shoeType ? st.plan.shoe_assignments?.[shoeType] ?? null : null;
     out.push({
       ...row.day,
       local_date: d,
@@ -459,6 +507,15 @@ async function serveDays(st: PlanState, from: string, to: string): Promise<Serve
 
 // ─── Proposals ────────────────────────────────────────────────────────────
 
+/** Plan-level part of a proposal; `prev` restores it on undo. */
+interface PlanPatch {
+  pace_factor?: number;
+  vdot?: number;
+  goals?: Goal[];
+  target_date?: string | null;
+  phase_start?: string | null;
+  prev?: { pace_factor?: number; vdot?: number; goals?: Goal[]; target_date?: string | null; phase_start?: string | null };
+}
 interface StoredChange {
   local_date: string;
   before: Day | null;
@@ -476,7 +533,7 @@ interface ProposalRow {
   reason: string;
   goal_impact: ProposalDraft["goal_impact"];
   changes: StoredChange[];
-  checks: Record<string, unknown> & { plan_patch?: { pace_factor?: number; vdot?: number; prev?: Record<string, number> } | null };
+  checks: Record<string, unknown> & { plan_patch?: PlanPatch | null };
   first_date: string;
   apply_after_date: string | null;
   created_at: string;
@@ -506,7 +563,7 @@ export interface ServedProposal {
   goal_impact: ProposalDraft["goal_impact"];
   changes: { local_date: string; before: Omit<Day, "spec"> & { spec: DaySpec } | null; after: Omit<Day, "spec"> & { spec: DaySpec }; before_version: number | null }[];
   checks: Record<string, unknown>;
-  plan_patch: { pace_factor?: number; vdot?: number } | null;
+  plan_patch: { pace_factor?: number; vdot?: number; goals?: Goal[]; target_date?: string | null } | null;
   affects_next_run: boolean;
   first_date: string;
   created_at: string;
@@ -528,7 +585,9 @@ function serveProposal(p: ProposalRow, nextRunDate: string | null = null): Serve
     goal_impact: p.goal_impact ?? null,
     changes: p.changes,
     checks,
-    plan_patch: plan_patch ? { pace_factor: plan_patch.pace_factor, vdot: plan_patch.vdot } : null,
+    plan_patch: plan_patch
+      ? { pace_factor: plan_patch.pace_factor, vdot: plan_patch.vdot, ...(plan_patch.goals ? { goals: plan_patch.goals, target_date: plan_patch.target_date ?? null } : {}) }
+      : null,
     affects_next_run: nextRunDate != null && p.changes.some((c) => c.local_date === nextRunDate),
     first_date: p.first_date,
     created_at: p.created_at,
@@ -586,9 +645,11 @@ export interface ProposalInput {
   changes: { local_date: string; after?: Day; spec?: DaySpec }[];
   deviation_reason?: string | null;
   dedupe_key?: string | null;
-  plan_patch?: { pace_factor?: number; vdot?: number } | null;
+  plan_patch?: PlanPatch | null;
   ai_call_id?: string | null;
   created_by?: string | null;
+  /** goal_promotion only: changes may add days the plan doesn't have yet (after a dated primary's race week). */
+  allow_new_days?: boolean;
 }
 
 /** Validate + store a PENDING proposal. Never touches plan days. */
@@ -601,8 +662,9 @@ async function createProposalInState(st: PlanState, input: ProposalInput): Promi
     seen.add(c.local_date);
     if (c.local_date < st.today) throw new RunPlanError("past_date", 400, { local_date: c.local_date });
     const cur = st.days.get(c.local_date);
-    if (!cur) throw new RunPlanError("date_outside_plan", 400, { local_date: c.local_date });
+    if (!cur && !(input.allow_new_days && c.after)) throw new RunPlanError("date_outside_plan", 400, { local_date: c.local_date });
     if (c.after) return { local_date: c.local_date, after: c.after };
+    if (!cur) throw new RunPlanError("date_outside_plan", 400, { local_date: c.local_date });
     try {
       return { local_date: c.local_date, after: buildDay(c.spec!, st.bctx, { phase: cur.phase, week_index: cur.week_index, flex: cur.flex && c.spec!.kind !== "walk" ? cur.flex : cur.flex }) };
     } catch (e) {
@@ -662,6 +724,15 @@ async function lockProposal(client: PoolClient, userId: string, id: string): Pro
 /** Write a proposal's `after` days, version-checked. Throws stale_proposal if any day moved on. */
 async function writeAfter(client: PoolClient, p: ProposalRow): Promise<void> {
   for (const c of p.changes) {
+    if (c.before == null && c.before_version == null && p.kind === "goal_promotion") {
+      // A day the plan didn't have yet (after the old primary's race week).
+      const ins = await client.query(
+        `INSERT INTO run_plan_days (plan_id, local_date, kind, day, note, source) VALUES ($1, $2::date, $3, $4::jsonb, $5, $6) ON CONFLICT (plan_id, local_date) DO NOTHING`,
+        [p.plan_id, c.local_date, c.after.kind, JSON.stringify(c.after), c.after.note, p.source],
+      );
+      if (ins.rowCount === 0) throw new RunPlanError("stale_proposal", 409, { local_date: c.local_date });
+      continue;
+    }
     const r = await client.query(
       `UPDATE run_plan_days SET kind = $3, day = $4::jsonb, note = $5, note_source = $6, version = version + 1, source = $7, updated_at = now()
         WHERE plan_id = $1 AND local_date = $2::date AND ($8::int IS NULL OR version = $8::int)`,
@@ -678,6 +749,29 @@ async function writeAfter(client: PoolClient, p: ProposalRow): Promise<void> {
       [p.plan_id, JSON.stringify({ ...(patch.pace_factor != null ? { pace_factor: patch.pace_factor } : {}), ...(patch.vdot != null ? { vdot: patch.vdot } : {}) })],
     );
   }
+  if (patch?.goals) await writeGoalPatch(client, p, { goals: patch.goals, target_date: patch.target_date ?? null, phase_start: patch.phase_start ?? null });
+}
+
+/**
+ * Goal promotion (apply) or its undo: new goals + phase start, and the days
+ * after the proposal's last change are dropped so `materialize` regenerates
+ * them for the new goals (pending proposals on them are superseded).
+ */
+async function writeGoalPatch(client: PoolClient, p: ProposalRow, g: { goals: Goal[]; target_date: string | null; phase_start: string | null }) {
+  await client.query(
+    `UPDATE run_plans SET goals = $2::jsonb, target_date = $3::date, baseline = baseline || $4::jsonb, updated_at = now() WHERE plan_id = $1`,
+    [p.plan_id, JSON.stringify(g.goals), g.target_date, JSON.stringify({ phase_start: g.phase_start })],
+  );
+  const last = p.changes.map((c) => c.local_date).sort().pop()!;
+  await client.query(`DELETE FROM run_plan_days WHERE plan_id = $1 AND local_date > $2::date`, [p.plan_id, last]);
+  const sup = await client.query<{ id: string }>(
+    `UPDATE run_plan_proposals q SET status = 'superseded', decided_at = now()
+      WHERE plan_id = $1 AND id <> $2 AND status IN ('pending', 'scheduled')
+        AND EXISTS (SELECT 1 FROM jsonb_array_elements(q.changes) c WHERE (c->>'local_date')::date > $3::date)
+      RETURNING id`,
+    [p.plan_id, p.id, last],
+  );
+  for (const r of sup.rows) await history(client, p.plan_id, p.user_id, "proposal_superseded", null, r.id, "Your goals changed", []);
 }
 const noteSourceFor = (src: string, c: StoredChange) =>
   c.after.note && c.after.note !== c.before?.note && ["apple", "anthropic", "overseer", "user_claude"].includes(src) ? src : "template";
@@ -824,7 +918,14 @@ export async function undoProposal(userId: string, id: string, today: string) {
     }
     // `changes` holds exactly the days the apply wrote (past days were dropped then).
     for (const c of p.changes) {
-      if (!c.before) continue;
+      if (!c.before) {
+        // A day the promotion added: remove it again (unless something changed it since).
+        if (p.kind === "goal_promotion") {
+          const d = await client.query(`DELETE FROM run_plan_days WHERE plan_id = $1 AND local_date = $2::date AND version = 1`, [p.plan_id, c.local_date]);
+          if (d.rowCount === 0) throw new RunPlanError("undo_conflict", 409, { local_date: c.local_date });
+        }
+        continue;
+      }
       const r = await client.query(
         `UPDATE run_plan_days SET kind = $3, day = $4::jsonb, note = $5, note_source = 'template', version = version + 1, source = 'user', updated_at = now()
           WHERE plan_id = $1 AND local_date = $2::date AND version = $6::int`,
@@ -833,7 +934,11 @@ export async function undoProposal(userId: string, id: string, today: string) {
       if (r.rowCount === 0) throw new RunPlanError("undo_conflict", 409, { local_date: c.local_date });
     }
     const prev = p.checks?.plan_patch?.prev;
-    if (prev) await client.query(`UPDATE run_plans SET baseline = baseline || $2::jsonb, updated_at = now() WHERE plan_id = $1`, [p.plan_id, JSON.stringify(prev)]);
+    if (prev) {
+      const { goals: pg, target_date: pt, phase_start: ps, ...base } = prev;
+      if (Object.keys(base).length) await client.query(`UPDATE run_plans SET baseline = baseline || $2::jsonb, updated_at = now() WHERE plan_id = $1`, [p.plan_id, JSON.stringify(base)]);
+      if (pg) await writeGoalPatch(client, p, { goals: pg, target_date: pt ?? null, phase_start: ps ?? null });
+    }
     await client.query(`UPDATE run_plan_proposals SET status = 'undone', undo_until = NULL WHERE id = $1`, [id]);
     await history(client, p.plan_id, p.user_id, "proposal_undone", p.source, p.id, `Undid: ${p.title}`, p.changes.map((c) => c.local_date));
   });
@@ -944,10 +1049,23 @@ function cleanSettings(input: Partial<CreatePlanInput>, today: string, base?: Cl
     if (raw.length !== 7 - rpw) throw new RunPlanError("fixed_walk_days_mismatch", 400, { expected: 7 - rpw });
     fixed = [...raw].sort();
   }
-  let target: string | null = input.target_date !== undefined ? (input.target_date as string | null) : base?.target_date ?? null;
-  if (target != null) {
-    if (!isIsoDate(target) || target < addDays(start, 14) || target > addDays(start, 364)) throw new RunPlanError("invalid_target_date", 400);
-  }
+  // Goal dates: each goal carries its own (null = ASAP); the plan's target_date is the primary's.
+  // Legacy bodies send only the plan-level date: it becomes the primary's.
+  const planTarget = input.target_date !== undefined ? (input.target_date as string | null) : undefined;
+  const fromBase = input.goals === undefined;
+  goals = withRoles(goals).map((g) => {
+    if (g.role !== "primary") return { ...g, target_date: g.target_date ?? null };
+    let t = g.target_date;
+    if (planTarget !== undefined && (fromBase || t === undefined)) t = planTarget;
+    else if (planTarget !== undefined && planTarget !== t) throw new RunPlanError("invalid_target_date", 400, { reason: "target_date must match the primary goal's target_date" });
+    if (t === undefined) t = base?.target_date ?? null;
+    return { ...g, target_date: t ?? null };
+  });
+  goals.forEach((g, i) => {
+    const t = g.target_date;
+    if (t != null && (!isIsoDate(t) || t < addDays(start, 14) || t > addDays(start, 364))) throw new RunPlanError("invalid_target_date", 400, { goal_index: i });
+  });
+  const target: string | null = primaryGoal(goals).target_date ?? null;
   const notes = input.coach_notes !== undefined ? input.coach_notes : base?.coach_notes ?? "";
   if (notes != null && typeof notes !== "string") throw new RunPlanError("invalid_goals", 400, { field: "coach_notes" });
   return { goals, target_date: target, runs_per_week: rpw, difficulty: diff as Difficulty, walk_mode: mode, fixed_walk_days: fixed, coach_notes: ((notes as string) ?? "").slice(0, 2000), start_date: start };
@@ -956,16 +1074,17 @@ function cleanSettings(input: Partial<CreatePlanInput>, today: string, base?: Cl
 async function cleanShoes(userId: string, raw: unknown, fallback?: Partial<Record<ShoeRunType, string | null>>): Promise<Partial<Record<ShoeRunType, string | null>>> {
   if (raw === undefined || raw === null) {
     if (fallback) return fallback;
-    // Default: the running default on runs, the walking default on walk days.
+    // Default: the running default on every run type. Walk days never get a shoe.
     const shoes = (await listShoes(userId)).filter((x) => !x.retired_at);
     const run = shoes.find((x) => x.default_for.includes("running"))?.shoe_id ?? null;
-    const walk = shoes.find((x) => x.default_for.includes("walking"))?.shoe_id ?? null;
-    return { easy: run, long: run, tempo: run, intervals: run, race: run, walk };
+    return { easy: run, long: run, tempo: run, intervals: run, race: run };
   }
   if (typeof raw !== "object" || Array.isArray(raw)) throw new RunPlanError("invalid_shoe", 400);
-  const out: Partial<Record<ShoeRunType, string | null>> = { ...(fallback ?? {}) };
+  const out: Partial<Record<ShoeRunType, string | null>> = {};
+  for (const t of SHOE_RUN_TYPES) if (fallback && fallback[t] !== undefined) out[t] = fallback[t];
   const ids: string[] = [];
   for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (k === "walk") continue; // walk days never get a shoe (old clients may still send the key)
     if (!SHOE_RUN_TYPES.includes(k as ShoeRunType)) throw new RunPlanError("invalid_shoe", 400, { field: k });
     if (v !== null && typeof v !== "string") throw new RunPlanError("invalid_shoe", 400, { field: k });
     out[k as ShoeRunType] = v as string | null;
@@ -1011,7 +1130,11 @@ export async function previewPlan(userId: string, input: CreatePlanInput, today:
   const shoeMap = await shoesFor(userId, Object.values(shoes).filter((x): x is string => !!x));
   return {
     plan: servePlan(ctx, today),
-    days: days.map((d) => ({ ...d.day, local_date: d.local_date, weekday: weekdayIndex(d.local_date), note_source: "template", shoe: shoes[shoeRunTypeFor(d.day.kind)] ? shoeMap.get(shoes[shoeRunTypeFor(d.day.kind)]!) ?? null : null, status: "planned", completed: null, grade: null, pending_proposal_ids: [], version: 1 })),
+    days: days.map((d) => {
+      const t = shoeRunTypeFor(d.day.kind);
+      const id = t ? shoes[t] : null;
+      return { ...d.day, local_date: d.local_date, weekday: weekdayIndex(d.local_date), note_source: "template", shoe: id ? shoeMap.get(id) ?? null : null, status: "planned", completed: null, grade: null, pending_proposal_ids: [], version: 1 };
+    }),
     warnings,
   };
 }
@@ -1060,7 +1183,7 @@ export async function createPlan(userId: string, input: CreatePlanInput, today: 
     }
     const id = r.rows[0].plan_id;
     await insertDays(client, id, days, source);
-    await history(client, id, userId, "plan_created", source, null, `Plan created: ${s.goals.map((g) => g.type === "distance_time" ? g.distance : g.type).join(", ")}`, []);
+    await history(client, id, userId, "plan_created", source, null, `Plan created: ${s.goals.map((g) => `${g.type === "distance_time" ? g.distance : g.type}${g.role === "secondary" ? " (secondary)" : ""}`).join(", ")}`, []);
     return id;
   });
   void planId;
@@ -1102,7 +1225,7 @@ const STRUCTURAL = ["goals", "target_date", "runs_per_week", "difficulty", "walk
 /** The user's own edit: applies directly (their decision), recorded as source 'user'. */
 export async function updatePlan(userId: string, patch: Record<string, unknown>, today: string) {
   const plan = await requirePlan(userId);
-  const base: CleanSettings = { goals: plan.goals, target_date: plan.target_date, runs_per_week: plan.runs_per_week, difficulty: plan.difficulty, walk_mode: plan.walk_mode, fixed_walk_days: plan.fixed_walk_days, coach_notes: plan.coach_notes, start_date: plan.start_date };
+  const base: CleanSettings = { goals: withRoles(plan.goals), target_date: plan.target_date, runs_per_week: plan.runs_per_week, difficulty: plan.difficulty, walk_mode: plan.walk_mode, fixed_walk_days: plan.fixed_walk_days, coach_notes: plan.coach_notes, start_date: plan.start_date };
   const s = cleanSettings({ ...patch, start_date: undefined } as Partial<CreatePlanInput>, today, base);
   const shoes = patch.shoe_assignments !== undefined ? await cleanShoes(userId, patch.shoe_assignments, plan.shoe_assignments) : plan.shoe_assignments;
   const structural = STRUCTURAL.some((k) => patch[k] !== undefined);
@@ -1205,8 +1328,14 @@ export async function submitGrade(userId: string, body: any, today: string) {
     avg_hr: n(body.avg_hr, 40, 230),
   };
   const grade = await storeGrade(st, date, typeof body.workout_id === "string" ? body.workout_id.slice(0, 255) : null, inputs, "phone");
+  // Optional effort guess riding along (same as POST /effort for this workout).
+  let effort: ServedEffort | null = null;
+  if (body.effort != null) {
+    if (typeof body.effort !== "object" || Array.isArray(body.effort)) throw new RunPlanError("invalid_effort", 400, { field: "effort" });
+    effort = (await storeEffort(st, { ...body.effort, local_date: date, workout_id: body.workout_id }, today)).effort;
+  }
   const proposals = await runFormulaPassInState(st, "after_run");
-  return { grade, proposals };
+  return { grade, proposals, effort };
 }
 
 /** Server fallback grade from distance, average pace and splits. */
@@ -1290,6 +1419,179 @@ export async function listCheckins(userId: string, from: string, to: string) {
   );
 }
 
+// ─── Effort guess (RPE) and learning (spec §9) ───────────────────────────
+
+interface EffortRow {
+  workout_id: string;
+  local_date: string;
+  run_type: string;
+  effort_type: EffortType;
+  features: EffortFeatures;
+  raw_guess: number;
+  offset_applied: number;
+  guess: number;
+  user_rating: number | null;
+  rated_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+export interface ServedEffort extends Omit<EffortRow, "offset_applied"> {
+  offset: number;
+  guess_label: string;
+  reason: string;
+  delta: number | null;
+}
+const EFFORT_COLS = `workout_id, local_date::text AS local_date, run_type, effort_type, features, raw_guess, offset_applied, guess, user_rating, rated_at, created_at, updated_at`;
+function serveEffort(r: EffortRow): ServedEffort {
+  const { offset_applied, ...rest } = r;
+  return {
+    ...rest,
+    raw_guess: Number(r.raw_guess),
+    offset: Number(offset_applied),
+    guess_label: rpeLabel(r.guess),
+    reason: effortReason(r.features ?? normalizeEffortFeatures({}), r.run_type),
+    delta: r.user_rating != null ? r.user_rating - r.guess : null,
+  };
+}
+
+/** Per-type calibration from the user's last 30 rated runs of each type (oldest first). */
+export async function effortCalibration(userId: string): Promise<Calibration[]> {
+  const rows = await db.query<{ effort_type: EffortType; raw_guess: number; user_rating: number }>(
+    `SELECT effort_type, raw_guess, user_rating FROM (
+        SELECT effort_type, raw_guess, user_rating, rated_at, workout_id,
+               row_number() OVER (PARTITION BY effort_type ORDER BY rated_at DESC, workout_id DESC) AS rn
+          FROM run_effort_ratings WHERE user_id = $1 AND user_rating IS NOT NULL) x
+      WHERE rn <= 30 ORDER BY rated_at, workout_id`,
+    [userId],
+  );
+  return EFFORT_TYPES.map((t) => calibrationFrom(t, rows.filter((r) => r.effort_type === t).map((r) => ({ raw_guess: Number(r.raw_guess), user_rating: r.user_rating }))));
+}
+
+async function storeEffort(st: PlanState, body: any, today: string): Promise<{ effort: ServedEffort; calibration: Calibration[] }> {
+  const date = body?.local_date;
+  if (!isIsoDate(date) || date > today || date < addDays(today, -7)) throw new RunPlanError("invalid_effort", 400, { field: "local_date" });
+  const wid = body?.workout_id;
+  if (typeof wid !== "string" || !wid.trim() || wid.length > 255) throw new RunPlanError("invalid_effort", 400, { field: "workout_id" });
+  const raw = Number(body?.raw_guess);
+  if (body?.raw_guess == null || !Number.isFinite(raw) || raw < 1 || raw > 10) throw new RunPlanError("invalid_effort", 400, { field: "raw_guess" });
+  let runType: string;
+  if (body.run_type != null) {
+    if (!DAY_KINDS.includes(body.run_type) || body.run_type === "walk") throw new RunPlanError("invalid_effort", 400, { field: "run_type" });
+    runType = body.run_type;
+  } else {
+    const day = st.days.get(date) ?? (await loadDays(st.plan.plan_id, date, date)).get(date)?.day;
+    if (!day) throw new RunPlanError("day_not_found", 404);
+    if (day.kind === "walk") throw new RunPlanError("invalid_effort", 400, { field: "run_type" });
+    runType = day.kind;
+  }
+  let features: EffortFeatures;
+  try {
+    features = normalizeEffortFeatures(body.features);
+  } catch (e) {
+    if (e instanceof EngineError) throw new RunPlanError(e.code, 400, e.extra);
+    throw e;
+  }
+  const type = effortTypeFor(runType)!;
+  const calibration = await effortCalibration(st.plan.user_id);
+  const g = servedGuess(raw, calibration.find((c) => c.effort_type === type) ?? null);
+  const rows = await db.query<EffortRow>(
+    `INSERT INTO run_effort_ratings (user_id, plan_id, workout_id, local_date, run_type, effort_type, features, raw_guess, offset_applied, guess)
+     VALUES ($1, $2, $3, $4::date, $5, $6, $7::jsonb, $8, $9, $10)
+     ON CONFLICT (user_id, workout_id) DO UPDATE SET plan_id = EXCLUDED.plan_id, local_date = EXCLUDED.local_date, run_type = EXCLUDED.run_type,
+       effort_type = EXCLUDED.effort_type, features = EXCLUDED.features, raw_guess = EXCLUDED.raw_guess,
+       offset_applied = EXCLUDED.offset_applied, guess = EXCLUDED.guess, updated_at = now()
+     RETURNING ${EFFORT_COLS}`,
+    [st.plan.user_id, st.plan.plan_id, wid, date, runType, type, JSON.stringify(features), Math.round(raw * 10) / 10, g.offset, g.guess],
+  );
+  return { effort: serveEffort(rows[0]), calibration };
+}
+
+/** POST /run-plans/effort — the phone's raw guess + features; served guess = raw + calibration. */
+export async function submitEffort(userId: string, body: any, today: string) {
+  const st = await loadState(userId, today, { ahead: 1 });
+  return storeEffort(st, body ?? {}, today);
+}
+
+async function effortRow(userId: string, workoutId: string): Promise<EffortRow> {
+  if (typeof workoutId !== "string" || !workoutId || workoutId.length > 255) throw new RunPlanError("effort_not_found", 404);
+  const r = await db.query<EffortRow>(`SELECT ${EFFORT_COLS} FROM run_effort_ratings WHERE user_id = $1 AND workout_id = $2`, [userId, workoutId]);
+  if (!r[0]) throw new RunPlanError("effort_not_found", 404);
+  return r[0];
+}
+export async function getEffort(userId: string, workoutId: string) {
+  const [row, calibration] = await Promise.all([effortRow(userId, workoutId), effortCalibration(userId)]);
+  return { effort: serveEffort(row), calibration };
+}
+export async function listEfforts(userId: string, from: string, to: string) {
+  if (!isIsoDate(from) || !isIsoDate(to)) throw new RunPlanError("invalid_today", 400, { field: "from/to" });
+  if (from > to) [from, to] = [to, from];
+  if ((Date.parse(to) - Date.parse(from)) / 86_400_000 > MAX_RANGE_DAYS) throw new RunPlanError("range_too_large", 400, { max_days: MAX_RANGE_DAYS });
+  const [rows, calibration] = await Promise.all([
+    db.query<EffortRow>(`SELECT ${EFFORT_COLS} FROM run_effort_ratings WHERE user_id = $1 AND local_date BETWEEN $2::date AND $3::date ORDER BY local_date DESC, created_at DESC LIMIT 500`, [userId, from, to]),
+    effortCalibration(userId),
+  ]);
+  return { efforts: rows.map(serveEffort), calibration };
+}
+
+/** Recent efforts + calibration + signals, for the coach model's context and the overseer. */
+export async function effortSummary(userId: string, limit = 10) {
+  const [rows, calibration] = await Promise.all([
+    db.query<EffortRow>(`SELECT ${EFFORT_COLS} FROM run_effort_ratings WHERE user_id = $1 ORDER BY local_date DESC, created_at DESC LIMIT $2`, [userId, limit]),
+    effortCalibration(userId),
+  ]);
+  const rated = rows.filter((r) => r.user_rating != null).map((r) => ({ workout_id: r.workout_id, local_date: r.local_date, effort_type: r.effort_type, guess: r.guess, user_rating: r.user_rating! }));
+  return {
+    recent: rows.map(serveEffort),
+    calibration,
+    signals: {
+      fatigue: rated.length > 0 && rated[0].user_rating >= rated[0].guess + 2,
+      progression: EFFORT_TYPES.find((t) => progressionSignal(rated, t)) ?? null,
+    },
+  };
+}
+
+/**
+ * POST /run-plans/effort/:workoutId/rating — the user's correction (1–10, null clears).
+ * Rated ≥ 2 above the guess → `effort_fatigue` proposal; 3 of the last 4 of a
+ * type ≥ 2 below → `effort_progression` proposal. Proposals only.
+ */
+export async function rateEffort(userId: string, workoutId: string, body: any, today: string) {
+  const r = body?.rating;
+  if (r !== null && (!Number.isInteger(r) || r < 1 || r > 10)) throw new RunPlanError("invalid_effort", 400, { field: "rating" });
+  await effortRow(userId, workoutId);
+  const rows = await db.query<EffortRow>(
+    `UPDATE run_effort_ratings SET user_rating = $3, rated_at = CASE WHEN $3::smallint IS NULL THEN NULL ELSE now() END, updated_at = now()
+      WHERE user_id = $1 AND workout_id = $2 RETURNING ${EFFORT_COLS}`,
+    [userId, workoutId, r],
+  );
+  const row = rows[0];
+  const calibration = await effortCalibration(userId);
+  let proposals: ServedProposal[] = [];
+  if (r != null) {
+    const plan = await activePlan(userId);
+    if (plan) {
+      const st = await loadState(userId, today, { plan });
+      const ctx = adaptContext(st);
+      const rated: RatedEffort = { workout_id: row.workout_id, local_date: row.local_date, effort_type: row.effort_type, guess: row.guess, user_rating: r };
+      const drafts: ProposalDraft[] = [];
+      const fat = effortFatigueProposal(ctx, rated);
+      if (fat) drafts.push(fat);
+      const recent = await db.query<{ workout_id: string; local_date: string; effort_type: EffortType; guess: number; user_rating: number }>(
+        `SELECT workout_id, local_date::text AS local_date, effort_type, guess, user_rating FROM run_effort_ratings
+          WHERE user_id = $1 AND effort_type = $2 AND user_rating IS NOT NULL ORDER BY local_date DESC, rated_at DESC LIMIT 4`,
+        [userId, row.effort_type],
+      );
+      const paceBusy = st.pending.some((p) => p.kind === "pace_update" || p.kind === "effort_progression");
+      if (!fat && !paceBusy && progressionSignal(recent, row.effort_type)) {
+        const prog = effortProgressionProposal(ctx, row.effort_type, row.workout_id);
+        if (prog) drafts.push(prog);
+      }
+      proposals = await createDrafts(st, drafts);
+    }
+  }
+  return { effort: serveEffort(row), calibration, proposals };
+}
+
 // ─── Formula pass (after upload, first open, nightly) ────────────────────
 
 export type Trigger = "after_run" | "first_open" | "nightly" | "checkin" | "profile";
@@ -1306,14 +1608,23 @@ async function runFormulaPassInState(st: PlanState, _trigger: Trigger): Promise<
     if (pace) drafts.push(pace);
     drafts.push(...walkDayProposals(ctx));
   }
+  const out = await createDrafts(st, drafts);
+  const promo = await promotionProposal(st);
+  if (promo) out.push(promo);
+  return out;
+}
+
+/** Store formula drafts as pending proposals (each built on the plan as it stands). */
+async function createDrafts(st: PlanState, drafts: ProposalDraft[]): Promise<ServedProposal[]> {
   const out: ServedProposal[] = [];
   for (const d of drafts) {
-    // Each draft is built on the plan as it stands; skip any that now overlap a newer pending one.
+    // Skip any that now overlap a newer pending one.
     const busy = new Set(st.pending.flatMap((p) => p.changes.map((c) => c.local_date)));
     if (d.changes.some((c) => busy.has(c.local_date))) continue;
     try {
       const patch = d.plan_patch ? { ...d.plan_patch, prev: { pace_factor: st.plan.baseline.pace_factor ?? 1 } } : null;
-      const p = await createProposalInState(st, { source: "formula", kind: d.kind, title: d.title, reason: d.reason, goal_impact: d.goal_impact, changes: d.changes, deviation_reason: d.deviation_reason ?? (d.kind === "pace_update" ? "Pace update (research rule 20)." : "Formula adjustment."), dedupe_key: d.dedupe_key, plan_patch: patch as any });
+      const dflt = d.kind === "pace_update" || d.kind === "effort_progression" ? "Pace update (research rule 20)." : "Formula adjustment.";
+      const p = await createProposalInState(st, { source: "formula", kind: d.kind, title: d.title, reason: d.reason, goal_impact: d.goal_impact, changes: d.changes, deviation_reason: d.deviation_reason ?? dflt, dedupe_key: d.dedupe_key, plan_patch: patch });
       if (p) out.push(p);
     } catch (e) {
       if (!(e instanceof RunPlanError)) throw e;
@@ -1321,6 +1632,59 @@ async function runFormulaPassInState(st: PlanState, _trigger: Trigger): Promise<
     }
   }
   return out;
+}
+
+const goalName = (g: Goal) =>
+  g.type === "distance_time" ? `${g.distance === "custom" ? `${g.distance_mi} mi` : g.distance === "half" ? "half marathon" : g.distance === "5k" ? "5K" : g.distance === "10k" ? "10K" : g.distance}${g.target_s ? ` in ${formatDuration(g.target_s)}` : ""}` : g.type === "just_improve" ? "just improve" : "burn more calories";
+
+/**
+ * Primary achieved (a qualifying run or best effort since the phase start)
+ * and a secondary exists → a `goal_promotion` PROPOSAL: the secondary becomes
+ * the primary with its own phases from tomorrow. Once per primary goal.
+ */
+async function promotionProposal(st: PlanState): Promise<ServedProposal | null> {
+  const prim = primaryGoal(st.settings.goals);
+  const sec = secondaryGoal(st.settings.goals);
+  if (!sec) return null;
+  const a = goalAchievement(prim, st.runs.filter((r) => r.local_date <= st.today), st.profile, st.settings.start_date);
+  if (!a) return null;
+  const key = `promote:${prim.type}:${prim.distance ?? ""}:${prim.target_s ?? ""}:${prim.target_date ?? ""}`;
+  const tomorrow = addDays(st.today, 1);
+  const newPrimary: Goal = { ...sec, role: "primary", target_date: sec.target_date && sec.target_date >= addDays(tomorrow, 14) ? sec.target_date : null };
+  const hist: RunHistoryItem[] = [...st.runs.filter((r) => r.local_date < st.today).map((r) => ({ local_date: r.local_date, distance_mi: r.distance_mi })), ...st.profileRun];
+  const td = st.days.get(st.today);
+  if (td && td.kind !== "walk") hist.push({ local_date: st.today, distance_mi: td.distance_mi });
+  for (const first of [tomorrow, addDays(tomorrow, 1)]) {
+    const settings: PlanSettings = { ...st.settings, goals: [newPrimary], target_date: newPrimary.target_date ?? null, start_date: first };
+    const days = generateDays({ ...st.gen, settings }, first, addDays(tomorrow, 13), hist);
+    if (!days.length) return null;
+    try {
+      return await createProposalInState(st, {
+        source: "formula",
+        kind: "goal_promotion",
+        title: `Goal reached: make the ${goalName(sec)} your main goal?`,
+        reason: `You did the ${goalName(prim)} (${formatDuration(a.seconds)} on ${a.local_date}). The plan rebuilds around the ${goalName(sec)} with its own phases.`,
+        goal_impact: null,
+        changes: days.map((d) => ({ local_date: d.local_date, after: d.day })),
+        deviation_reason: "New primary goal: the plan restarts its phases.",
+        dedupe_key: key,
+        allow_new_days: true,
+        plan_patch: {
+          goals: [newPrimary],
+          target_date: newPrimary.target_date ?? null,
+          phase_start: first,
+          prev: { goals: st.plan.goals, target_date: st.plan.target_date, phase_start: st.plan.baseline.phase_start ?? null },
+        },
+      });
+    } catch (e) {
+      if (!(e instanceof RunPlanError)) throw e;
+      if (e.code !== "hard_rule_violation") {
+        console.warn("[runPlans] goal promotion refused:", e.code, JSON.stringify(e.extra));
+        return null;
+      }
+    }
+  }
+  return null;
 }
 
 /** A new fitness profile VDOT differing ≥ 2% from the plan's → pace_update proposal. */
@@ -1430,13 +1794,15 @@ export async function getCoachContext(userId: string, today: string, back = 14, 
     return n;
   })();
   const weekDone = dateRange(weekStart(today), addDays(today, -1)).filter((d) => past.find((x) => x.local_date === d)?.status === "done").length;
+  const plan = servePlan(st, today);
+  const effort = await effortSummary(userId, 10);
   return {
     today,
-    plan: servePlan(st, today),
+    plan,
     fitness_profile: st.profile,
     paces: st.bctx.paces,
     hr: { easy_ceiling: st.bctx.hr.easy_ceiling, tempo: st.bctx.hr.tempo, zones: st.bctx.hr.zones },
-    limits: { spike_limit_mi_by_date: limits, longest_run_30d_mi: Math.max(0, ...hist.filter((h) => h.local_date >= addDays(today, -30) && h.local_date < today).map((h) => h.distance_mi)), hard_sessions_per_week: hardSessionsFor(st.plan.runs_per_week, st.plan.difficulty, st.gen.profile?.experience ?? null, st.plan.goals) },
+    limits: { spike_limit_mi_by_date: limits, longest_run_30d_mi: Math.max(0, ...hist.filter((h) => h.local_date >= addDays(today, -30) && h.local_date < today).map((h) => h.distance_mi)), hard_sessions_per_week: hardSessionsFor(st.plan.runs_per_week, st.gen.profile?.experience ?? null, st.settings.goals) },
     past: past.map(slim),
     ahead: aheadDays.map(slim),
     checkins,
@@ -1444,9 +1810,11 @@ export async function getCoachContext(userId: string, today: string, back = 14, 
     recent_decisions: decisions,
     signals: { days_since_last_run: last ? Math.round((Date.parse(today) - Date.parse(last)) / 86_400_000) : null, missed_key_sessions: missed, fatigue_flag: sig.fatigue_flag, resting_hr_delta: sig.resting_hr_delta, hrv_below_baseline: sig.hrv_below_baseline, acwr: sig.acwr, hard_efforts_last_6d: sig.hard_efforts_last_6d, low_energy_streak: lowStreak, runs_done_this_week: weekDone, walk_day_earned: st.pending.some((p) => p.kind === "walk_day_earned"), overdoing_it: sig.hard_efforts_last_6d >= 4 || sig.fatigue_flag },
     coach_notes: st.plan.coach_notes,
-    focus: focusOf(st.plan.goals),
+    focus: focusOf(st.settings.goals),
     rules: COACH_RULES_TEXT,
     formula_proposals: st.pending.filter((p) => p.source === "formula").map((p) => serveProposal(p)),
+    goals: plan.goals,
+    effort,
   };
 }
 
@@ -1586,15 +1954,19 @@ export async function applyOverseerChange(
 export async function getPlanDetailForAdmin(userId: string, today = new Date().toISOString().slice(0, 10)) {
   const plan = await activePlan(userId);
   const { profile } = await getProfile(userId);
-  if (!plan) return { plan: null, days: [], proposals: [], fitness_profile: profile, checkins: [], grades: [], history: [] };
+  if (!plan) {
+    const e = await listEfforts(userId, addDays(today, -42), today);
+    return { plan: null, days: [], proposals: [], fitness_profile: profile, checkins: [], grades: [], history: [], efforts: e.efforts, effort_calibration: e.calibration };
+  }
   const st = await loadState(userId, today, { plan, back: 42 });
-  const [days, proposals, checkins, hist] = await Promise.all([
+  const [days, proposals, checkins, hist, eff] = await Promise.all([
     serveDays(st, addDays(today, -42), addDays(today, DAYS_AHEAD)),
     listProposalRows(plan.plan_id, null, 200),
     listCheckins(userId, addDays(today, -42), today),
     db.query(`SELECT id::text AS id, at, event, source, proposal_id, summary, dates, detail FROM run_plan_history WHERE plan_id = $1 ORDER BY at DESC LIMIT 200`, [plan.plan_id]),
+    listEfforts(userId, addDays(today, -42), today),
   ]);
-  return { plan: servePlan(st, today), days, proposals: proposals.map((p) => serveProposal(p, nextRunDate(st))), fitness_profile: profile, checkins, grades: [...st.grades.values()], history: hist };
+  return { plan: servePlan(st, today), days, proposals: proposals.map((p) => serveProposal(p, nextRunDate(st))), fitness_profile: profile, checkins, grades: [...st.grades.values()], history: hist, efforts: eff.efforts, effort_calibration: eff.calibration };
 }
 
 // ─── Notifications (spec §6) ──────────────────────────────────────────────

@@ -135,6 +135,17 @@ export const listCheckins = wrap(async (req) => {
 });
 export const grade = wrap(async (req) => svc.submitGrade(req.userId!, req.body ?? {}, todayOf(req)));
 
+// ─── Effort guess (RPE) ──────────────────────────────────────────────────
+export const submitEffort = wrap(async (req) => svc.submitEffort(req.userId!, req.body ?? {}, todayOf(req)), 201);
+export const listEfforts = wrap(async (req) => {
+  const today = todayOf(req);
+  const from = isIsoDate(req.query.from) ? req.query.from : addDays(today, -30);
+  const to = isIsoDate(req.query.to) ? req.query.to : today;
+  return svc.listEfforts(req.userId!, from, to);
+});
+export const getEffort = wrap(async (req) => svc.getEffort(req.userId!, String(req.params.workoutId)));
+export const rateEffort = wrap(async (req) => svc.rateEffort(req.userId!, String(req.params.workoutId), req.body ?? {}, todayOf(req)));
+
 // ─── Coach settings ──────────────────────────────────────────────────────
 export const patchCoachSettings = wrap(async (req) => {
   if (typeof req.body?.user_opt_out !== "boolean") throw new BadRequest("invalid_source");

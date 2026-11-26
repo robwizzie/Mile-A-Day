@@ -105,12 +105,18 @@ const DISTANCE_LABEL: Record<GoalDistance, string> = {
   custom: "race",
 };
 
+export const GOAL_ROLES = ["primary", "secondary"] as const;
+export type GoalRole = (typeof GOAL_ROLES)[number];
 export interface Goal {
   type: GoalType;
   distance?: GoalDistance;
   distance_mi?: number;
   target_s?: number | null;
   weekly_minutes?: number;
+  /** primary drives volume / long run / phases; secondary gets ≤ 1 speed session a week. null = legacy extra (ignored). */
+  role?: GoalRole | null;
+  /** This goal's date; null = as soon as possible. The primary's is the plan's `target_date`. */
+  target_date?: string | null;
 }
 
 export const DAY_KINDS = ["easy", "long", "tempo", "intervals", "race", "calibration", "walk"] as const;
@@ -142,13 +148,17 @@ export const PROPOSAL_KINDS = [
   "post_run",
   "weekly_review",
   "plan_build",
+  "goal_promotion",
+  "effort_fatigue",
+  "effort_progression",
 ] as const;
 export type ProposalKind = (typeof PROPOSAL_KINDS)[number];
 export type Phase = "base" | "build" | "peak" | "taper" | "race" | "rolling" | "cutback" | "return";
-export const SHOE_RUN_TYPES = ["easy", "long", "tempo", "intervals", "race", "walk"] as const;
+/** Shoes are assigned per RUN type only; walk days never get a shoe (spec §2.6). */
+export const SHOE_RUN_TYPES = ["easy", "long", "tempo", "intervals", "race"] as const;
 export type ShoeRunType = (typeof SHOE_RUN_TYPES)[number];
-export const shoeRunTypeFor = (k: DayKind): ShoeRunType =>
-  k === "calibration" ? "race" : (k as ShoeRunType);
+export const shoeRunTypeFor = (k: DayKind): ShoeRunType | null =>
+  k === "walk" ? null : k === "calibration" ? "race" : (k as ShoeRunType);
 
 // ─── Fitness profile (from the phone) ─────────────────────────────────────
 
@@ -418,6 +428,8 @@ export interface DaySpec {
   recover_s?: number | null;
   pace_factor?: number | null;
   strides?: boolean | null;
+  /** "secondary" = the week's one session for the secondary goal (informational). */
+  for_goal?: GoalRole | null;
   note?: string | null;
 }
 
@@ -544,6 +556,7 @@ function validSpec(spec: DaySpec): DaySpec {
     recover_s: n(spec.recover_s, 0, 600, "recover_s"),
     pace_factor: n(spec.pace_factor, 0.85, 1.15, "pace_factor"),
     strides: spec.strides == null ? null : Boolean(spec.strides),
+    for_goal: spec.for_goal === "primary" || spec.for_goal === "secondary" ? spec.for_goal : null,
     note: typeof spec.note === "string" ? spec.note.slice(0, 600) : null,
   };
 }
@@ -696,66 +709,112 @@ export interface PlanSettings {
   pace_factor?: number;
 }
 
+/**
+ * Parse goals. With roles: 1–2 goals, exactly one primary, ≤ 1 secondary.
+ * Legacy (no role anywhere): 1–4 goals, roles assigned by `withRoles`.
+ * `target_date` is kept only when sent (range-checked by the caller, which knows the start date).
+ */
 export function validateGoals(raw: unknown): Goal[] {
   if (!Array.isArray(raw) || raw.length < 1 || raw.length > 4) throw new EngineError("invalid_goals");
   let ji = 0, bc = 0;
-  return raw.map((g: any) => {
+  const out = raw.map((g: any, gi: number) => {
     if (!g || !GOAL_TYPES.includes(g.type)) throw new EngineError("invalid_goals");
+    let goal: Goal;
     if (g.type === "distance_time") {
       if (!GOAL_DISTANCES.includes(g.distance)) throw new EngineError("invalid_goals", { field: "distance" });
-      const out: Goal = { type: "distance_time", distance: g.distance };
+      const o: Goal = { type: "distance_time", distance: g.distance };
       if (g.distance === "custom") {
         const d = Number(g.distance_mi);
         if (!Number.isFinite(d) || d < 0.5 || d > 31.1) throw new EngineError("invalid_goals", { field: "distance_mi" });
-        out.distance_mi = round2(d);
-      } else out.distance_mi = round2(DISTANCE_MI[g.distance as Exclude<GoalDistance, "custom">]);
+        o.distance_mi = round2(d);
+      } else o.distance_mi = round2(DISTANCE_MI[g.distance as Exclude<GoalDistance, "custom">]);
       if (g.target_s != null) {
         const t = Number(g.target_s);
-        if (!Number.isFinite(t) || t / out.distance_mi! < 180 || t / out.distance_mi! > 1800) throw new EngineError("invalid_goals", { field: "target_s" });
-        out.target_s = Math.round(t);
-      } else out.target_s = null;
-      return out;
-    }
-    if (g.type === "just_improve") {
+        if (!Number.isFinite(t) || t / o.distance_mi! < 180 || t / o.distance_mi! > 1800) throw new EngineError("invalid_goals", { field: "target_s" });
+        o.target_s = Math.round(t);
+      } else o.target_s = null;
+      goal = o;
+    } else if (g.type === "just_improve") {
       if (++ji > 1) throw new EngineError("invalid_goals");
-      return { type: "just_improve" };
+      goal = { type: "just_improve" };
+    } else {
+      if (++bc > 1) throw new EngineError("invalid_goals");
+      const m = g.weekly_minutes == null ? 150 : Number(g.weekly_minutes);
+      if (!Number.isFinite(m) || m < 60 || m > 600) throw new EngineError("invalid_goals", { field: "weekly_minutes" });
+      goal = { type: "burn_calories", weekly_minutes: Math.round(m) };
     }
-    if (++bc > 1) throw new EngineError("invalid_goals");
-    const m = g.weekly_minutes == null ? 150 : Number(g.weekly_minutes);
-    if (!Number.isFinite(m) || m < 60 || m > 600) throw new EngineError("invalid_goals", { field: "weekly_minutes" });
-    return { type: "burn_calories", weekly_minutes: Math.round(m) };
+    if (g.role != null) {
+      if (!GOAL_ROLES.includes(g.role)) throw new EngineError("invalid_goals", { field: "role", goal_index: gi });
+      goal.role = g.role;
+    }
+    if (g.target_date !== undefined) {
+      if (g.target_date !== null && !isIsoDate(g.target_date)) throw new EngineError("invalid_target_date", { goal_index: gi });
+      goal.target_date = g.target_date;
+    }
+    return goal;
   });
-}
-
-/** The goal the plan's sessions are shaped around (rule 23). */
-export function focusOf(goals: Goal[]): GoalDistance | "calories" {
-  const dt = goals.filter((g) => g.type === "distance_time");
-  if (dt.length) {
-    // The longest race distance decides the structure; shorter goals ride along.
-    const longest = dt.reduce((a, b) => ((goalDistanceMi(b) ?? 0) > (goalDistanceMi(a) ?? 0) ? b : a));
-    return longest.distance!;
+  if (out.some((g) => g.role != null)) {
+    if (out.length > 2 || out.some((g) => g.role == null)) throw new EngineError("invalid_goals", { field: "role" });
+    if (out.filter((g) => g.role === "primary").length !== 1) throw new EngineError("invalid_goals", { field: "role" });
+    return out;
   }
-  if (goals.some((g) => g.type === "just_improve")) return "5k";
-  return "calories";
+  return withRoles(out);
 }
-const focusDistanceMi = (goals: Goal[]) =>
-  Math.max(0, ...goals.filter((g) => g.type === "distance_time").map((g) => goalDistanceMi(g) ?? 0));
 
-/** Rule 3: hard sessions per week from runs/week, difficulty and experience. */
-export function hardSessionsFor(
-  runsPerWeek: number,
-  difficulty: Difficulty,
-  experience: FitnessProfile["experience"],
-  goals: Goal[],
-): number {
-  let h: number = ({ 1: 0, 2: 1, 3: 2, 4: 3 } as const)[difficulty];
+/** Roles for legacy goal lists: the longest race (else just improve, else calories) is primary, the next goal secondary. */
+export function withRoles(goals: Goal[]): Goal[] {
+  if (goals.some((g) => g.role === "primary")) return goals;
+  let pi = -1;
+  goals.forEach((g, i) => {
+    if (g.type !== "distance_time") return;
+    if (pi < 0 || (goalDistanceMi(g) ?? 0) > (goalDistanceMi(goals[pi]) ?? 0)) pi = i;
+  });
+  if (pi < 0) pi = goals.findIndex((g) => g.type === "just_improve");
+  if (pi < 0) pi = 0;
+  const si = goals.findIndex((_, i) => i !== pi);
+  return goals.map((g, i) => ({ ...g, role: i === pi ? "primary" : i === si ? "secondary" : null }));
+}
+export const primaryGoal = (goals: Goal[]): Goal => withRoles(goals).find((g) => g.role === "primary")!;
+export const secondaryGoal = (goals: Goal[]): Goal | null => withRoles(goals).find((g) => g.role === "secondary") ?? null;
+
+const focusOfGoal = (g: Goal): GoalDistance | "calories" =>
+  g.type === "distance_time" ? g.distance! : g.type === "just_improve" ? "5k" : "calories";
+/** The goal the plan's sessions are shaped around (rule 23): the PRIMARY goal. */
+export function focusOf(goals: Goal[]): GoalDistance | "calories" {
+  return focusOfGoal(primaryGoal(goals));
+}
+const focusDistanceMi = (goals: Goal[]) => {
+  const p = primaryGoal(goals);
+  return p.type === "distance_time" ? goalDistanceMi(p) ?? 0 : 0;
+};
+
+/**
+ * Rule 3: hard sessions per week from RUNS PER WEEK + experience only
+ * (spec §2.3): 1–3 runs → 1, 4–5 → 2, 6–7 → 2 (3 when experienced).
+ * New runners 0 (strides), novices ≤ 1, calorie primary ≤ 1 (rule 22).
+ * Difficulty never changes it (it scales volume: `VOLUME_KNOBS`).
+ */
+export function hardSessionsFor(runsPerWeek: number, experience: FitnessProfile["experience"], goals: Goal[]): number {
+  let h = runsPerWeek <= 3 ? 1 : runsPerWeek <= 5 ? 2 : experience === "experienced" ? 3 : 2;
   if (experience === "new") h = 0; // strides only for a new runner's first 8 weeks
   else if (experience === "novice") h = Math.min(h, 1);
-  const byRuns = runsPerWeek <= 1 ? 0 : runsPerWeek === 2 ? 1 : runsPerWeek <= 5 ? 2 : 3;
-  h = Math.min(h, byRuns, 3);
-  if (focusOf(goals) === "calories") h = Math.min(h, 1); // rule 22
+  if (focusOf(goals) === "calories") h = Math.min(h, 1);
   return h;
 }
+
+/**
+ * What the effort slider (difficulty 1–4) scales — volume only:
+ * `start` first-week volume vs current, `peak` peak weekly volume,
+ * `growth` weekly ramp (rule 5, ≤ 10%), `long` long-run share of its cap
+ * (rule 6 ≤ 30%, rule 23 ≤ 25% for mile/5K), `vo2` / `tempo` work per
+ * session as a share of the week (rule 4 caps: VO2 ≤ 8%, threshold ≤ 10%).
+ */
+export const VOLUME_KNOBS: Record<Difficulty, { start: number; peak: number; growth: number; long: number; vo2: number; tempo: number }> = {
+  1: { start: 0.9, peak: 0.75, growth: 0.05, long: 0.8, vo2: 0.05, tempo: 0.07 },
+  2: { start: 1, peak: 0.9, growth: 0.075, long: 0.9, vo2: 0.06, tempo: 0.08 },
+  3: { start: 1, peak: 1, growth: 0.1, long: 1, vo2: 0.07, tempo: 0.09 },
+  4: { start: 1, peak: 1.15, growth: 0.1, long: 1, vo2: 0.08, tempo: 0.1 },
+};
 
 /** Rule 9 taper length by race distance. */
 export function taperDays(distanceMi: number): number {
@@ -779,32 +838,32 @@ export interface WeekInfo {
 
 /** Rule 5: the next week's increase — smaller of +10% or +2 mi, ≥ +1 under 10 mi/wk, never > 30%. */
 export function rampStep(current: number, difficulty: Difficulty): number {
-  const pct = ({ 1: 0.05, 2: 0.075, 3: 0.1, 4: 0.1 } as const)[difficulty];
+  const pct = VOLUME_KNOBS[difficulty].growth;
   let inc = Math.min(current * pct, 2);
   if (current < 10) inc = Math.max(inc, difficulty === 1 ? 0.5 : 1);
   return Math.min(inc, Math.max(0.5, current * 0.3));
 }
 
 function peakWeekly(s: PlanSettings, start: number, paces: Paces): number {
-  const dfac = ({ 1: 0.75, 2: 0.9, 3: 1, 4: 1.15 } as const)[s.difficulty];
+  const dfac = VOLUME_KNOBS[s.difficulty].peak;
   const focus = focusOf(s.goals);
   let peak: number;
   if (focus === "calories") {
-    const g = s.goals.find((x) => x.type === "burn_calories");
+    const g = primaryGoal(s.goals);
     const minutes = (g?.weekly_minutes ?? 150) * (s.difficulty === 4 ? 1.5 : 1); // stretch 225+
     peak = (minutes * 60) / easyMid(paces);
   } else {
     const byFocus: Record<GoalDistance, number> = { mile: 15, "5k": 20, "10k": 25, half: 30, marathon: 40, custom: 20 };
     peak = byFocus[focus] * dfac;
     if (focus === "custom") peak = Math.max(15, focusDistanceMi(s.goals) * 2.2) * dfac;
-    if (s.goals.some((g) => g.type === "just_improve") && !s.goals.some((g) => g.type === "distance_time")) peak = Math.min(30, Math.max(start * 1.5, 15)) * dfac;
+    if (primaryGoal(s.goals).type === "just_improve") peak = Math.min(30, Math.max(start * 1.5, 15)) * dfac;
   }
   const byRuns = s.runs_per_week * (s.runs_per_week <= 2 ? 5 : 7);
   return Math.max(start, Math.min(peak, byRuns));
 }
 
 export function startWeekly(s: PlanSettings, profile: FitnessProfile | null): number {
-  return Math.max(s.runs_per_week * MIN_RUN_MI, round1(profile?.weekly_miles_4w ?? 0));
+  return Math.max(s.runs_per_week * MIN_RUN_MI, round1((profile?.weekly_miles_4w ?? 0) * VOLUME_KNOBS[s.difficulty].start));
 }
 
 const cutbackEvery = (p: FitnessProfile | null) => ((p?.age ?? 0) >= 50 || p?.experience === "new" ? 3 : 4);
@@ -813,7 +872,7 @@ const cutbackEvery = (p: FitnessProfile | null) => ((p?.age ?? 0) >= 50 || p?.ex
 export function planWeeks(s: PlanSettings, profile: FitnessProfile | null, paces: Paces, through: number): WeekInfo[] {
   const start = startWeekly(s, profile);
   const peak = peakWeekly(s, start, paces);
-  const H = hardSessionsFor(s.runs_per_week, s.difficulty, profile?.experience ?? null, s.goals);
+  const H = hardSessionsFor(s.runs_per_week, profile?.experience ?? null, s.goals);
   const every = cutbackEvery(profile);
   const longOk = s.runs_per_week >= 3 || (s.runs_per_week === 2 && focusDistanceMi(s.goals) >= 6);
   const monday0 = weekStart(s.start_date);
@@ -997,12 +1056,37 @@ export interface GenContext {
 
 export function buildContextFor(g: Pick<GenContext, "settings" | "paces" | "hr">): BuildContext {
   const focus = focusOf(g.settings.goals);
-  const race = g.settings.goals.find((x) => x.type === "distance_time" && x.distance === focus && x.target_s);
+  const prim = primaryGoal(g.settings.goals);
+  const race = prim.type === "distance_time" && prim.target_s ? prim : null;
   const d = race ? goalDistanceMi(race) : null;
   return { paces: g.paces, hr: g.hr, focus, race_pace_s: race && d ? Math.round(race.target_s! / d) : null };
 }
 
 const TEMPO_MAX: Record<string, number> = { mile: 2, "5k": 3, "10k": 4, half: 6, marathon: 8, custom: 4, calories: 2 };
+
+/**
+ * Hard-session sizes for a week of `V` miles (rule 4 caps; difficulty scales
+ * the share: `VOLUME_KNOBS`). Same session count at every difficulty.
+ */
+export function sessionSizes(V: number, focus: GoalDistance | "calories", difficulty: Difficulty, phase: Phase): { tempo_work_mi: number; rep_mi: number; reps: number } {
+  const k = VOLUME_KNOBS[difficulty];
+  const taper = phase === "taper" || phase === "race";
+  const shortFocus = focus === "mile" || focus === "5k" || focus === "calories";
+  const tempoWork = round025(clamp(round025(V * k.tempo), 0.5, TEMPO_MAX[focus] ?? 3) * (taper ? 0.75 : 1));
+  const repMi = focus === "mile" ? 0.25 : shortFocus ? 0.5 : 1;
+  const vo2Work = Math.max(repMi * 3, V * k.vo2);
+  const reps = Math.max(2, clamp(Math.floor(vo2Work / repMi + 1e-9), 3, focus === "mile" ? 12 : shortFocus ? 8 : 6) - (taper ? 1 : 0));
+  return { tempo_work_mi: tempoWork, rep_mi: repMi, reps };
+}
+
+/** The secondary goal's one speed session (spec §2.1): shorter race → its intervals; longer race → a tempo. */
+function secondarySession(sec: Goal, primaryMi: number, V: number, difficulty: Difficulty, phase: Phase, wuMi: number): DaySpec | null {
+  if (sec.type !== "distance_time") return null;
+  const d = goalDistanceMi(sec) ?? 3.1;
+  const sz = sessionSizes(V, sec.distance!, difficulty, phase);
+  if (d < primaryMi) return { kind: "intervals", reps: sz.reps, rep_mi: sz.rep_mi, for_goal: "secondary", note: `Speed for your ${DISTANCE_LABEL[sec.distance!]} goal. Easy days stay easy so this one can be fast.` };
+  return { kind: "tempo", work_mi: sz.tempo_work_mi, distance_mi: round2(sz.tempo_work_mi + 2 * wuMi * 0.75), for_goal: "secondary", note: `Tempo for your ${DISTANCE_LABEL[sec.distance!]} goal: comfortably hard in the middle, easy on both ends.` };
+}
 
 /**
  * Generate plan days for [from, to]. `history` = actual runs before `today`
@@ -1022,7 +1106,8 @@ export function generateDays(
   const hist = [...history];
   const out: { local_date: string; day: Day }[] = [];
   const pf = s.pace_factor ?? 1;
-  const raceGoal = s.goals.find((x) => x.type === "distance_time" && x.distance === bctx.focus);
+  const prim = primaryGoal(s.goals);
+  const raceGoal = prim.type === "distance_time" ? prim : null;
   for (const wk of weeks) {
     const days = generateWeek(g, wk, bctx, hist, pf, raceGoal ?? null, from);
     for (const d of days) {
@@ -1048,24 +1133,32 @@ function generateWeek(
   const meta = (i: number) => ({ phase: wk.phase, week_index: wk.index, flex: lay.slots[i].flex });
   const specs: (DaySpec | null)[] = Array(7).fill(null);
   const wuMi = V >= 15 ? 1 : 0.75;
-  const shortFocus = focus === "mile" || focus === "5k" || focus === "calories";
-  // Hard sessions (rule 4 caps: threshold ≤ 10% of weekly volume, VO2 ≤ 8%).
-  const tempoWork = clamp(round025(V * 0.1), 0.5, TEMPO_MAX[focus] ?? 3) * (wk.phase === "taper" || wk.phase === "race" ? 0.75 : 1);
-  const repMi = focus === "mile" ? 0.25 : shortFocus ? 0.5 : 1;
-  const vo2Work = Math.max(repMi * 3, V * 0.08);
-  const reps = clamp(Math.floor(vo2Work / repMi + 1e-9), 3, focus === "mile" ? 12 : shortFocus ? 8 : 6) - (wk.phase === "taper" || wk.phase === "race" ? 1 : 0);
+  // Hard sessions (rule 4 caps; difficulty scales their size, never their count).
+  const sz = sessionSizes(V, focus, s.difficulty, wk.phase);
   const longCapMin = (LONG_MAX_S / easyMid(g.paces)) | 0;
-  const longShare = focus === "mile" || focus === "5k" ? 0.25 : 0.3;
-  let hardTotal = 0;
+  const longShare = (focus === "mile" || focus === "5k" ? 0.25 : 0.3) * VOLUME_KNOBS[s.difficulty].long;
   for (let i = 0; i < 7; i++) {
     const k = lay.slots[i].kind;
     if (k === "tempo") {
-      specs[i] = { kind: "tempo", work_mi: round025(tempoWork), distance_mi: round2(tempoWork + 2 * wuMi * 0.75) };
+      specs[i] = { kind: "tempo", work_mi: sz.tempo_work_mi, distance_mi: round2(sz.tempo_work_mi + 2 * wuMi * 0.75) };
     } else if (k === "intervals") {
-      specs[i] = { kind: "intervals", reps: Math.max(2, reps), rep_mi: repMi };
+      specs[i] = { kind: "intervals", reps: sz.reps, rep_mi: sz.rep_mi };
     }
-    if (specs[i]) hardTotal += buildDay(specs[i]!, bctx).distance_mi;
   }
+  // Secondary goal: one of the week's hard sessions (≥ 2 hard), else strides on an easy day (below).
+  const sec = secondaryGoal(s.goals);
+  const secOn = sec && sec.type === "distance_time" && wk.phase !== "taper" && wk.phase !== "race";
+  let secStrides = false;
+  if (secOn) {
+    const hardIdx = specs.map((x, i) => (x && isHard(x.kind) ? i : -1)).filter((i) => i >= 0);
+    const ss = secondarySession(sec!, focusDistanceMi(s.goals) || 3.1, V, s.difficulty, wk.phase, wuMi);
+    if (hardIdx.length >= 2 && ss) {
+      const at = hardIdx.find((i) => specs[i]!.kind === ss.kind) ?? hardIdx[hardIdx.length - 1];
+      specs[at] = ss;
+    } else secStrides = true;
+  }
+  let hardTotal = 0;
+  for (let i = 0; i < 7; i++) if (specs[i]) hardTotal += buildDay(specs[i]!, bctx).distance_mi;
   const runSlots = lay.slots.map((x, i) => (x.kind !== "walk" ? i : -1)).filter((i) => i >= 0);
   const longIdx = lay.slots.findIndex((x) => x.kind === "long");
   const easyIdx = runSlots.filter((i) => lay.slots[i].kind === "easy");
@@ -1079,10 +1172,11 @@ function generateWeek(
     remaining -= long;
   }
   const perEasy = coreEasy.length ? Math.max(MIN_RUN_MI, round05(remaining / coreEasy.length)) : 0;
-  const strides = wk.hard === 0 && s.difficulty >= 2;
+  const strides = (wk.hard === 0 && s.difficulty >= 2) || secStrides;
   for (const i of easyIdx) {
     const d = lay.slots[i].flex ? MIN_RUN_MI : longIdx >= 0 ? Math.min(perEasy, Math.max(MIN_RUN_MI, long - 0.5)) : perEasy;
-    specs[i] = { kind: "easy", distance_mi: d, strides: strides && !lay.slots[i].flex && i === coreEasy[0] };
+    const st = strides && !lay.slots[i].flex && i === coreEasy[0];
+    specs[i] = { kind: "easy", distance_mi: d, strides: st, ...(st && secStrides ? { for_goal: "secondary" as const } : {}) };
   }
   if (longIdx >= 0) specs[longIdx] = { kind: "long", distance_mi: long };
   // Calibration (rule 18) in the first week when history is thin.
@@ -1758,25 +1852,400 @@ export interface Checkpoint {
   target_s: number;
   eta_week: number | null;
 }
-export function checkpointsFor(goals: Goal[], vdot: number, difficulty: Difficulty): Checkpoint[] {
+/** Plan-level checkpoints (legacy field): the goals' estimate checkpoints, primary first. */
+export function checkpointsFor(estimates: (GoalEstimate | null)[]): Checkpoint[] {
   const out: Checkpoint[] = [];
-  const gain = 0.002 + 0.001 * difficulty; // fraction of race time per week
-  goals.forEach((g, gi) => {
-    if (g.type !== "distance_time" || !g.target_s) return;
-    const d = goalDistanceMi(g)!;
-    const now = estimateFor(vdot, d);
-    if (g.target_s >= now * 0.92) {
-      out.push({ label: `${DISTANCE_LABEL[g.distance!]} in ${formatDuration(g.target_s)}`, goal_index: gi, target_s: g.target_s, eta_week: Math.ceil(Math.log(g.target_s / now) / Math.log(1 - gain)) });
-      return;
-    }
-    let t = now;
-    for (let k = 0; k < 6 && t > g.target_s; k++) {
-      t = Math.max(g.target_s, Math.floor((t * 0.92) / 60) * 60);
-      const label = t === g.target_s ? `${DISTANCE_LABEL[g.distance!]} in ${formatDuration(t)}` : `sub-${formatDuration(t + (t % 60 === 0 ? 0 : 0)).replace(/:00$/, "")} ${DISTANCE_LABEL[g.distance!]}`;
-      out.push({ label, goal_index: gi, target_s: t, eta_week: Math.ceil(Math.log(t / now) / Math.log(1 - gain)) });
-    }
-  });
+  const order = estimates.map((e, i) => ({ e, i })).filter((x) => x.e).sort((a, b) => (a.e!.role === "primary" ? -1 : 0) - (b.e!.role === "primary" ? -1 : 0));
+  for (const { e, i } of order) for (const c of e!.checkpoints) out.push({ label: c.label, goal_index: i, target_s: c.target_s, eta_week: c.eta_week });
   return out;
+}
+
+// ─── Goal estimates (spec §2.1) ──────────────────────────────────────────
+
+/** The long run a distance needs before it's realistic (endurance limiter). */
+export function longRunNeededMi(g: Goal): number {
+  const d = goalDistanceMi(g) ?? 3.1;
+  const by: Partial<Record<GoalDistance, number>> = { mile: 3, "5k": 5, "10k": 8, half: 11, marathon: 20 };
+  return g.distance && g.distance !== "custom" ? by[g.distance]! : round05(clamp(d * 0.85, 3, 20));
+}
+/** ≤ 1 VDOT point per 2–3 weeks of training, plus a cutback every 4th week. */
+export const WEEKS_PER_VDOT: [number, number] = [(2 * 4) / 3, (3 * 4) / 3];
+const CHECKPOINT_STEP_S: Record<GoalDistance, number> = { mile: 15, "5k": 60, "10k": 60, half: 300, marathon: 300, custom: 60 };
+
+/** Weeks to grow the longest run from `from` to `to` under the 10% single-run spike rule (one step a week, cutback every 4th). */
+export function enduranceWeeks(from: number | null, to: number): [number, number] {
+  const l = Math.max(1, from ?? 1);
+  if (l >= to - 0.05) return [0, 0];
+  const steps = Math.ceil(Math.log(to / l) / Math.log(SPIKE_FACTOR) - 1e-9);
+  const w = steps + Math.floor(steps / 3);
+  return [w, w + 2];
+}
+/** Weeks to gain the VDOT a target needs. */
+export function speedWeeks(vdotNow: number, vdotNeeded: number | null): [number, number] {
+  if (vdotNeeded == null || vdotNeeded <= vdotNow + 0.05) return [0, 0];
+  const gap = vdotNeeded - vdotNow;
+  return [Math.ceil(gap * WEEKS_PER_VDOT[0]), Math.ceil(gap * WEEKS_PER_VDOT[1])];
+}
+
+export interface GoalAchievement {
+  workout_id: string | null;
+  local_date: string;
+  seconds: number;
+}
+/** A counted run (≥ the distance, pace × distance ≤ target) or a profile best effort since `since`. */
+export function goalAchievement(g: Goal, runs: ActualRun[], profile: FitnessProfile | null, since: string): GoalAchievement | null {
+  if (g.type !== "distance_time") return null;
+  const d = goalDistanceMi(g);
+  if (!d) return null;
+  let best: GoalAchievement | null = null;
+  for (const r of runs) {
+    if (r.local_date < since || r.distance_mi < d * 0.99 || !(r.distance_mi > 0)) continue;
+    const secs = Math.round(((r.moving_s ?? r.duration_s) * d) / r.distance_mi);
+    if (g.target_s != null && secs > g.target_s) continue;
+    if (!best || secs < best.seconds) best = { workout_id: r.workout_id, local_date: r.local_date, seconds: secs };
+  }
+  for (const e of profile?.best_efforts ?? []) {
+    const ed = e.distance === "custom" ? e.distance_mi ?? null : DISTANCE_MI[e.distance];
+    if (!ed || Math.abs(ed - d) > 0.02 || !e.date || e.date < since) continue;
+    if (g.target_s != null && e.seconds > g.target_s) continue;
+    if (!best || e.seconds < best.seconds) best = { workout_id: null, local_date: e.date, seconds: Math.round(e.seconds) };
+  }
+  return best;
+}
+
+export interface GoalEstimate {
+  goal_index: number;
+  role: GoalRole | null;
+  now_s: number | null;
+  now_label: string | null;
+  target_s: number | null;
+  limiter: "speed" | "endurance" | null;
+  speed_weeks: [number, number] | null;
+  endurance_weeks: [number, number] | null;
+  weeks: [number, number] | null;
+  projected_date: string | null;
+  projected_date_range: [string, string] | null;
+  feasibility: "on_track" | "stretch" | "unlikely" | "achieved" | null;
+  weeks_available: number | null;
+  vdot_now: number | null;
+  vdot_needed: number | null;
+  longest_run_mi: number | null;
+  long_run_needed_mi: number | null;
+  checkpoints: { label: string; target_s: number; eta_week: number; eta_date: string }[];
+  achieved: boolean;
+  achieved_at: string | null;
+  achieved_by: GoalAchievement | null;
+  text: string;
+}
+
+const weeksText = (w: [number, number]) => (w[0] === w[1] ? `${w[0]} week${w[0] === 1 ? "" : "s"}` : `${w[0]}–${w[1]} weeks`);
+const shortLabel = (g: Goal) => (g.distance === "custom" ? `${fmtMi(goalDistanceMi(g) ?? 0)} mi` : g.distance === "half" ? "half" : DISTANCE_LABEL[g.distance!]);
+
+/**
+ * Per-goal estimate from the fitness numbers (code, never the model):
+ * speed = VDOT gap (≤ 1 point per 2–3 weeks), endurance = longest run up to
+ * `longRunNeededMi` under the 10% spike rule; the larger is the limiter.
+ */
+export function goalEstimate(
+  g: Goal,
+  index: number,
+  ctx: { vdot: number; profile: FitnessProfile | null; today: string; easy_pace_s: number; achieved?: GoalAchievement | null },
+): GoalEstimate {
+  const base: GoalEstimate = {
+    goal_index: index, role: g.role ?? null, now_s: null, now_label: null, target_s: g.target_s ?? null, limiter: null,
+    speed_weeks: null, endurance_weeks: null, weeks: null, projected_date: null, projected_date_range: null, feasibility: null,
+    weeks_available: g.target_date ? Math.max(0, Math.floor(dayDiff(ctx.today, g.target_date) / 7)) : null,
+    vdot_now: round1(ctx.vdot), vdot_needed: null, longest_run_mi: null, long_run_needed_mi: null, checkpoints: [],
+    achieved: false, achieved_at: null, achieved_by: null, text: "",
+  };
+  const dated = (w: [number, number]) => {
+    const mid = (w[0] + w[1]) / 2;
+    base.weeks = w;
+    base.projected_date = addDays(ctx.today, Math.round(mid * 7));
+    base.projected_date_range = [addDays(ctx.today, w[0] * 7), addDays(ctx.today, w[1] * 7)];
+    if (g.target_date) base.feasibility = w[1] <= base.weeks_available! ? "on_track" : w[0] <= base.weeks_available! ? "stretch" : "unlikely";
+  };
+  if (g.type === "just_improve") {
+    base.text = "Rolling 4-week blocks that build, with a retest every 6–8 weeks.";
+    return base;
+  }
+  if (g.type === "burn_calories") {
+    const target = g.weekly_minutes ?? 150;
+    const now = Math.round(((ctx.profile?.weekly_miles_4w ?? 0) * ctx.easy_pace_s) / 60);
+    base.now_label = `${now} min a week now`;
+    const w: [number, number] = now >= target ? [0, 0] : (() => {
+      const steps = Math.ceil(Math.log(target / Math.max(30, now)) / Math.log(1.1) - 1e-9);
+      const x = steps + Math.floor(steps / 3);
+      return [x, x + 2] as [number, number];
+    })();
+    dated(w);
+    base.text = w[1] === 0 ? `You're already moving ${now} minutes a week. The plan keeps you at ${target}+.` : `${now} → ${target} minutes a week in about ${weeksText(w)}.`;
+    return base;
+  }
+  const d = goalDistanceMi(g)!;
+  const now = estimateFor(ctx.vdot, d);
+  base.now_s = now;
+  const est5k = estimateFor(ctx.vdot, DISTANCE_MI["5k"]);
+  const lbl = shortLabel(g);
+  base.now_label = g.distance === "5k" ? `5K ${formatDuration(est5k)} now` : `5K ${formatDuration(est5k)} ≈ ${lbl} ${formatDuration(now)}`;
+  const vNeed = g.target_s ? round1(vdotFromRace(d, g.target_s)) : null;
+  base.vdot_needed = vNeed;
+  const longest = ctx.profile?.longest_run_30d_mi ?? ctx.profile?.longest_run_mi ?? null;
+  base.longest_run_mi = longest;
+  const need = longRunNeededMi(g);
+  base.long_run_needed_mi = need;
+  const sw = speedWeeks(ctx.vdot, vNeed);
+  const ew = enduranceWeeks(longest, need);
+  base.speed_weeks = sw;
+  base.endurance_weeks = ew;
+  const w: [number, number] = [Math.max(sw[0], ew[0]), Math.max(sw[1], ew[1])];
+  base.limiter = w[1] === 0 ? null : sw[1] >= ew[1] ? "speed" : "endurance";
+  dated(w);
+  // Checkpoints for far speed goals: evenly spaced in VDOT, rounded up to a whole step.
+  if (vNeed != null && sw[1] > 0) {
+    const n = Math.min(3, Math.floor((sw[0] + sw[1]) / 2 / 20));
+    const step = CHECKPOINT_STEP_S[g.distance!];
+    const seen = new Set<number>();
+    for (let k = 1; k <= n; k++) {
+      const v = ctx.vdot + ((vNeed - ctx.vdot) * k) / (n + 1);
+      const t = Math.ceil(raceTimeFor(v, d) / step) * step;
+      if (t >= now || t <= g.target_s! || seen.has(t)) continue;
+      seen.add(t);
+      const cv = vdotFromRace(d, t - 1);
+      const eta = Math.ceil((cv - ctx.vdot) * ((WEEKS_PER_VDOT[0] + WEEKS_PER_VDOT[1]) / 2));
+      base.checkpoints.push({ label: `sub-${formatDuration(t).replace(/:00$/, "")} ${DISTANCE_LABEL[g.distance!] === "half marathon" ? "half" : DISTANCE_LABEL[g.distance!]}`, target_s: t, eta_week: eta, eta_date: addDays(ctx.today, eta * 7) });
+    }
+  }
+  const a = ctx.achieved ?? null;
+  if (a) {
+    base.achieved = true;
+    base.achieved_at = a.local_date;
+    base.achieved_by = a;
+    if (g.target_date) base.feasibility = "achieved";
+  }
+  const goalTxt = g.target_s ? `${lbl} in ${formatDuration(g.target_s)}` : `the ${lbl}`;
+  if (a) base.text = `Done: ${goalTxt} on ${a.local_date} (${formatDuration(a.seconds)}).`;
+  else if (base.limiter == null) base.text = `You're ready for ${goalTxt} now (${base.now_label}).`;
+  else if (base.limiter === "endurance")
+    base.text = `${sw[1] === 0 ? `Your speed is already there (${base.now_label}). ` : ""}The gap is distance: longest run ${longest != null ? `${fmtMi(longest)} mi` : "unknown"}, the plan builds it to ${fmtMi(need)} mi. About ${weeksText(w)}.`;
+  else {
+    const big = w[0] >= 26 ? `a big jump: roughly ${Math.round(w[0] / 4.35)}–${Math.round(w[1] / 4.35)} months` : `about ${weeksText(w)}`;
+    base.text = `From ~${formatDuration(now)} this is ${big}.${base.checkpoints.length ? ` Checkpoints: ${base.checkpoints.map((c) => c.label.split(" ")[0]).join(", then ")}.` : ""}`;
+  }
+  if (g.target_date && !a) base.text += base.feasibility === "on_track" ? " On track for your date." : base.feasibility === "stretch" ? " Your date is a stretch." : " Your date looks too soon for this.";
+  return base;
+}
+
+// ─── Volume summary (what the effort slider means; spec §2.3) ───────────
+
+export interface VolumeInfo {
+  difficulty: Difficulty;
+  label: string;
+  weekly_growth_pct: number;
+  long_run_target_mi: number | null;
+  easy_day_mi: [number, number] | null;
+  interval_reps: number | null;
+  tempo_work_mi: number | null;
+  text: string;
+}
+export function volumeInfo(g: GenContext, weekIndex: number): VolumeInfo {
+  const s = g.settings;
+  const weeks = planWeeks(s, g.profile, g.paces, Math.max(weekIndex + 1, 26));
+  const wk = weeks[Math.min(weekIndex, weeks.length - 1)];
+  const focus = focusOf(s.goals);
+  const k = VOLUME_KNOBS[s.difficulty];
+  const peakV = Math.max(...weeks.map((w) => w.volume_mi));
+  const longShare = (focus === "mile" || focus === "5k" ? 0.25 : 0.3) * k.long;
+  const longCap = (LONG_MAX_S / easyMid(g.paces)) | 0;
+  const longOk = weeks.some((w) => w.long) && s.runs_per_week >= 2;
+  const longTarget = longOk ? Math.max(2, round05(Math.min(peakV * longShare, longCap))) : null;
+  const days = wk ? generateDays(g, wk.monday, addDays(wk.monday, 6), []).map((d) => d.day) : [];
+  const easy = days.filter((d) => d.kind === "easy" && !d.flex).map((d) => d.distance_mi);
+  const sz = sessionSizes(wk?.volume_mi ?? 0, focus, s.difficulty, wk?.phase ?? "rolling");
+  const hasIv = days.some((d) => d.kind === "intervals");
+  const hasTempo = days.some((d) => d.kind === "tempo");
+  const label = DIFFICULTY_LABEL[s.difficulty];
+  const parts = [`weekly miles grow up to ~${Math.round(k.growth * 100)}% a week`];
+  if (longTarget) parts.push(`long run builds to ${fmtMi(longTarget)} mi`);
+  if (easy.length) parts.push(`easy days ${fmtMi(Math.min(...easy))}${Math.max(...easy) > Math.min(...easy) ? `–${fmtMi(Math.max(...easy))}` : ""} mi`);
+  if (hasIv) parts.push(`intervals ${sz.reps} × ${repLabel(sz.rep_mi)}`);
+  else if (hasTempo) parts.push(`tempo ${fmtMi(sz.tempo_work_mi)} mi`);
+  return {
+    difficulty: s.difficulty,
+    label,
+    weekly_growth_pct: Math.round(k.growth * 1000) / 10,
+    long_run_target_mi: longTarget,
+    easy_day_mi: easy.length ? [Math.min(...easy), Math.max(...easy)] : null,
+    interval_reps: hasIv ? sz.reps : null,
+    tempo_work_mi: hasTempo ? sz.tempo_work_mi : null,
+    text: `${label}: ${parts.join(", ")}.`,
+  };
+}
+
+// ─── Effort guess (RPE) and learning (spec §9) ───────────────────────────
+
+export const EFFORT_TYPES = ["easy", "long", "quality"] as const;
+export type EffortType = (typeof EFFORT_TYPES)[number];
+export const effortTypeFor = (k: string): EffortType | null =>
+  k === "walk" ? null : k === "easy" ? "easy" : k === "long" ? "long" : "quality";
+export const EFFORT_MIN_SAMPLES = 3;
+export const EFFORT_ALPHA = 0.3;
+export const EFFORT_MAX_OFFSET = 4;
+/** Rated this far from the guess counts as a signal (fatigue above, progression below). */
+export const EFFORT_SIGNAL_DELTA = 2;
+
+export interface EffortFeatures {
+  has_hr: boolean | null;
+  avg_hr: number | null;
+  peak_hr: number | null;
+  avg_hr_zone: number | null;
+  peak_hr_zone: number | null;
+  time_in_zones_s: number[] | null;
+  avg_pace_s: number | null;
+  predicted_pace_s: number | null;
+  pace_vs_predicted_pct: number | null;
+  hr_drift_pct: number | null;
+  duration_s: number | null;
+  walk_fraction: number | null;
+}
+export function normalizeEffortFeatures(raw: unknown): EffortFeatures {
+  if (raw != null && (typeof raw !== "object" || Array.isArray(raw))) throw new EngineError("invalid_effort", { field: "features" });
+  if (JSON.stringify(raw ?? {}).length > 4096) throw new EngineError("invalid_effort", { field: "features" });
+  const r = (raw ?? {}) as Record<string, unknown>;
+  const n = (k: string, lo: number, hi: number) => {
+    const v = r[k];
+    if (v == null) return null;
+    const x = Number(v);
+    if (!Number.isFinite(x) || x < lo || x > hi) throw new EngineError("invalid_effort", { field: k });
+    return Math.round(x * 100) / 100;
+  };
+  let zones: number[] | null = null;
+  if (r.time_in_zones_s != null) {
+    if (!Array.isArray(r.time_in_zones_s) || r.time_in_zones_s.length !== 5) throw new EngineError("invalid_effort", { field: "time_in_zones_s" });
+    zones = r.time_in_zones_s.map((x) => {
+      const v = Number(x);
+      if (!Number.isFinite(v) || v < 0 || v > 86_400) throw new EngineError("invalid_effort", { field: "time_in_zones_s" });
+      return Math.round(v);
+    });
+  }
+  return {
+    has_hr: r.has_hr == null ? null : Boolean(r.has_hr),
+    avg_hr: n("avg_hr", 30, 240),
+    peak_hr: n("peak_hr", 30, 240),
+    avg_hr_zone: n("avg_hr_zone", 0, 5),
+    peak_hr_zone: n("peak_hr_zone", 0, 5),
+    time_in_zones_s: zones,
+    avg_pace_s: n("avg_pace_s", 120, 3600),
+    predicted_pace_s: n("predicted_pace_s", 120, 3600),
+    pace_vs_predicted_pct: n("pace_vs_predicted_pct", -60, 200),
+    hr_drift_pct: n("hr_drift_pct", -50, 100),
+    duration_s: n("duration_s", 0, 86_400),
+    walk_fraction: n("walk_fraction", 0, 1),
+  };
+}
+
+export interface Calibration {
+  effort_type: EffortType;
+  offset: number;
+  samples: number;
+  applied: boolean;
+}
+/** EWMA (α 0.3) of rating − raw guess over rated runs, oldest first; applied from 3 samples. */
+export function calibrationFrom(type: EffortType, rated: { raw_guess: number; user_rating: number }[]): Calibration {
+  let off = 0;
+  rated.forEach((r, i) => {
+    const d = r.user_rating - r.raw_guess;
+    off = i === 0 ? d : EFFORT_ALPHA * d + (1 - EFFORT_ALPHA) * off;
+  });
+  off = Math.round(clamp(off, -EFFORT_MAX_OFFSET, EFFORT_MAX_OFFSET) * 10) / 10;
+  return { effort_type: type, offset: rated.length ? off : 0, samples: rated.length, applied: rated.length >= EFFORT_MIN_SAMPLES };
+}
+export function servedGuess(raw: number, cal: Calibration | null): { offset: number; guess: number } {
+  const offset = cal?.applied ? cal.offset : 0;
+  return { offset, guess: clamp(Math.round(raw + offset), 1, 10) };
+}
+export function rpeLabel(n: number): string {
+  return n <= 2 ? "very easy" : n <= 4 ? "easy" : n <= 6 ? "moderate" : n <= 8 ? "hard" : n === 9 ? "very hard" : "max";
+}
+/** One-line "why" for the guess, from the phone's features (template, not a model). */
+export function effortReason(f: EffortFeatures, runType: string): string {
+  const parts: string[] = [];
+  if (f.has_hr !== false && f.peak_hr_zone != null && f.avg_hr_zone != null) {
+    const hard = runType !== "easy" && runType !== "long";
+    if (hard && f.peak_hr_zone >= 4) parts.push(`HR reached zone ${Math.floor(f.peak_hr_zone)}${hard ? " on the hard parts" : ""}`);
+    else parts.push(`HR averaged zone ${Math.max(1, Math.round(f.avg_hr_zone))}`);
+  } else if (f.has_hr === false) parts.push("No heart rate, so this is from pace and time");
+  if (f.pace_vs_predicted_pct != null && Math.abs(f.pace_vs_predicted_pct) >= 3)
+    parts.push(`pace was ${Math.round(Math.abs(f.pace_vs_predicted_pct))}% ${f.pace_vs_predicted_pct < 0 ? "faster" : "slower"} than your fitness predicts`);
+  if (f.hr_drift_pct != null && f.hr_drift_pct >= 5) parts.push(`HR drifted up ${Math.round(f.hr_drift_pct)}%`);
+  if (f.walk_fraction != null && f.walk_fraction >= 0.15) parts.push(`${Math.round(f.walk_fraction * 100)}% walking`);
+  if (!parts.length && f.duration_s) parts.push(`${Math.round(f.duration_s / 60)} minutes at a steady effort`);
+  const t = parts.join(", ");
+  return t ? `${t[0].toUpperCase()}${t.slice(1)}.` : "From the run's pace and time.";
+}
+
+export interface RatedEffort {
+  workout_id: string;
+  local_date: string;
+  effort_type: EffortType;
+  guess: number;
+  user_rating: number;
+}
+/** 3 of the last 4 rated runs of `type` at ≤ guess − 2 (newest first input). */
+export function progressionSignal(recentNewestFirst: RatedEffort[], type: EffortType): boolean {
+  const last4 = recentNewestFirst.filter((r) => r.effort_type === type).slice(0, 4);
+  return last4.filter((r) => r.user_rating <= r.guess - EFFORT_SIGNAL_DELTA).length >= 3;
+}
+
+/** Rated ≥ 2 harder than guessed → ease the next hard day in the coming 7 days (proposal only). */
+export function effortFatigueProposal(ctx: AdaptContext, rated: RatedEffort): ProposalDraft | null {
+  if (rated.user_rating < rated.guess + EFFORT_SIGNAL_DELTA) return null;
+  const next = dateRange(addDays(ctx.today, 1), addDays(ctx.today, 7)).find((d) => {
+    const x = ctx.days.get(d);
+    return x?.is_hard && (x.kind === "tempo" || x.kind === "intervals") && !ctx.pendingDates.has(d);
+  });
+  if (!next) return null;
+  const day = ctx.days.get(next)!;
+  const pf = clamp(round2((day.spec.pace_factor ?? 1) * 1.03), 0.85, 1.15);
+  const after =
+    day.kind === "intervals"
+      ? rebuild(day, { reps: Math.max(2, Math.round((day.spec.reps ?? 4) * 0.75)), distance_mi: null, pace_factor: pf }, ctx.bctx)
+      : rebuild(day, { work_mi: Math.max(0.5, round025((day.spec.work_mi ?? 1) * 0.75)), distance_mi: null, pace_factor: pf }, ctx.bctx);
+  return {
+    kind: "effort_fatigue",
+    title: `Lighter ${weekdayName(next)}: ${after.title}`,
+    reason: `You rated ${weekdayName(rated.local_date)}'s run ${rated.user_rating}/10, harder than the ${rated.guess}/10 it looked like. ${weekdayName(next)}'s session gets a little lighter.`,
+    changes: [{ local_date: next, after }],
+    goal_impact: null,
+    deviation_reason: null,
+    dedupe_key: `effort_fatigue:${rated.workout_id}`,
+  };
+}
+
+/** Repeatedly easier than guessed → paces 3% faster for 14 days (rule 20 step), plan-wide via `plan_patch`. */
+export function effortProgressionProposal(ctx: AdaptContext, type: EffortType, lastWorkoutId: string): ProposalDraft | null {
+  const step = -0.03;
+  const changes: ProposedChange[] = [];
+  for (const d of dateRange(addDays(ctx.today, 1), addDays(ctx.today, 14))) {
+    const day = ctx.days.get(d);
+    if (!day || day.kind === "walk" || day.kind === "race" || ctx.pendingDates.has(d)) continue;
+    const pf = clamp(round2((day.spec.pace_factor ?? 1) * (1 + step)), 0.85, 1.15);
+    if (pf === (day.spec.pace_factor ?? 1)) continue;
+    changes.push({ local_date: d, after: rebuild(day, { pace_factor: pf }, ctx.bctx) });
+  }
+  if (!changes.length) return null;
+  const est = estimateFor(ctx.bctx.paces.vdot, 3.10686);
+  const what = type === "quality" ? "hard sessions" : type === "long" ? "long runs" : "easy runs";
+  return {
+    kind: "effort_progression",
+    title: "Faster paces: it's feeling easier",
+    reason: `3 of your last 4 ${what} felt at least 2 points easier than they looked. Paces move 3% faster for the next two weeks.`,
+    changes,
+    goal_impact: { label: "5K estimate", before_s: est, after_s: Math.round(est * (1 + step)) },
+    deviation_reason: null,
+    dedupe_key: `effort_prog:${lastWorkoutId}`,
+    plan_patch: { pace_factor: round2(clamp((ctx.settings.pace_factor ?? 1) * (1 + step), 0.85, 1.15)) },
+  };
 }
 
 // ─── Coach "options" (the tool the model picks from) ──────────────────────
@@ -1863,7 +2332,9 @@ HARD rules (code rejects any proposal that breaks them):
 Conventions (you may deviate with a stated reason):
 1 Phases: base (>=4 wk) -> build -> peak (2-3 wk) -> taper. Pyramidal (more threshold) in build, polarized near the race. No date or "just improve": rolling 3-up/1-down, retest every 6-8 weeks.
 2 Cutback every 4th week (3rd for age 50+, injury history, first 12 weeks of running): volume -25%, keep one short quality session.
-3 >=80% of running time easy. Hard sessions/week: 0 for a new runner's first 8 weeks (strides only), 1 novice, 2 experienced, cap 3. >=1 easy or walk day between hard days.
+3 >=80% of running time easy. Hard sessions/week come from runs/week: 1-3 runs -> 1, 4-5 -> 2, 6-7 -> 2 (3 if experienced); 0 for a new runner's first 8 weeks (strides only), max 1 novice. >=1 easy or walk day between hard days. The effort setting (1-4) scales volume only (weekly growth, long run, easy-day length, reps), never the number of hard days.
+Goals: the PRIMARY goal drives volume, long run and phases; the SECONDARY gets at most one compatible speed session a week inside the hard-session count (or strides when there is only 1 hard session). Estimates and checkpoints come from the tools (goals[].estimate).
+Effort ratings (RPE 1-10): the runner corrects the guessed effort after a run. Rated >=2 harder than guessed = a fatigue signal; repeatedly >=2 easier on one run type = a progression signal. Both may only lead to proposals.
 4 Quality caps: threshold <=10% of weekly volume, VO2max intervals <=8%, reps <=5%.
 5 Weekly progression: smaller of +10% or +2 mi; at least +1 mi/week under 10 mi/week; never >30%.
 6 Long run <=30% of weekly volume and <=150 min.

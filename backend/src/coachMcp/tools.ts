@@ -23,6 +23,7 @@ import {
   getDays,
   getProfile,
   getRuns,
+  listEfforts,
   listCheckins,
   listProposals,
 } from "../services/runPlans/runPlanService.js";
@@ -185,7 +186,8 @@ export function buildCoachServer(auth: AuthInfo): McpServer {
       title: "Runs",
       description:
         "The runner's counted runs in [from, to] (≤ 120 days; default the last 28 days): local date, distance, " +
-        "duration, moving time and per-mile splits. include_walks adds walks and hikes.",
+        "duration, moving time and per-mile splits. include_walks adds walks and hikes. `efforts` = post-run effort " +
+        "guesses (RPE 1–10) and the runner's own rating per workout; `effort_calibration` = how far their ratings sit from the guesses per run type.",
       inputSchema: { today: todayParam, from: date().optional(), to: date().optional(), include_walks: z.boolean().optional() },
       annotations: read,
     },
@@ -196,7 +198,8 @@ export function buildCoachServer(auth: AuthInfo): McpServer {
         const today = await resolveToday(userId, args.today);
         const to = args.to ?? today;
         const from = args.from ?? addDays(to, -27);
-        return { from, to, runs: await getRuns(userId, from, to, args.include_walks === true) };
+        const [runs, eff] = await Promise.all([getRuns(userId, from, to, args.include_walks === true), listEfforts(userId, from, to)]);
+        return { from, to, runs, efforts: eff.efforts, effort_calibration: eff.calibration };
       }),
   );
 
