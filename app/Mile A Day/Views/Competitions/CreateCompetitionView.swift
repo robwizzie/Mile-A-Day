@@ -28,6 +28,11 @@ struct CreateCompetitionView: View {
     /// answered all of them and the only remaining question is who to invite.
     var startsCollapsed: Bool = false
 
+    /// Push the friend picker as soon as friends load, when no friend was
+    /// pre-selected. Set by the new-user starter card's "Pick a friend": the
+    /// preset is already chosen, so "who" is the first and only question.
+    var opensFriendPicker: Bool = false
+
     // Form fields
     @State private var selectedFriends: Set<BackendUser> = []
     @State private var selectedType: CompetitionType = .apex
@@ -67,6 +72,9 @@ struct CreateCompetitionView: View {
     /// Whether the collapsed option sections are expanded. Starts open unless
     /// the quick-start path asked for them closed.
     @State private var showAdvanced = false
+    /// One-shot guard for `opensFriendPicker`: `.task` re-runs when the
+    /// pushed picker pops back, and re-pushing it would trap the user there.
+    @State private var friendPickerAutoOpened = false
 
     var canCreate: Bool {
         !selectedFriends.isEmpty &&
@@ -254,6 +262,13 @@ struct CreateCompetitionView: View {
                         // non-Void and "unused").
                         _ = selectedFriends.insert(friend)
                     }
+                }
+                await MainActor.run {
+                    guard opensFriendPicker, !friendPickerAutoOpened,
+                          preselectedFriend == nil, selectedFriends.isEmpty
+                    else { return }
+                    friendPickerAutoOpened = true
+                    showFriendPicker = true
                 }
             }
             // One-shot: `onAppear` re-fires whenever a pushed destination

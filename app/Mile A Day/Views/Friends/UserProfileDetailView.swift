@@ -97,9 +97,17 @@ struct UserProfileDetailView: View {
     @State private var flameyUnavailable = false
 
     // Compete-together sheet — opens CreateCompetitionView with this friend
-    // pre-selected. Sheet state lives here so the CTA can present the
-    // standard NavigationStack-wrapped form modal.
-    @State private var showCompeteSheet = false
+    // pre-selected (and, from the Streak Standoff pill, that preset applied).
+    // Sheet state lives here so the CTAs can present the standard
+    // NavigationStack-wrapped form modal.
+    @State private var competeRequest: CompeteRequest?
+
+    struct CompeteRequest: Identifiable {
+        let id = UUID()
+        /// Nil = the plain "Compete" form; a preset = the one-tap path, its
+        /// options collapsed so the only step left is Create.
+        let preset: CompetitionPreset?
+    }
 
     // Section tabs — break up the previously long vertical list into
     // focused views. Same tab grammar as own ProfileView so navigating
@@ -210,12 +218,14 @@ struct UserProfileDetailView: View {
                 owner: RouteArtAvatar(name: user.displayName, imageURL: user.profile_image_url)
             )
         }
-        .sheet(isPresented: $showCompeteSheet) {
+        .sheet(item: $competeRequest) { request in
             CreateCompetitionView(
                 onCreated: { _ in
-                    showCompeteSheet = false
+                    competeRequest = nil
                 },
-                preselectedFriend: user
+                preselectedFriend: user,
+                preset: request.preset,
+                startsCollapsed: request.preset != nil
             )
         }
         .sheet(isPresented: $showPureFlameInfo) {
@@ -773,12 +783,29 @@ struct UserProfileDetailView: View {
         }()
 
         VStack(spacing: 8) {
-            HStack(spacing: 8) {
-                if nudgeIsAvailable {
-                    nudgeProfileButton
+            // Still ONE row whenever it fits. With Nudge showing too, four
+            // controls don't fit most widths at their full labels, so the
+            // Standoff pill drops to its own full-width line rather than
+            // squeezing every label (320pt SE/mini through 440pt Pro Max).
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) {
+                    if nudgeIsAvailable {
+                        nudgeProfileButton
+                    }
+                    streakStandoffButton
+                    competeTogetherButton
+                    moreMenu
                 }
-                competeTogetherButton
-                moreMenu
+                VStack(spacing: 8) {
+                    HStack(spacing: 8) {
+                        if nudgeIsAvailable {
+                            nudgeProfileButton
+                        }
+                        competeTogetherButton
+                        moreMenu
+                    }
+                    streakStandoffButton
+                }
             }
             saveStreakChip
         }
@@ -836,6 +863,38 @@ struct UserProfileDetailView: View {
         }
     }
 
+    // MARK: - Streak Standoff
+
+    /// One tap to the Streak Standoff form with this friend already in it and
+    /// the preset's options collapsed: the next tap is Create. The plain
+    /// "Compete" pill beside it still opens the full form.
+    private var streakStandoffButton: some View {
+        Button {
+            MADHaptics.tap()
+            competeRequest = CompeteRequest(preset: .streakStandoff)
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "flame.fill")
+                    .madFont(size: 11, weight: .bold, maxScale: 1.5)
+                Text("Streak Standoff")
+                    .madFont(size: 12, weight: .bold, design: .rounded)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+            }
+            .foregroundColor(MADTheme.Colors.madRed)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 9)
+            .frame(maxWidth: .infinity)
+            .background(
+                Capsule()
+                    .fill(MADTheme.Colors.madRed.opacity(0.1))
+                    .overlay(Capsule().strokeBorder(MADTheme.Colors.madRed.opacity(0.45), lineWidth: 1))
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint(Text("Starts a Streak Standoff with \(user.displayName)"))
+    }
+
     // MARK: - Compete Together
 
     private var competeTogetherButton: some View {
@@ -846,7 +905,7 @@ struct UserProfileDetailView: View {
         // without overwhelming the profile header.
         Button {
             MADHaptics.tap()
-            showCompeteSheet = true
+            competeRequest = CompeteRequest(preset: nil)
         } label: {
             HStack(spacing: 5) {
                 Image(systemName: "trophy.fill")
