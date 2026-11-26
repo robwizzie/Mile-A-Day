@@ -145,7 +145,8 @@ export async function checkRoleBoundary(kind: Kind): Promise<string | null> {
              has_schema_privilege('public', 'CREATE') AS can_create,
              (SELECT count(*)::int FROM pg_class
                WHERE relnamespace = 'public'::regnamespace AND relkind = 'r'
-                 AND relname LIKE 'mcp\\_%' AND NOT relrowsecurity) AS unprotected,
+                 AND (relname LIKE 'mcp\\_%' OR relname LIKE 'coach\\_mcp\\_%')
+                 AND NOT relrowsecurity) AS unprotected,
              current_setting('track_counts')::boolean AS track_counts,
              -- CASE, not AND: the planner may test a non-sequence first, and that errors.
              (SELECT count(*)::int FROM pg_class
@@ -210,6 +211,24 @@ async function auditFinish(
       [id, out.rowCount, out.committed, out.error, Date.now() - started, out.changes ? JSON.stringify(out.changes) : null],
     )
     .catch((err) => console.error("[mcp] audit finish failed", err));
+}
+
+/**
+ * Run-plan tools (runPlanTools.ts) go through the app's services, not SQL, but
+ * are audited the same way: the row is written BEFORE the call runs (no audit
+ * row, no call), with the tool's arguments as the statement.
+ */
+export async function audited<T>(caller: Caller, tool: string, args: unknown, write: boolean, fn: () => Promise<T>): Promise<T> {
+  const id = await auditStart(caller, tool, JSON.stringify(args ?? {}).slice(0, 20_000), write);
+  const started = Date.now();
+  try {
+    const out = await fn();
+    await auditFinish(id, started, { rowCount: null, committed: write, error: null });
+    return out;
+  } catch (err) {
+    await auditFinish(id, started, { rowCount: null, committed: false, error: errorText(err) });
+    throw err;
+  }
 }
 
 /**

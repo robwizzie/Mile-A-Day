@@ -18,9 +18,25 @@ export async function getData<T>(path: string): Promise<T> {
 }
 
 /** POST an admin action; surfaces the backend's error message on failure. */
-export async function postData<T>(path: string, json?: unknown): Promise<T> {
+export function postData<T>(path: string, json?: unknown): Promise<T> {
+  return sendData<T>("POST", path, json);
+}
+
+/** PUT/PATCH an admin setting (coach settings, AI mode, note status). */
+export function putData<T>(path: string, json: unknown): Promise<T> {
+  return sendData<T>("PUT", path, json);
+}
+export function patchData<T>(path: string, json: unknown): Promise<T> {
+  return sendData<T>("PATCH", path, json);
+}
+
+async function sendData<T>(
+  method: "POST" | "PUT" | "PATCH",
+  path: string,
+  json?: unknown,
+): Promise<T> {
   const res = await fetch(`/admin/api/data/${path}`, {
-    method: "POST",
+    method,
     cache: "no-store",
     ...(json === undefined
       ? {}

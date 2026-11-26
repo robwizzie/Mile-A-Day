@@ -280,7 +280,10 @@ export type NotificationType =
   // notification inbox). Gated per device on `activityDigestV1` — this used
   // to be typed `competition_updates` so it would route at all, which landed
   // a summary of comments and hypes on the Compete tab.
-  | "activity_digest";
+  | "activity_digest"
+  // Run Plans v2: a pending proposal changes the next run (runPlans/notifications).
+  // Sent only to run_plans_v2 devices; quiet hours and the daily cap apply.
+  | "run_plan_proposal";
 
 export interface PushPayload {
   title: string;

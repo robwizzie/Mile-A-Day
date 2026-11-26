@@ -16,6 +16,7 @@ import {
   SegmentedControl,
   PANEL_BACKGROUND,
 } from "./lib";
+import { AiModeControl, type AiMode } from "./Coach";
 
 type UserDetail = {
   profile: {
@@ -479,6 +480,8 @@ function OverviewTab({
         </p>
       )}
 
+      <CoachModeRow userId={p.user_id} />
+
       <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
         <MiniStat label="Streak" value={`${p.current_streak}🔥`} />
         <MiniStat
@@ -689,6 +692,34 @@ function OverviewTab({
           </ul>
         )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * AI Coach mode (Off / Apple / Anthropic), the same control as the Coach
+ * tab's member table. Plus members only; everyone else is on no plan at all.
+ */
+function CoachModeRow({ userId }: { userId: string }) {
+  const [state, setState] = useState<
+    { plus: boolean; ai_mode: AiMode } | "error" | null
+  >(null);
+  useEffect(() => {
+    getData<{ user: { plus: boolean; ai_mode: AiMode } }>(
+      `coach/users/${encodeURIComponent(userId)}`,
+    )
+      .then((r) => setState({ plus: r.user.plus, ai_mode: r.user.ai_mode }))
+      .catch(() => setState("error"));
+  }, [userId]);
+  if (state === null || state === "error") return null;
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/[0.08] bg-white/[0.05] px-4 py-3">
+      <span className="text-sm text-white/60">AI Coach</span>
+      {state.plus ? (
+        <AiModeControl userId={userId} value={state.ai_mode} />
+      ) : (
+        <span className="text-sm text-white/40">Not a Mile A Day+ member</span>
+      )}
     </div>
   );
 }

@@ -58,7 +58,7 @@ hashes, plant a token, or erase the audit log; only the app's role (the owner) t
 - owning a table, or being able to CREATE in `public`
 - the read role being able to UPDATE
 - being able to `setval()` a sequence
-- an `mcp_*` table without RLS
+- an `mcp_*` or `coach_mcp_*` table without RLS
 - `track_counts` being off
 
 Any of these refuses every statement. A pass is trusted for 5 minutes. This catches the app's
@@ -108,6 +108,35 @@ own `DATABASE_URL`, or an over-granted role, pasted into a connector variable.
   listener, so `COPY … TO STDOUT` through a plain cursor kills the process. Use `SafeCursor`.
 - **A checked-out client without an `error` listener.** A dropped connection then crashes the
   process (`connect()` adds one).
+
+## Run Plans overseer tools
+
+Six more tools (`src/mcp/runPlanTools.ts`, spec §11) let the admin's Claude audit the AI Coach and
+run the admin's own plan. They go through the app's Run Plans services on the app's pool, never
+SQL, so the engine computes every number and `validateChanges` checks every change:
+
+| Tool | Scope | Does |
+|---|---|---|
+| `list_run_plans` | `db:read` | every active plan: goals, tier, AI mode, 28-day grades, last change, pending proposals |
+| `get_run_plan_detail {user}` | `db:read` | `getPlanDetailForAdmin`: plan, profile, days, proposals + decisions, check-ins, grades, history |
+| `get_coach_calls {user \| call_id}` | `db:read` | AI calls with FULL input/output, cost, latency (≤ 25 per page, `before=` to page) |
+| `review_note {user, body}` | `db:write` | a `coach_review_notes` row, source `overseer` (shown on the admin Coach tab) |
+| `propose_plan_change {user, …}` | `db:write` | `proposeOverseerChange`: a PENDING proposal, source `overseer`; the user decides in the app |
+| `set_plan {…, confirmed_in_chat, summary}` | `db:write` | `applyOverseerChange`: applies directly, the admin's OWN plan only |
+
+- **Same door.** `isUserAllowed` already ran on the request; each tool checks `role = 'admin'`
+  again itself, so a demotion mid-session or a future mount elsewhere can't reach them.
+- **Audited first.** `audited()` writes the `mcp_audit_log` row (tool name, JSON arguments) before
+  the service runs and finishes it with the outcome. A refused non-admin call never gets that far.
+- **`set_plan` needs a yes in the chat.** Its description tells Claude to show the exact change and
+  get an explicit yes first. The service refuses without `confirmed_in_chat === true`
+  (`confirmation_required`), without a non-blank `summary` (`summary_required`), or for any
+  other user's plan (`own_plan_only`). Hard rules still apply. The plan history records
+  `overseer_set_plan` with the summary, and the app can undo it for 24 hours.
+- Health-derived data: call logs are kept 90 days and readable only by admins (site and connector).
+
+Check: `scripts/overseer-check.mjs` drives the real handlers through the MCP SDK (in-memory
+transport). `mcp-check` asserts the tools are listed behind the real sign-in and that one call works.
 
 ## Tokens
 

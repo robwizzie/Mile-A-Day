@@ -207,6 +207,10 @@ jobs:
       # management is admin-only and never returns the stored hash.
       - name: Desk display check
         run: node scripts/display-check.mjs
+      - name: Laundry engine check
+        run: node scripts/laundry-check.mjs
+      - name: Laundry check
+        run: node scripts/laundry-db-check.mjs
       # The phone remote's live preview runs a copy of the desk's own code;
       # it must match desk/firmware/mad (desk/sync-preview.sh).
       - name: Desk preview code in sync
@@ -460,6 +464,29 @@ jobs:
       # a too-powerful role refused outright.
       - name: MCP connector check
         run: node scripts/mcp-check.mjs
+      # Run Plans v2: the engine's research rules (spike guard + no back-to-back
+      # hard days are HARD; ramp, taper, cutback, missed days, walk modes,
+      # check-in tweaks, grade, notification timing), proposals NEVER
+      # auto-apply (formula pass, open, upload hook, nightly), the apply /
+      # after-run / decline / undo lifecycle, Plus + ai_mode gating, the
+      # Anthropic $48 stop with a mocked client, the 90-day AI log sweep, and
+      # overseer set_plan only with confirmed_in_chat on the admin's own plan.
+      - name: Run Plans v2 check
+        run: node scripts/run-plans-v2-check.mjs
+      # Overseer tools on the admin connector (list_run_plans, get_run_plan_detail,
+      # get_coach_calls, review_note, propose_plan_change, set_plan) through the
+      # MCP SDK: non-admins refused by every tool, read-only sign-ins can't
+      # write, set_plan only with confirmed_in_chat + summary on the admin's own
+      # plan, propose stays pending, notes saved, every call audited.
+      - name: Overseer tools check
+        run: node scripts/overseer-check.mjs
+      # Coach MCP (src/coachMcp, the runner's own Claude at mileaday.run/mcp):
+      # the full OAuth sign-in through the website's own rewrite table
+      # (website/next.config.mjs), Plus checked at sign-in, refresh and every
+      # call, tools scoped to the signed-in runner, propose_change PENDING only
+      # (source user_claude), and neither connector accepting the other's tokens.
+      - name: Coach MCP check
+        run: node scripts/coach-mcp-check.mjs
 
   website:
     name: Website (lint + build)

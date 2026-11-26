@@ -1,4 +1,5 @@
 import { Router } from "express";
+import * as coach from "../controllers/adminCoachController.js";
 import { signInLimiter } from "../middleware/rateLimit.js";
 import {
   adminCreateDisplayKey,
@@ -22,6 +23,12 @@ import {
   adminDeskPushUnsubscribe,
   adminDeskPushTest,
 } from "../controllers/displayController.js";
+import {
+  adminLaundry,
+  adminLaundryEmptied,
+  adminLaundryPlug,
+  adminLaundryRevoke,
+} from "../controllers/laundryController.js";
 import {
   verifyAppleWeb,
   overview,
@@ -77,6 +84,22 @@ adminAuthRouter.post("/apple", signInLimiter, verifyAppleWeb);
 const adminRouter = Router();
 adminRouter.get("/overview", overview);
 
+// Coach tab (Run Plans v2 AI Coach): usage, Anthropic spend, per-user access,
+// plans + proposals + call logs, global switch, review notes.
+adminRouter.get("/coach/usage", coach.usage);
+adminRouter.get("/coach/spend", coach.spend);
+adminRouter.get("/coach/users", coach.users);
+adminRouter.get("/coach/users/:userId", coach.userDetail);
+adminRouter.put("/coach/users/:userId/ai-mode", coach.setAiMode);
+adminRouter.get("/coach/calls", coach.recentCalls);
+adminRouter.get("/coach/calls/:id", coach.callDetail);
+adminRouter.get("/coach/plans", coach.plans);
+adminRouter.get("/coach/settings", coach.getSettings);
+adminRouter.put("/coach/settings", coach.putSettings);
+adminRouter.get("/coach/review-notes", coach.listNotes);
+adminRouter.post("/coach/review-notes", coach.createNote);
+adminRouter.patch("/coach/review-notes/:id", coach.patchNote);
+
 // Desk display keys (the LED counter). Plaintext key returned once on create.
 adminRouter.get("/display-keys", adminListDisplayKeys);
 adminRouter.post("/display-keys", adminCreateDisplayKey);
@@ -100,6 +123,11 @@ adminRouter.post("/desk/push/subscribe", adminDeskPushSubscribe);
 adminRouter.post("/desk/push/kinds", adminDeskPushKinds);
 adminRouter.post("/desk/push/unsubscribe", adminDeskPushUnsubscribe);
 adminRouter.post("/desk/push/test", adminDeskPushTest);
+// Laundry plugs: the signed-in admin's own (and only with a desk of their own).
+adminRouter.get("/desk/laundry", adminLaundry);
+adminRouter.post("/desk/laundry/plug", adminLaundryPlug);
+adminRouter.post("/desk/laundry/plug/:id/revoke", adminLaundryRevoke);
+adminRouter.post("/desk/laundry/:machine/emptied", adminLaundryEmptied);
 adminRouter.get("/miles-by-day", milesByDay);
 adminRouter.get("/engagement", engagement);
 adminRouter.get("/signups-by-day", signupsByDay);

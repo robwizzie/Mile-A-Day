@@ -13,6 +13,7 @@ const LABELS: Record<string, [string, string]> = {
   record: ["Record signup day", "Today beats the best of the last 30 days"],
   lead: ["Versus lead", "The lead for today changes hands"],
   box_offline: ["Desk offline", "Your desk stops checking in (and comes back)"],
+  laundry: ["Laundry", "Your washer or dryer finishes (and a nudge if it sits 45 min)"],
 };
 
 type Info = { enabled: boolean; public_key: string | null; kinds: string[]; default_kinds: string[];

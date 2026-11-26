@@ -22,12 +22,12 @@ export type DeskEngine = {
 /** Style numbers (the box's STYLES). */
 export const STYLE = {
   CLASSIC: 0, SPOTLIGHT: 1, ARCADE: 2, BIG: 3, CAMPFIRE: 4, RACE: 5, CLOCK: 6,
-  VERSUS: 7, GROWTH: 8, ODOMETER: 9, SHOWCASE: 10,
+  VERSUS: 7, GROWTH: 8, ODOMETER: 9, SHOWCASE: 10, LAUNDRY: 11,
 } as const;
 export const MASCOT = { RUNNER: 0, FLAMEY: 1 } as const;
 
 const MODULES = ["__init__", "gfx", "art", "app", "cards", "heat", "fx", "modes", "extra", "decor",
-                 "season", "closet", "testscenes", "boards"];
+                 "season", "closet", "testscenes", "boards", "laundry"];
 
 let enginePromise: Promise<DeskEngine> | null = null;
 

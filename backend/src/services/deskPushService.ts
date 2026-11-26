@@ -7,7 +7,8 @@ const db = PostgresService.getInstance();
  * Web push for the desk remote: the admin panel added to a founder's home
  * screen. Notifications the iOS app doesn't already send — desk doodles and
  * messages, new users, "I'd buy one" signups, App Store reviews, record
- * signup days, the Versus lead changing hands, a desk going offline.
+ * signup days, the Versus lead changing hands, a desk going offline, and
+ * the owner's own washer or dryer finishing (laundryService.ts).
  *
  * Privacy:
  *  - A subscription is always the subscriber's own (the admin session's
@@ -22,7 +23,7 @@ const db = PostgresService.getInstance();
  */
 
 export const DESK_PUSH_KINDS = [
-  "doodle", "message", "new_user", "user_milestone", "interest", "review", "record", "lead", "box_offline",
+  "doodle", "message", "new_user", "user_milestone", "interest", "review", "record", "lead", "box_offline", "laundry",
 ] as const;
 export type DeskPushKind = (typeof DESK_PUSH_KINDS)[number] | "test";
 /** On for a new phone unless it opts out (offline alerts are opt-in). */
@@ -40,7 +41,7 @@ const MAX_FAILURES = 10;
 /** Kinds whose event has no table of its own: logged on send so the remote's
  *  Activity shows them (doodles, messages, signups and desk interest already
  *  come from their own tables there). */
-const LOGGED_KINDS: DeskPushKind[] = ["review", "record", "lead", "box_offline"];
+const LOGGED_KINDS: DeskPushKind[] = ["review", "record", "lead", "box_offline", "laundry"];
 const LOG_DAYS = 30;
 
 export interface PushPayload { title: string; body: string; url?: string; tag?: string }

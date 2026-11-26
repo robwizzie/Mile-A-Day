@@ -238,6 +238,12 @@ export const CLIENT_FEATURES = {
    * for the type, so the push would open nothing.
    */
   buddyOutAlertV1: "buddy_out_alert_v1",
+  /**
+   * The build has Run Plans v2: it routes the `run_plan_proposal` push (and
+   * its RUN_PLAN_PROPOSAL category's APPLY / KEEP actions) to the proposal.
+   * An older build has no screen for it, so the push is sent only here.
+   */
+  runPlansV2: "run_plans_v2",
 } as const;
 
 export type ClientFeature =

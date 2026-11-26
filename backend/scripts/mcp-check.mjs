@@ -28,6 +28,7 @@ process.env.RATE_LIMITS_DISABLED = "1";
 const { mountMcpConnector } = await import("../dist/mcp/index.js");
 const { closeMcpPools, configureDatabase, checkRoleBoundary, SafeCursor } = await import("../dist/mcp/dbTools.js");
 const { loadMcpConfig } = await import("../dist/mcp/config.js");
+const { RUN_PLAN_TOOL_NAMES } = await import("../dist/mcp/runPlanTools.js");
 const { PostgresService } = await import("../dist/services/DbService.js");
 
 const admin = new pg.Pool({ connectionString: process.env.DATABASE_URL, max: 3 });
@@ -352,14 +353,18 @@ try {
     assert.ok(auth.code);
     assert.equal(back.searchParams.get("state"), auth.authUrl.searchParams.get("state"));
   });
-  await check("finishAuth exchanges the code; reconnect lists the three tools", async () => {
+  await check("finishAuth exchanges the code; reconnect lists the db tools + the overseer tools", async () => {
     await new StreamableHTTPClientTransport(MCP_URL, { authProvider: auth }).finishAuth(auth.code);
     assert.ok(auth.tokens()?.access_token && auth.tokens()?.refresh_token);
     assert.ok(auth.tokens().expires_in <= 3600);
     client = new Client({ name: "mcp-check", version: "1" });
     await client.connect(new StreamableHTTPClientTransport(MCP_URL, { authProvider: auth }));
     const names = (await client.listTools()).tools.map((t) => t.name).sort();
-    assert.deepEqual(names, ["audit_log", "execute", "query"]);
+    assert.deepEqual(names, ["audit_log", "execute", "query", ...RUN_PLAN_TOOL_NAMES].sort());
+    // Through the real sign-in: an overseer read works and is audited.
+    const r = await client.callTool({ name: "list_run_plans", arguments: { limit: 5 } });
+    assert.equal(r.isError, undefined, r.content?.[0]?.text);
+    assert.ok(Array.isArray(JSON.parse(r.content[0].text).plans));
   });
   await check("the code cannot be redeemed a second time", async () => {
     const r = await token({ grant_type: "authorization_code", code: auth.code, code_verifier: auth.verifier,

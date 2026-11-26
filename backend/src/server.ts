@@ -45,7 +45,9 @@ import {
 } from "./middleware/rateLimit.js";
 import adminRoutes, { adminAuthRouter } from "./routes/adminRoutes.js";
 import displayRoutes from "./routes/displayRoutes.js";
+import laundryRoutes from "./routes/laundryRoutes.js";
 import { mountMcpConnector } from "./mcp/index.js";
+import { mountCoachMcp } from "./coachMcp/index.js";
 import { startCompetitionCron } from "./cron/competitionCron.js";
 import { startNotificationCron } from "./cron/notificationCron.js";
 import { startSilentSyncCron } from "./cron/silentSyncCron.js";
@@ -63,6 +65,8 @@ import { startDeskPushCron } from "./cron/deskPushCron.js";
 import { startLastCallCron } from "./cron/lastCallCron.js";
 import { startDiagnosticsCron } from "./cron/diagnosticsCron.js";
 import { startAppleRevocationCron } from "./cron/appleRevocationCron.js";
+import { startRunPlansCron } from "./cron/runPlansCron.js";
+import runPlansRoutes from "./routes/runPlansRoutes.js";
 import { healUncomputedStreaks } from "./services/streakFeatureCore.js";
 import { seedExtraBadges } from "./services/badgeService.js";
 import { seedExtraChallenges } from "./services/dailyChallengeService.js";
@@ -351,9 +355,16 @@ app.use("/store", storePublicRouter);
 app.use("/admin/auth", adminAuthRouter);
 // Desk display feed: its own per-device key, never a user JWT (see displayService).
 app.use("/display", displayRoutes);
+// Laundry plugs (washer / dryer power readings): their own per-plug key.
+app.use("/laundry", laundryRoutes);
 // MCP database connector (src/mcp): its own OAuth sign-in, never an app JWT.
 // Mounts nothing unless MCP_ALLOWED_USERS is set.
 mountMcpConnector(app);
+// Coach MCP (src/coachMcp): Run Plans for the runner's own Claude, any Mile A
+// Day+ member, public at mileaday.run/mcp via the website's proxy to /coach/*.
+// Its own OAuth, tables and token audience; proposal-only. Mounts nothing
+// unless COACH_MCP_ENABLED=1.
+mountCoachMcp(app);
 
 app.use(authenticateToken);
 // Per-user backstop, far above any real client (see RATE_LIMIT_SPECS.global).
@@ -386,6 +397,7 @@ app.use("/live", liveTrackingRoutes);
 app.use("/ghosts", ghostRoutes);
 app.use("/telemetry", telemetryRoutes);
 app.use("/diagnostics", diagnosticsRoutes);
+app.use("/run-plans", runPlansRoutes);
 
 app.use((err: Error, req: Request, res: Response, _next: NextFunction) => {
   console.error("Error:", err.message);
@@ -500,6 +512,7 @@ function startCrons() {
   startLastCallCron();
   startDiagnosticsCron();
   startAppleRevocationCron();
+  startRunPlansCron();
   // Idempotently ensure the v2 social/app-function badges exist in the catalog.
   seedExtraBadges();
   // Idempotently ensure the v2 daily challenges (5K/10K/social) exist.

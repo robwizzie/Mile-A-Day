@@ -17,5 +17,14 @@ for (const f of fs.readdirSync(src).filter((f) => f.endsWith(".py") && f !== "ma
     bad++;
   }
 }
+// The laundry plug script the remote hands out must be the one in desk/laundry.
+{
+  const a = fs.readFileSync(path.join(root, "desk/laundry/mad-laundry.js"));
+  const p = path.join(root, "website/public/desk/laundry/mad-laundry.js");
+  if (!fs.existsSync(p) || !a.equals(fs.readFileSync(p))) {
+    console.log("FAIL  mad-laundry.js differs (run desk/sync-preview.sh)");
+    bad++;
+  }
+}
 console.log(bad ? `desk-preview-check: ${bad} FAILED` : "desk-preview-check: all assertions passed");
 process.exit(bad ? 1 : 0);

@@ -201,3 +201,18 @@ All imports MUST end with `.js` extension, e.g. `import { foo } from './services
 
 ## Buddy live routes
 - `buddy_live_routes` row = that walker's opt-in; serve only through `getLiveRoutes` (participants who also share, blocks respected), and delete on finish, leave and close. `scripts/buddy-live-route-check.mjs` pins every door.
+
+## Run Plans
+Details: docs/conventions/backend.md § Run Plans v2
+- Every plan change is a `run_plan_proposals` row the user decides; `run_plan_days` is written only by `applyProposal`/`applyScheduledFor`, `undoProposal`, `updatePlan` (user), `applyOverseerChange` and `materialize` (new days, `ON CONFLICT DO NOTHING`). Check: `run-plans-v2-check`.
+- Every number comes from `services/runPlans/engine.ts` (`buildDay` from a `DaySpec`); proposals from ANY source pass `validateChanges`: HARD = `spike_guard`, `no_back_to_back_hard` (422 `hard_rule_violation`); conventions need `deviation_reason`.
+- `applyOverseerChange` (overseer `set_plan`) needs `confirmed_in_chat === true`, a `summary`, `role = admin` and the admin's OWN plan; everyone else gets `proposeOverseerChange` (pending).
+- AI access via `getAiStatus` only (`coach_settings.ai_mode`, default `apple`; `app_settings['coach']`; `COACH_AI_DISABLED`); Anthropic also needs `ANTHROPIC_API_KEY`, consent and month spend < `COACH_ANTHROPIC_STOP_USD` (48), every call through `runAnthropicCoach` (`recordAiCall` + `addAnthropicSpend`).
+- `coach_ai_calls` is health-derived: admins only, swept at 90 days (`sweepAiCallLogs`); shoes still only via `shoeService` (`listShoes`).
+- Overseer tools (`src/mcp/runPlanTools.ts`) call runPlans services, never SQL; each re-checks `role = 'admin'`, runs inside `audited()`, and `set_plan` goes only through `applyOverseerChange`. Check: `overseer-check`.
+- Coach MCP (`src/coachMcp`, the runner's own Claude) is proposal-only: tools self-scoped on the token's user, `isPlusActive` on every call, `createProposal` with source `user_claude`, never an apply; `coach_mcp_*` `.enableRLS()`; off unless `COACH_MCP_ENABLED=1`. Check: `coach-mcp-check`.
+- Hard sessions = `hardSessionsFor(runs_per_week, experience, goals)` only; `difficulty` scales volume via `VOLUME_KNOBS` / `sessionSizes`, never the hard count. Check: `run-plans-v2-check`.
+- Goals: one `role: "primary"` (drives phases, `focusOf`, `target_date`) + ≤ 1 secondary (one `for_goal: "secondary"` session inside the hard count); legacy lists go through `withRoles`. Estimates only from `goalEstimate`; promotion is a `goal_promotion` proposal (`plan_patch.goals`); `applyGoalPatch` snapshots dropped days into `checks.dropped_days`, `undoGoalPatch` restores them version-checked.
+- Shoes: `SHOE_RUN_TYPES` has no `walk`; `shoeRunTypeFor("walk")` is null, a sent `walk` key is skipped, `walk` is served null.
+- Effort (RPE): `run_effort_ratings`, first submission per workout wins; served `guess` = phone `raw_guess` + `effortCalibration` offset (EWMA, applied from `EFFORT_MIN_SAMPLES`, own rating excluded); signals only via `rateEffort` → `effort_fatigue` / `effort_progression` proposals.
+- `run_plan_proposal` push: next-run proposals only, `notificationDueAt` (run hour < 9 → 8 PM eve, else 9 AM), `run_plans_v2` devices, claimed on `notified_at`.

@@ -21,6 +21,7 @@ import { ownedFlameyItems, servedFlameyLook } from "./flameyService.js";
 import { postCommentMatchSql } from "./posts/postSql.js";
 import { VIEWER_MAY_SEE_WORKOUT_CONTENT_SQL } from "./visibilityService.js";
 import { prettyTokens, pushTo } from "./deskPushService.js";
+import { boxLaundry, getLaundryStatus } from "./laundryService.js";
 
 const db = PostgresService.getInstance();
 
@@ -314,6 +315,7 @@ export const DESK_STYLES = [
   "GROWTH",
   "ODOMETER",
   "SHOWCASE",
+  "LAUNDRY", // the owner's washer and dryer (only with laundry plugs)
 ] as const;
 export const DESK_MASCOTS = ["RUNNER", "FLAMEY"] as const;
 const COMMAND_WINDOW_SECONDS = 180; // a box acts on a tap from the last 3 min
@@ -585,6 +587,7 @@ export const DESK_TEST_SCENES = [
   "record",
   "replay",
   "dizzy",
+  "laundry",
 ] as const;
 
 /** Queue one test animation for a box. Same rate limit as the other taps. */
@@ -1382,6 +1385,10 @@ export interface DisplayFeed {
   growth: DisplayGrowth | null;
   /** Head-to-head: the other desk owner, if you're friends and they share runs with friends. */
   rival: DisplayRival | null;
+  /** The owner's own washer / dryer (their laundry plugs), else null: stage,
+   *  minutes running (or since done), minutes left (-1 = unknown), whether
+   *  that's the sure end of the load, and a finished load's length (-1). */
+  laundry: ReturnType<typeof boxLaundry>;
   /** Workouts finished today in each Eastern hour (community counts). */
   hours: number[];
   /** Streak leaderboard: the owner's top 5 among themselves and accepted
@@ -1734,7 +1741,7 @@ export async function getDisplayFeed(
     friendMiles.map((f) => getTodayStats(f.sender).catch(() => null)),
   );
   const isAdmin = roleRows[0]?.role === "admin";
-  const [reviews, growth, rival, doodles, hours, leaders, lastRun] =
+  const [reviews, growth, rival, doodles, hours, leaders, lastRun, laundry] =
     await Promise.all([
       isAdmin ? latestReviews() : Promise.resolve([] as DeskReview[]),
       isAdmin ? getGrowth() : Promise.resolve(null),
@@ -1758,6 +1765,8 @@ export async function getDisplayFeed(
       getCommunityHours(),
       getLeaders(userId),
       getLastRun(userId),
+      // Never fails the feed: laundry is a side show.
+      getLaundryStatus(userId).catch(() => null),
     ]);
   const look = servedFlameyLook(closetRows[0]?.flamey_look, owned);
   let flamey: Partial<
@@ -1824,6 +1833,7 @@ export async function getDisplayFeed(
     reviews,
     growth,
     rival,
+    laundry: boxLaundry(laundry),
     hours,
     leaders,
     doodles: doodles
