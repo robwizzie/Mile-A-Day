@@ -107,30 +107,23 @@ struct RunPlanHomeView: View {
     }
 
     private func header(_ plan: RunPlanV2Plan, ai: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 8) {
-                RPV2Eyebrow(text: String(localized: "Week \(plan.week_index ?? 1) · \(RPV2Format.phaseLabel(plan))"))
+                RPV2Eyebrow(text: eyebrow(plan))
                 Spacer(minLength: 4)
                 RPV2TierBadge(ai: ai)
             }
-            Text(RPV2Format.goalsLine(plan.goals))
-                .madFont(size: 21, weight: .black, design: .rounded, maxScale: 1.5)
-                .foregroundStyle(.white)
-                .fixedSize(horizontal: false, vertical: true)
-            if let sub = subline(plan) {
-                Text(sub)
-                    .madFont(size: 12, weight: .bold, design: .rounded)
-                    .foregroundStyle(.white.opacity(0.5))
-                    .madBodyLines(2)
-            }
+            RunPlanGoalsHeader(plan: plan)
         }
     }
 
-    private func subline(_ plan: RunPlanV2Plan) -> String? {
-        var parts: [String] = []
-        if let cp = plan.checkpoints.first, let label = cp.label { parts.append(String(localized: "Next checkpoint: \(label)")) }
-        if let w = plan.weekly_target_mi, w > 0 { parts.append(String(localized: "\(RPV2Format.distance(w)) this week")) }
-        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    /// "Week 3 · 22 mi this week" (the phase when there's no week target).
+    private func eyebrow(_ plan: RunPlanV2Plan) -> String {
+        let week = String(localized: "Week \(plan.week_index ?? 1)")
+        if let w = plan.weekly_target_mi, w > 0 {
+            return String(localized: "\(week) · \(RPV2Format.distance(w)) this week")
+        }
+        return "\(week) · \(RPV2Format.phaseLabel(plan))"
     }
 
     private var flaggedDates: Set<String> {

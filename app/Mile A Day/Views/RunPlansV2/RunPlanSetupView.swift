@@ -9,62 +9,102 @@ import SwiftUI
 @MainActor
 @Observable
 final class RunPlanSetupModel {
-    struct DistanceGoal: Identifiable, Equatable {
-        var distance: RunPlanV2GoalDistance
+    /// One goal being edited (primary or secondary).
+    struct GoalDraft: Equatable {
+        var type: RunPlanV2GoalType = .distanceTime
+        var distance: RunPlanV2GoalDistance = .fiveK
         /// Target time text "mm:ss" / "h:mm:ss" (empty = no target).
         var targetText: String = ""
         /// Custom distance only.
         var customMiles: Double = 2.0
-        var id: String { distance.rawValue }
+        /// burn_calories: 225+ minutes a week instead of 150.
+        var burnStretch = false
+        /// false = as soon as possible.
+        var hasDate = false
+        var date: Date = Calendar.current.date(byAdding: .weekOfYear, value: 12, to: Date()) ?? Date()
+
+        init(distance: RunPlanV2GoalDistance = .fiveK) { self.distance = distance }
+
+        init(goal: RunPlanV2Goal) {
+            type = goal.goalType
+            distance = goal.goalDistance ?? (goal.goalType == .distanceTime ? .custom : .fiveK)
+            targetText = goal.target_s.map(RPV2Format.clock) ?? ""
+            customMiles = goal.distance_mi ?? 2
+            burnStretch = (goal.weekly_minutes ?? 150) >= 225
+            if let key = goal.target_date, let d = RunPlanV2Date.date(from: key) {
+                hasDate = true
+                date = d
+            }
+        }
+
+        var targetSeconds: Int? { RunPlanSetupModel.parseClock(targetText) }
+        var miles: Double? { distance == .custom ? customMiles : distance.miles }
+        var dateKey: String? { hasDate ? RunPlanV2Date.key(for: date) : nil }
+        var isValid: Bool { type != .distanceTime || targetText.isEmpty || targetSeconds != nil }
+
+        func goal(role: RunPlanV2GoalRole) -> RunPlanV2Goal {
+            switch type {
+            case .distanceTime:
+                return RunPlanV2Goal(type: .distanceTime, distance: distance, distanceMi: miles,
+                                     targetSeconds: targetSeconds, role: role, targetDate: dateKey)
+            case .justImprove:
+                return RunPlanV2Goal(type: .justImprove, role: role, targetDate: dateKey)
+            case .burnCalories:
+                return RunPlanV2Goal(type: .burnCalories, weeklyMinutes: burnStretch ? 225 : 150,
+                                     role: role, targetDate: dateKey)
+            }
+        }
+
+        /// Same goal as a served one (to pick its estimate).
+        func matches(_ g: RunPlanV2Goal) -> Bool {
+            guard g.goalType == type else { return false }
+            guard type == .distanceTime else { return true }
+            guard g.goalDistance == distance, g.target_s == targetSeconds else { return false }
+            guard distance == .custom else { return true }
+            return abs((g.distance_mi ?? 0) - customMiles) < 0.05
+        }
     }
 
-    var distanceGoals: [DistanceGoal] = []
-    var justImprove = false
-    var burnCalories = false
-    var burnStretch = false
-    var hasTargetDate = false
-    var targetDate: Date = Calendar.current.date(byAdding: .weekOfYear, value: 12, to: Date()) ?? Date()
+    var primary = GoalDraft()
+    var secondary: GoalDraft?
     var runsPerWeek = 4
     var difficulty: RunPlanV2Difficulty = .steady
     var walkMode: RunPlanV2WalkMode = .builtIn
     /// 0 = Monday … 6 = Sunday.
     var fixedWalkDays: Set<Int> = [3, 6]
     var coachNotes = ""
-    /// shoe run type → shoe id (nil = none).
+    /// Run type → shoe id (nil = none). Never `walk`: walk days get no shoe.
     var shoes: [RunPlanV2ShoeRunType: String] = [:]
 
     var preview: RunPlanV2PlanWithDays?
     var previewError: String?
+    /// A preview request is on its way (the goal cards say "Estimating").
+    var isPreviewing = false
     var isBuilding = false
     var error: String?
+    /// Settings edit: the live plan's goals (their estimates until a preview lands).
+    private(set) var liveGoals: [RunPlanV2Goal] = []
 
     init() {}
 
     /// Seeds from a live plan (settings edit).
     init(plan: RunPlanV2Plan) {
-        for g in plan.goals {
-            switch g.goalType {
-            case .justImprove: justImprove = true
-            case .burnCalories:
-                burnCalories = true
-                burnStretch = (g.weekly_minutes ?? 150) >= 225
-            case .distanceTime:
-                var d = DistanceGoal(distance: g.goalDistance ?? .custom)
-                d.targetText = g.target_s.map(RPV2Format.clock) ?? ""
-                d.customMiles = g.distance_mi ?? 2
-                distanceGoals.append(d)
+        liveGoals = plan.goals
+        if let p = plan.primaryGoal {
+            primary = GoalDraft(goal: p)
+            // Old plans carry the date on the plan only.
+            if p.target_date == nil, let td = plan.target_date, let d = RunPlanV2Date.date(from: td) {
+                primary.hasDate = true
+                primary.date = d
             }
         }
-        if let td = plan.target_date, let d = RunPlanV2Date.date(from: td) {
-            hasTargetDate = true
-            targetDate = d
-        }
+        if let s = plan.secondaryGoal { secondary = GoalDraft(goal: s) }
         runsPerWeek = plan.runs_per_week ?? 4
         difficulty = plan.difficultyLevel
         walkMode = plan.walkMode
         if !plan.fixed_walk_days.isEmpty { fixedWalkDays = Set(plan.fixed_walk_days) }
         coachNotes = plan.coach_notes ?? ""
-        for t in RunPlanV2ShoeRunType.allCases {
+        for t in RunPlanV2ShoeRunType.runTypes {
             if let id = plan.shoeId(for: t) { shoes[t] = id }
         }
     }
@@ -74,20 +114,25 @@ final class RunPlanSetupModel {
     var walkDayCount: Int { 7 - runsPerWeek }
 
     var goals: [RunPlanV2Goal] {
-        var out: [RunPlanV2Goal] = distanceGoals.map { d in
-            RunPlanV2Goal(type: .distanceTime, distance: d.distance,
-                          distanceMi: d.distance == .custom ? d.customMiles : d.distance.miles,
-                          targetSeconds: Self.parseClock(d.targetText))
-        }
-        if justImprove { out.append(RunPlanV2Goal(type: .justImprove)) }
-        if burnCalories { out.append(RunPlanV2Goal(type: .burnCalories, weeklyMinutes: burnStretch ? 225 : 150)) }
+        var out = [primary.goal(role: .primary)]
+        if let secondary { out.append(secondary.goal(role: .secondary)) }
         return out
     }
 
+    /// Why the secondary can't be saved as it is (nil = fine).
+    var secondaryProblem: String? {
+        guard let s = secondary else { return nil }
+        if s.type == primary.type, s.type != .distanceTime {
+            return String(localized: "Pick a different kind of goal for the secondary.")
+        }
+        if s.type == .distanceTime, primary.type == .distanceTime, s.distance == primary.distance, s.distance != .custom {
+            return String(localized: "Pick a different distance for the secondary.")
+        }
+        return nil
+    }
+
     var goalsValid: Bool {
-        let g = goals
-        return !g.isEmpty && g.count <= 4
-            && distanceGoals.allSatisfy { $0.targetText.isEmpty || Self.parseClock($0.targetText) != nil }
+        primary.isValid && (secondary?.isValid ?? true) && secondaryProblem == nil
     }
 
     var effortValid: Bool {
@@ -102,14 +147,20 @@ final class RunPlanSetupModel {
         return lo...hi
     }
 
-    func toggle(_ d: RunPlanV2GoalDistance) {
-        if let i = distanceGoals.firstIndex(where: { $0.distance == d }) {
-            distanceGoals.remove(at: i)
-        } else if goals.count < 4 {
-            distanceGoals.append(DistanceGoal(distance: d))
-            distanceGoals.sort { (RunPlanV2GoalDistance.allCases.firstIndex(of: $0.distance) ?? 0)
-                < (RunPlanV2GoalDistance.allCases.firstIndex(of: $1.distance) ?? 0) }
-        }
+    /// The server's estimate for a draft: the latest preview's, else the
+    /// live plan's while the goal is unchanged. Nil = not known yet.
+    func estimate(for role: RunPlanV2GoalRole) -> RunPlanV2GoalEstimate? {
+        guard let draft = role == .primary ? primary : secondary else { return nil }
+        let served = preview?.plan.goals ?? []
+        if let g = served.first(where: { $0.goalRole == role }), draft.matches(g) { return g.estimate }
+        if let g = liveGoals.first(where: { $0.goalRole == role }), draft.matches(g) { return g.estimate }
+        return nil
+    }
+
+    func addSecondary() {
+        var d = GoalDraft(distance: primary.distance == .fiveK ? .tenK : .fiveK)
+        if primary.type != .distanceTime { d.type = .distanceTime }
+        secondary = d
     }
 
     func setRuns(_ n: Int) {
@@ -131,14 +182,15 @@ final class RunPlanSetupModel {
     var shoeAssignments: RunPlanV2ShoeAssignments? {
         guard !shoes.isEmpty else { return nil }
         var out: RunPlanV2ShoeAssignments = [:]
-        for t in RunPlanV2ShoeRunType.allCases { out[t.rawValue] = shoes[t] }
+        for t in RunPlanV2ShoeRunType.runTypes { out[t.rawValue] = shoes[t] }
         return out
     }
 
     func createRequest() -> RunPlanV2CreateRequest {
         RunPlanV2CreateRequest(
             today: RunPlanV2Date.todayKey(), goals: goals,
-            target_date: hasTargetDate ? RunPlanV2Date.key(for: targetDate) : nil,
+            // Plan-level date = the primary's (they must match).
+            target_date: primary.dateKey,
             runs_per_week: runsPerWeek, difficulty: difficulty.rawValue, walk_mode: walkMode.rawValue,
             fixed_walk_days: walkMode == .fixed ? fixedWalkDays.sorted() : [],
             coach_notes: String(coachNotes.prefix(2000)), shoe_assignments: shoeAssignments,
@@ -148,7 +200,7 @@ final class RunPlanSetupModel {
     func patch() -> RunPlanV2PlanPatch {
         var p = RunPlanV2PlanPatch()
         p.goals = goals
-        p.target_date = .some(hasTargetDate ? RunPlanV2Date.key(for: targetDate) : nil)
+        p.target_date = .some(primary.dateKey)
         p.runs_per_week = runsPerWeek
         p.difficulty = difficulty.rawValue
         p.walk_mode = walkMode.rawValue
@@ -160,27 +212,35 @@ final class RunPlanSetupModel {
 
     private var previewTask: Task<Void, Never>?
 
-    /// The formula draft for the current answers (hard-session count, ramp).
+    /// The formula draft for the current answers: goal estimates, the
+    /// hard-session count and what the effort level means (`volume`).
     func refreshPreview() {
         previewTask?.cancel()
-        guard goalsValid, effortValid else { return }
+        guard goalsValid, effortValid else {
+            isPreviewing = false
+            return
+        }
         let request = createRequest()
+        isPreviewing = true
         previewTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: 350_000_000)
             guard !Task.isCancelled else { return }
             do {
-                preview = try await RunPlanV2Store.shared.preview(request)
+                let fresh = try await RunPlanV2Store.shared.preview(request)
+                guard !Task.isCancelled else { return }
+                preview = fresh
                 previewError = nil
             } catch let e as RunPlanV2Error {
                 previewError = e.message
             } catch {
                 previewError = nil
             }
+            if !Task.isCancelled { isPreviewing = false }
         }
     }
 
     /// "6:47", "26:00", "1:52:10" → seconds.
-    static func parseClock(_ text: String) -> Int? {
+    nonisolated static func parseClock(_ text: String) -> Int? {
         let parts = text.trimmingCharacters(in: .whitespaces).split(separator: ":").map { Int($0) }
         guard !parts.isEmpty, parts.allSatisfy({ $0 != nil }) else { return nil }
         let n = parts.compactMap { $0 }
@@ -290,222 +350,6 @@ struct RunPlanSetupView: View {
     }
 }
 
-// MARK: - Step 1 · Goals
-
-struct RunPlanGoalsStep: View {
-    @Bindable var model: RunPlanSetupModel
-    let profile: RunPlanV2FitnessProfile?
-    var showsHeader = true
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            if showsHeader {
-                RPV2StepHeader(step: String(localized: "Step 1 of 3"), title: String(localized: "What are you training for?"),
-                               subtitle: String(localized: "Pick one or more."))
-            }
-            distanceCard
-            toggleCard(on: model.justImprove, icon: "chart.line.uptrend.xyaxis", tint: RPV2Colors.green,
-                       title: String(localized: "Just improve"),
-                       text: String(localized: "4-week blocks that build, then a retest every 6 to 8 weeks.")) {
-                model.justImprove.toggle()
-            }
-            toggleCard(on: model.burnCalories, icon: "flame.fill", tint: RPV2Colors.red,
-                       title: String(localized: "Burn more calories"),
-                       text: String(localized: "Plans around time on your feet: 150 min a week, stretch 225+. You can track your weight in the Health app. No diet advice.")) {
-                model.burnCalories.toggle()
-            }
-            if model.burnCalories {
-                Toggle(isOn: $model.burnStretch) {
-                    Text(String(localized: "Stretch goal: 225+ minutes a week"))
-                        .madFont(size: 13, weight: .bold, design: .rounded)
-                }
-                .tint(RPV2Colors.green)
-                .padding(.horizontal, 4)
-            }
-            targetDate
-            if let note = flameyNote {
-                FlameyNote(text: note)
-            }
-        }
-    }
-
-    private var distanceOn: Bool { !model.distanceGoals.isEmpty }
-
-    private var chipItems: [(id: String, label: String, on: Bool)] {
-        RunPlanV2GoalDistance.allCases.map { d -> (id: String, label: String, on: Bool) in
-            (id: d.rawValue, label: RPV2Format.distanceName(d == .custom ? nil : d, miles: nil),
-             on: model.distanceGoals.contains { $0.distance == d })
-        }
-    }
-
-    private var distanceCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
-                Image(systemName: "target").madFont(size: 16, weight: .bold, maxScale: 1.15)
-                    .foregroundStyle(RPV2Colors.orange).accessibilityHidden(true)
-                Text(String(localized: "Distance + time"))
-                    .madFont(size: 15, weight: .black, design: .rounded)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                RPV2CheckDot(on: distanceOn)
-            }
-            RunPlanChipFlow(items: chipItems) { raw in
-                if let d = RunPlanV2GoalDistance(rawValue: raw) { model.toggle(d) }
-            }
-            ForEach($model.distanceGoals) { $goal in
-                RunPlanGoalTargetRow(goal: $goal, now: now(for: goal.distance), best: best(for: goal.distance))
-            }
-        }
-        .padding(12)
-        .background(selectedBackground(distanceOn))
-    }
-
-    private func toggleCard(on: Bool, icon: String, tint: Color, title: String, text: String,
-                            action: @escaping () -> Void) -> some View {
-        Button(action: { MADHaptics.tap(); action() }) {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 8) {
-                    Image(systemName: icon).madFont(size: 16, weight: .bold, maxScale: 1.15)
-                        .foregroundStyle(tint).accessibilityHidden(true)
-                    Text(title)
-                        .madFont(size: 15, weight: .black, design: .rounded)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    RPV2CheckDot(on: on)
-                }
-                Text(text)
-                    .madFont(size: 12, design: .rounded)
-                    .foregroundStyle(.white.opacity(0.55))
-                    .fixedSize(horizontal: false, vertical: true)
-                    .multilineTextAlignment(.leading)
-            }
-            .foregroundStyle(.white)
-            .padding(12)
-            .background(selectedBackground(on))
-        }
-        .buttonStyle(.plain)
-        .accessibilityAddTraits(on ? .isSelected : [])
-    }
-
-    private var targetDate: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(String(localized: "Target date"))
-                .madFont(size: 13, weight: .bold, design: .rounded)
-            dateOption(on: !model.hasTargetDate, title: String(localized: "No date, keep improving")) { model.hasTargetDate = false }
-            dateOption(on: model.hasTargetDate, title: String(localized: "By a date")) { model.hasTargetDate = true }
-            if model.hasTargetDate {
-                DatePicker(String(localized: "Date"), selection: $model.targetDate, in: model.targetDateRange,
-                           displayedComponents: .date)
-                    .madFont(size: 14, weight: .semibold, design: .rounded)
-                    .tint(RPV2Colors.orange)
-                    .padding(.horizontal, 12)
-            }
-        }
-    }
-
-    private func dateOption(on: Bool, title: String, action: @escaping () -> Void) -> some View {
-        Button(action: { MADHaptics.tap(); action() }) {
-            HStack(spacing: 8) {
-                Image(systemName: on ? "checkmark" : "calendar")
-                    .madFont(size: 14, weight: .black, maxScale: 1.15)
-                    .foregroundStyle(on ? RPV2Colors.orange : .white.opacity(0.4))
-                    .accessibilityHidden(true)
-                Text(title)
-                    .madFont(size: 14, weight: .heavy, design: .rounded)
-                    .foregroundStyle(.white)
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 9)
-            .background(selectedBackground(on, radius: 14))
-        }
-        .buttonStyle(.plain)
-        .accessibilityAddTraits(on ? .isSelected : [])
-    }
-
-    private func selectedBackground(_ on: Bool, radius: CGFloat = 18) -> some View {
-        RoundedRectangle(cornerRadius: radius, style: .continuous)
-            .fill(on ? RPV2Colors.orange.opacity(0.10) : RPV2Colors.card)
-            .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous)
-                .strokeBorder(on ? RPV2Colors.orange : .clear, lineWidth: 2))
-    }
-
-    private func now(for d: RunPlanV2GoalDistance) -> Int? {
-        profile?.race_estimates?.seconds(for: d)
-    }
-
-    private func best(for d: RunPlanV2GoalDistance) -> RunPlanV2BestEffort? {
-        profile?.best_efforts.first { $0.distance == d.rawValue }
-    }
-
-    /// Checkpoints for a big jump (the server sets them; this says why).
-    private var flameyNote: String? {
-        for g in model.distanceGoals {
-            guard let target = RunPlanSetupModel.parseClock(g.targetText), let now = now(for: g.distance) else { continue }
-            if Double(now - target) / Double(now) > 0.12 {
-                return String(localized: "That's a big jump from about \(RPV2Format.clock(now)), so we'll go in checkpoints and move the target as you get faster.")
-            }
-        }
-        return nil
-    }
-}
-
-/// One distance goal: "5K  Now ~26:00 → [19:59]".
-struct RunPlanGoalTargetRow: View {
-    @Binding var goal: RunPlanSetupModel.DistanceGoal
-    let now: Int?
-    let best: RunPlanV2BestEffort?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 8) {
-                Text(RPV2Format.distanceName(goal.distance == .custom ? nil : goal.distance,
-                                             miles: goal.distance == .custom ? goal.customMiles : nil))
-                    .madFont(size: 13, weight: .black, design: .rounded)
-                    .lineLimit(1)
-                    .frame(minWidth: 56, alignment: .leading)
-                if let now {
-                    Text(String(localized: "Now ~\(RPV2Format.clock(now))"))
-                        .madFont(size: 13, weight: .bold, design: .rounded)
-                        .foregroundStyle(.white.opacity(0.55))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-                }
-                Image(systemName: "arrow.right").madFont(size: 12, maxScale: 1.15)
-                    .foregroundStyle(.white.opacity(0.35)).accessibilityHidden(true)
-                TextField(String(localized: "Target"), text: $goal.targetText)
-                    .keyboardType(.numbersAndPunctuation)
-                    .madFont(size: 13, weight: .black, design: .rounded)
-                    .multilineTextAlignment(.center)
-                    .frame(minWidth: 64, maxWidth: 90)
-                    .padding(.vertical, 3)
-                    .background(RoundedRectangle(cornerRadius: 8).fill(Color.white.opacity(0.1)))
-                    .accessibilityLabel(String(localized: "Target time"))
-                Spacer(minLength: 0)
-            }
-            if goal.distance == .custom {
-                Stepper(value: $goal.customMiles, in: 0.5...31.1, step: 0.5) {
-                    Text(RPV2Format.distance(goal.customMiles))
-                        .madFont(size: 12, weight: .bold, design: .rounded)
-                }
-            }
-            Text(footnote)
-                .madFont(size: 11, design: .rounded)
-                .foregroundStyle(.white.opacity(0.5))
-                .madBodyLines(2)
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.black.opacity(0.3)))
-    }
-
-    private var footnote: String {
-        if let best, let s = best.seconds {
-            return String(localized: "Your best is \(RPV2Format.clock(s)). Type a target like 6:45, or leave it empty.")
-        }
-        if now != nil { return String(localized: "Estimated from your runs. Type a target like 24:00, or leave it empty.") }
-        return String(localized: "Type a target like 24:00, or leave it empty.")
-    }
-}
-
 /// Wrapping row of selectable chips.
 struct RunPlanChipFlow: View {
     let items: [(id: String, label: String, on: Bool)]
@@ -569,7 +413,7 @@ struct RunPlanEffortStep: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             if showsHeader {
-                RPV2StepHeader(step: String(localized: "Step 2 of 3"), title: String(localized: "How much, how hard?"))
+                RPV2StepHeader(step: String(localized: "Step 2 of 3"), title: String(localized: "How often, how much?"))
             }
             runsCard
             difficultyCard
@@ -612,6 +456,7 @@ struct RunPlanEffortStep: View {
                     .accessibilityAddTraits(n == model.runsPerWeek ? .isSelected : [])
                 }
             }
+            hardSessionsLine
         }
         .padding(12)
         .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(RPV2Colors.card))
@@ -623,27 +468,63 @@ struct RunPlanEffortStep: View {
 
     private var runsCaption: some View {
         Text(model.walkDayCount == 1
-             ? String(localized: "\(model.runsPerWeek) runs, 1 walk day")
-             : String(localized: "\(model.runsPerWeek) runs, \(model.walkDayCount) walk days"))
+             ? String(localized: "1 walk day")
+             : String(localized: "\(model.walkDayCount) walk days"))
             .madFont(size: 11, weight: .heavy, design: .rounded)
             .foregroundStyle(.white.opacity(0.45))
     }
 
+    /// "4 runs → 2 hard sessions a week. The rest stay easy (about 80% of
+    /// your running)." Runs per week (plus experience) sets the hard days;
+    /// effort never does.
+    private var hardSessionsLine: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "bolt.fill").madFont(size: 13, weight: .bold, maxScale: 1.15)
+                .foregroundStyle(RPV2Colors.red).padding(.top, 2).accessibilityHidden(true)
+            (Text(hardSessionsBold).foregroundColor(.white).bold()
+             + Text(" " + hardSessionsRest).foregroundColor(.white.opacity(0.65)))
+                .madFont(size: 12, design: .rounded)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.top, 2)
+    }
+
+    private var hardSessions: Int {
+        RunPlanEffortMapping.hardSessions(runs: model.runsPerWeek, preview: model.preview?.plan,
+                                          experience: profile?.experience,
+                                          calorieGoal: model.primary.type == .burnCalories)
+    }
+
+    private var hardSessionsBold: String {
+        let n = model.runsPerWeek
+        let runs = n == 1 ? String(localized: "1 run") : String(localized: "\(n) runs")
+        switch hardSessions {
+        case 0: return String(localized: "\(runs) → no hard sessions yet.")
+        case 1: return String(localized: "\(runs) → 1 hard session a week.")
+        default: return String(localized: "\(runs) → \(hardSessions) hard sessions a week.")
+        }
+    }
+
+    private var hardSessionsRest: String {
+        hardSessions == 0
+            ? String(localized: "Easy running with a few strides while you build.")
+            : String(localized: "The rest stay easy (about 80% of your running).")
+    }
+
     private var difficultyCard: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(String(localized: "Difficulty")).madFont(size: 13, weight: .bold, design: .rounded)
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .firstTextBaseline) { effortTitle; Spacer(minLength: 6); effortCaption }
+                VStack(alignment: .leading, spacing: 2) { effortTitle; effortCaption }
+            }
             RunPlanDifficultySlider(value: $model.difficulty)
-            VStack(alignment: .leading, spacing: 5) {
-                ForEach(Array(effortLines.enumerated()), id: \.offset) { _, line in
-                    HStack(alignment: .top, spacing: 8) {
-                        Image(systemName: line.icon).madFont(size: 13, weight: .bold, maxScale: 1.15)
-                            .foregroundStyle(line.tint).padding(.top, 2).accessibilityHidden(true)
-                        Text(line.text)
-                            .madFont(size: 13, design: .rounded)
-                            .foregroundStyle(.white.opacity(0.75))
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "waveform.path.ecg").madFont(size: 13, weight: .bold, maxScale: 1.15)
+                    .foregroundStyle(RPV2Colors.orange).padding(.top, 2).accessibilityHidden(true)
+                (Text(volume.bold).foregroundColor(.white).bold()
+                 + Text(volume.rest.isEmpty ? "" : " " + volume.rest).foregroundColor(.white.opacity(0.7)))
+                    .madFont(size: 13, design: .rounded)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             .padding(.top, 4)
         }
@@ -651,26 +532,23 @@ struct RunPlanEffortStep: View {
         .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(RPV2Colors.card))
     }
 
-    private var effortLines: [(icon: String, tint: Color, text: String)] {
-        var lines: [(icon: String, tint: Color, text: String)] = []
-        if let hard = model.preview?.plan.hard_sessions_per_week {
-            let text: String
-            switch hard {
-            case 0: text = String(localized: "No hard runs yet: easy running with a few strides while you build.")
-            case 1: text = String(localized: "1 hard run a week, the rest easy.")
-            default: text = String(localized: "\(hard) hard runs a week, the rest easy.")
-            }
-            lines.append(("bolt.fill", RPV2Colors.red, text))
-        }
-        if let base = profile?.weekly_miles_4w, base > 0 {
-            lines.append(("waveform.path.ecg", RPV2Colors.orange,
-                          String(localized: "Miles build from \(RPV2Format.distance(base)) a week, about 10% at a time.")))
-        }
-        if lines.isEmpty {
-            lines.append(("bolt.fill", RPV2Colors.red,
-                          String(localized: "Harder settings add hard runs and build your miles faster.")))
-        }
-        return lines
+    private var effortTitle: some View {
+        Text(String(localized: "Effort")).madFont(size: 13, weight: .bold, design: .rounded)
+    }
+
+    private var effortCaption: some View {
+        Text(String(localized: "sets volume, not hard days"))
+            .madFont(size: 11, weight: .heavy, design: .rounded)
+            .foregroundStyle(.white.opacity(0.45))
+    }
+
+    /// What this effort level means: the preview's `volume` when it is for
+    /// this level, else the documented per-level description.
+    private var volume: (bold: String, rest: String) {
+        let level = model.difficulty
+        let served = model.preview?.plan.volume
+        let current = served?.difficulty == level.rawValue ? served : nil
+        return (RunPlanEffortMapping.headline(level), RunPlanEffortMapping.detail(level, volume: current))
     }
 
     private func walkOption(_ mode: RunPlanV2WalkMode, title: String, text: String) -> some View {
@@ -789,7 +667,7 @@ struct RunPlanDifficultySlider: View {
             }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(String(localized: "Difficulty"))
+        .accessibilityLabel(String(localized: "Effort"))
         .accessibilityValue(RPV2Format.difficultyLabel(value))
         .accessibilityAdjustableAction { dir in
             switch dir {
@@ -798,6 +676,72 @@ struct RunPlanDifficultySlider: View {
             @unknown default: break
             }
         }
+    }
+}
+
+/// Runs per week → hard sessions, and what each effort level means (contract
+/// §3, Nov 25 evening). The server's numbers win; these are the documented
+/// fallbacks while a preview is on its way.
+enum RunPlanEffortMapping {
+    /// 1–3 runs → 1, 4–5 → 2, 6–7 → 2 (3 when experienced); new → 0,
+    /// novice → ≤ 1, a calorie primary → ≤ 1.
+    static func hardSessions(runs: Int, preview: RunPlanV2Plan?, experience: String?, calorieGoal: Bool) -> Int {
+        if let plan = preview, plan.runs_per_week == runs, let served = plan.hard_sessions_per_week { return served }
+        var n: Int
+        switch runs {
+        case ...3: n = 1
+        case 4...5: n = 2
+        default: n = experience == "experienced" ? 3 : 2
+        }
+        if experience == "new" { n = 0 }
+        if experience == "novice" || calorieGoal { n = min(n, 1) }
+        return n
+    }
+
+    static func headline(_ level: RunPlanV2Difficulty) -> String {
+        switch level {
+        case .easy: return String(localized: "Easy does it: a smaller version of the same week.")
+        case .steady: return String(localized: "Steady: the same week at a steady build.")
+        case .push: return String(localized: "Push: a bigger version of the same week.")
+        case .allIn: return String(localized: "All in: the biggest version of the same week.")
+        }
+    }
+
+    /// From the served `volume` (distances in the display unit), else the
+    /// documented growth step per level.
+    static func detail(_ level: RunPlanV2Difficulty, volume: RunPlanV2Volume?) -> String {
+        guard let v = volume else { return fallback(level) }
+        var parts: [String] = []
+        if let g = v.weekly_growth_pct {
+            parts.append(String(localized: "Weekly distance grows up to ~\(percent(g)) a week"))
+        }
+        if let l = v.long_run_target_mi, l > 0 {
+            parts.append(String(localized: "long run builds to \(RPV2Format.distance(l))"))
+        }
+        if v.easy_day_mi.count == 2 {
+            let lo = RPV2Format.number(v.easy_day_mi[0]), hi = RPV2Format.distance(v.easy_day_mi[1])
+            parts.append(String(localized: "easy days \(lo)–\(hi)"))
+        }
+        if let r = v.interval_reps, r > 0 {
+            parts.append(String(localized: "\(r) reps on interval days"))
+        } else if let t = v.tempo_work_mi, t > 0 {
+            parts.append(String(localized: "\(RPV2Format.distance(t)) of tempo work"))
+        }
+        if parts.isEmpty { return v.text ?? fallback(level) }
+        return parts.joined(separator: ", ") + "."
+    }
+
+    private static func fallback(_ level: RunPlanV2Difficulty) -> String {
+        switch level {
+        case .easy: return String(localized: "Weekly distance grows up to ~5% a week, with shorter long runs and fewer reps.")
+        case .steady: return String(localized: "Weekly distance grows up to ~7.5% a week.")
+        case .push: return String(localized: "Weekly distance grows up to ~10% a week, with a longer long run and more reps.")
+        case .allIn: return String(localized: "Weekly distance grows up to ~10% a week, with the longest long run and the most reps.")
+        }
+    }
+
+    private static func percent(_ x: Double) -> String {
+        abs(x - x.rounded()) < 0.05 ? "\(Int(x.rounded()))%" : String(format: "%.1f%%", x)
     }
 }
 
@@ -885,12 +829,8 @@ struct RunPlanFindingsStep: View {
                 Text(String(localized: "Shoes for each run")).madFont(size: 13, weight: .bold, design: .rounded)
             }
             .padding(.bottom, 4)
-            shoeRow(String(localized: "Easy & long"), types: [.easy, .long, .race])
-            Divider().overlay(Color.white.opacity(0.07))
-            shoeRow(String(localized: "Intervals & tempo"), types: [.intervals, .tempo])
-            Divider().overlay(Color.white.opacity(0.07))
-            shoeRow(String(localized: "Walk days"), types: [.walk])
-            Text(String(localized: "Loaded on each run for you."))
+            RunPlanShoeRows(model: model)
+            Text(String(localized: "Loaded on each run for you. Walk days don't need a shoe."))
                 .madFont(size: 11, design: .rounded).foregroundStyle(.white.opacity(0.5))
                 .padding(.top, 4)
         }
@@ -898,12 +838,47 @@ struct RunPlanFindingsStep: View {
         .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(RPV2Colors.card))
     }
 
-    private func shoeRow(_ title: String, types: [RunPlanV2ShoeRunType]) -> some View {
+    /// Defaults: the running default for every run type. Walk days get none.
+    private func seedShoes() {
+        guard model.shoes.isEmpty else { return }
+        if let run = shoeStore.defaultShoe(for: .running) {
+            for t in RunPlanV2ShoeRunType.runTypes { model.shoes[t] = run.shoe_id }
+        }
+    }
+
+    // MARK: Coach notes (AI only)
+
+    private var notesCard: some View {
+        RunPlanCoachNotesEditor(text: $model.coachNotes)
+    }
+}
+
+/// The two shoe rows (contract run types only; walk days never get a shoe):
+/// Easy & long (easy, long, race) and Intervals & tempo (intervals, tempo).
+struct RunPlanShoeRows: View {
+    @Bindable var model: RunPlanSetupModel
+    private var shoeStore: ShoeStore { ShoeStore.shared }
+
+    static let groups: [(title: String, types: [RunPlanV2ShoeRunType])] = [
+        (String(localized: "Easy & long"), [.easy, .long, .race]),
+        (String(localized: "Intervals & tempo"), [.intervals, .tempo]),
+    ]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(Self.groups.enumerated()), id: \.offset) { i, g in
+                if i > 0 { Divider().overlay(Color.white.opacity(0.07)) }
+                row(g.title, types: g.types)
+            }
+        }
+    }
+
+    private func row(_ title: String, types: [RunPlanV2ShoeRunType]) -> some View {
         let current = types.first.flatMap { model.shoes[$0] }
         return HStack(spacing: 8) {
             VStack(alignment: .leading, spacing: 1) {
                 RPV2Eyebrow(text: title, color: .white.opacity(0.45))
-                Text(shoeStore.shoe(id: current).map(shoeName) ?? String(localized: "None"))
+                Text(shoeStore.shoe(id: current).map(Self.name) ?? String(localized: "None"))
                     .madFont(size: 14, weight: .heavy, design: .rounded)
                     .lineLimit(1)
             }
@@ -911,34 +886,20 @@ struct RunPlanFindingsStep: View {
             Menu {
                 Button(String(localized: "None")) { types.forEach { model.shoes[$0] = nil } }
                 ForEach(shoeStore.active) { shoe in
-                    Button(shoeName(shoe)) { types.forEach { model.shoes[$0] = shoe.shoe_id } }
+                    Button(Self.name(shoe)) { types.forEach { model.shoes[$0] = shoe.shoe_id } }
                 }
             } label: {
                 Text(String(localized: "Change"))
                     .madFont(size: 13, weight: .black, design: .rounded)
                     .foregroundStyle(RPV2Colors.orange)
             }
+            .accessibilityLabel(String(localized: "Change shoe for \(title)"))
         }
         .padding(.vertical, 8)
     }
 
-    private func shoeName(_ shoe: Shoe) -> String {
+    static func name(_ shoe: Shoe) -> String {
         [shoe.brand, shoe.name].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " ")
-    }
-
-    /// Defaults: running default for runs, walking default for walk days.
-    private func seedShoes() {
-        guard model.shoes.isEmpty else { return }
-        if let run = shoeStore.defaultShoe(for: .running) {
-            for t in [RunPlanV2ShoeRunType.easy, .long, .race, .intervals, .tempo] { model.shoes[t] = run.shoe_id }
-        }
-        if let walk = shoeStore.defaultShoe(for: .walking) { model.shoes[.walk] = walk.shoe_id }
-    }
-
-    // MARK: Coach notes (AI only)
-
-    private var notesCard: some View {
-        RunPlanCoachNotesEditor(text: $model.coachNotes)
     }
 }
 

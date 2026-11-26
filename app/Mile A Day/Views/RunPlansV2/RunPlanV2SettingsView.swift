@@ -56,7 +56,7 @@ struct RunPlanV2SettingsView: View {
                             subtitle: effortSummary(plan), tint: RPV2Colors.red)
             }
             .buttonStyle(.plain)
-            if !ShoeStore.shared.active.isEmpty || plan.shoe_assignments?.values.contains(where: { $0 != nil }) == true {
+            if !ShoeStore.shared.active.isEmpty || RunPlanV2ShoeRunType.runTypes.contains(where: { plan.shoeId(for: $0) != nil }) {
                 SettingsDivider()
                 NavigationLink { RunPlanEditView(part: .shoes) } label: {
                     SettingsRow(icon: ShoeSymbol.filled, title: String(localized: "Shoes for each run"),
@@ -243,7 +243,7 @@ struct RunPlanEditView: View {
             p.fixed_walk_days = full.fixed_walk_days
         case .shoes:
             var all: RunPlanV2ShoeAssignments = [:]
-            for t in RunPlanV2ShoeRunType.allCases { all[t.rawValue] = m.shoes[t] }
+            for t in RunPlanV2ShoeRunType.runTypes { all[t.rawValue] = m.shoes[t] }
             p.shoe_assignments = all
         case .notes:
             p.coach_notes = full.coach_notes ?? ""
@@ -260,55 +260,20 @@ struct RunPlanEditView: View {
     }
 }
 
-/// Shoe per run type, for the settings editor.
+/// Shoe per run type, for the settings editor (walk days never get one).
 struct RunPlanShoesEditor: View {
     @Bindable var model: RunPlanSetupModel
-    private var shoeStore: ShoeStore { ShoeStore.shared }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            ForEach(RunPlanV2ShoeRunType.allCases, id: \.rawValue) { t in
-                HStack(spacing: 8) {
-                    VStack(alignment: .leading, spacing: 1) {
-                        RPV2Eyebrow(text: label(t), color: .white.opacity(0.45))
-                        Text(shoeStore.shoe(id: model.shoes[t]).map(name) ?? String(localized: "None"))
-                            .madFont(size: 14, weight: .heavy, design: .rounded)
-                            .lineLimit(1)
-                    }
-                    Spacer(minLength: 6)
-                    Menu {
-                        Button(String(localized: "None")) { model.shoes[t] = nil }
-                        ForEach(shoeStore.active) { shoe in
-                            Button(name(shoe)) { model.shoes[t] = shoe.shoe_id }
-                        }
-                    } label: {
-                        Text(String(localized: "Change"))
-                            .madFont(size: 13, weight: .black, design: .rounded)
-                            .foregroundStyle(RPV2Colors.orange)
-                    }
-                }
-                .padding(.vertical, 9)
-                if t != RunPlanV2ShoeRunType.allCases.last { Divider().overlay(Color.white.opacity(0.07)) }
-            }
+            RunPlanShoeRows(model: model)
+            Text(String(localized: "Loaded on each run for you. Walk days don't need a shoe."))
+                .madFont(size: 11, design: .rounded).foregroundStyle(.white.opacity(0.5))
+                .padding(.top, 4)
         }
         .padding(12)
         .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(RPV2Colors.card))
-        .task { await shoeStore.refreshIfStale() }
-    }
-
-    private func label(_ t: RunPlanV2ShoeRunType) -> String {
-        switch t {
-        case .easy: return String(localized: "Easy")
-        case .long: return String(localized: "Long")
-        case .tempo: return String(localized: "Tempo")
-        case .intervals: return String(localized: "Intervals")
-        case .race: return String(localized: "Race")
-        case .walk: return String(localized: "Walk days")
-        }
-    }
-
-    private func name(_ shoe: Shoe) -> String {
-        [shoe.brand, shoe.name].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " ")
+        .task { await ShoeStore.shared.refreshIfStale() }
     }
 }
 

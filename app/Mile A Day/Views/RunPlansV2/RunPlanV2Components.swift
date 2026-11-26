@@ -174,10 +174,112 @@ enum RPV2Format {
         }
     }
 
-    /// "Faster mile + sub-20:00 5K".
+    /// "Faster mile + sub-20:00 5K": the primary first, then the secondary
+    /// (legacy extra goals without a role are left out).
     static func goalsLine(_ goals: [RunPlanV2Goal]) -> String {
-        let names = goals.map(goalName)
+        let ordered = orderedGoals(goals)
+        let names = ordered.map(goalName)
         return names.isEmpty ? String(localized: "Your plan") : names.joined(separator: " + ")
+    }
+
+    /// Primary, then secondary; plans from before roles keep their order.
+    static func orderedGoals(_ goals: [RunPlanV2Goal]) -> [RunPlanV2Goal] {
+        guard goals.contains(where: { $0.role != nil }) else { return Array(goals.prefix(2)) }
+        let p = goals.filter { $0.goalRole == .primary }
+        let s = goals.filter { $0.goalRole == .secondary }
+        return Array(p.prefix(1)) + Array(s.prefix(1))
+    }
+
+    static func longDistanceName(_ d: RunPlanV2GoalDistance?, miles: Double?) -> String {
+        switch d {
+        case .half: return String(localized: "Half marathon")
+        default: return distanceName(d, miles: miles)
+        }
+    }
+
+    /// "5K under 20:00", "Half marathon", "Just improve".
+    static func goalTitle(_ goal: RunPlanV2Goal) -> String {
+        switch goal.goalType {
+        case .justImprove: return String(localized: "Just improve")
+        case .burnCalories: return String(localized: "Burn more calories")
+        case .distanceTime:
+            let name = longDistanceName(goal.goalDistance, miles: goal.distance_mi)
+            guard let t = goal.target_s else { return name }
+            return String(localized: "\(name) under \(clock(t))")
+        }
+    }
+
+    /// "9:09/mi pace", "150 min a week on your feet".
+    static func goalSubtitle(_ goal: RunPlanV2Goal) -> String {
+        switch goal.goalType {
+        case .justImprove: return String(localized: "4-week blocks, then a retest every 6 to 8 weeks")
+        case .burnCalories:
+            let minutes = goal.weekly_minutes ?? 150
+            return String(localized: "\(minutes) min a week on your feet")
+        case .distanceTime:
+            guard let t = goal.target_s, let mi = goal.miles, mi > 0 else {
+                return String(localized: "No target time: finish it, then get faster")
+            }
+            return String(localized: "\(pace(Int((Double(t) / mi).rounded()))) pace")
+        }
+    }
+
+    private static let monthDayFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.setLocalizedDateFormatFromTemplate("MMM d")
+        return f
+    }()
+
+    private static let monthYearFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.setLocalizedDateFormatFromTemplate("MMM yyyy")
+        return f
+    }()
+
+    /// "Jan 6" within ~10 months, else "Mar 2028".
+    static func projected(_ key: String) -> String {
+        let d = date(key)
+        let near = d.timeIntervalSinceNow < 300 * 86_400
+        return near ? monthDayFormatter.string(from: d) : monthYearFormatter.string(from: d)
+    }
+
+    /// The estimate chip: "~Jan 6" (green on track, gold stretch, orange
+    /// unlikely) or "Reached".
+    static func estimateChip(_ e: RunPlanV2GoalEstimate) -> (text: String, tint: Color)? {
+        if e.isAchieved { return (String(localized: "Reached"), RPV2Colors.green) }
+        guard let d = e.projected_date, !d.isEmpty else { return nil }
+        let tint: Color
+        switch e.feasibilityKind {
+        case .stretch: tint = RPV2Colors.gold
+        case .unlikely: tint = RPV2Colors.orange
+        default: tint = RPV2Colors.green
+        }
+        return (String(localized: "~\(projected(d))"), tint)
+    }
+
+    static func feasibilityLabel(_ f: RunPlanV2Feasibility) -> String {
+        switch f {
+        case .onTrack: return String(localized: "On track for your date")
+        case .stretch: return String(localized: "A stretch for your date")
+        case .unlikely: return String(localized: "Unlikely by your date")
+        case .achieved: return String(localized: "Reached")
+        }
+    }
+
+    static func limiterLabel(_ l: RunPlanV2Limiter) -> String {
+        switch l {
+        case .speed: return String(localized: "The gap is speed")
+        case .endurance: return String(localized: "The gap is distance")
+        }
+    }
+
+    /// "Checkpoints: sub-24, then sub-22".
+    static func checkpointsLine(_ e: RunPlanV2GoalEstimate) -> String? {
+        let labels = e.checkpoints.compactMap(\.label).filter { !$0.isEmpty }
+        guard let first = labels.first else { return nil }
+        if labels.count == 1 { return String(localized: "Checkpoint: \(first)") }
+        let rest = labels.dropFirst().joined(separator: ", ")
+        return String(localized: "Checkpoints: \(first), then \(rest)")
     }
 
     static func difficultyLabel(_ d: RunPlanV2Difficulty) -> String {

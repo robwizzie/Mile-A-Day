@@ -133,13 +133,39 @@ struct RunPlanProposalCard: View {
 
     private var touchesToday: Bool { proposal.touches(RunPlanV2Date.todayKey()) }
 
+    /// A goal swap regenerates up to 14 days: show the first week.
+    private var shownChanges: [RunPlanV2ProposalChange] { Array(proposal.changes.prefix(compact ? 3 : 7)) }
+    private var hiddenChanges: Int { proposal.changes.count - shownChanges.count }
+
+    /// `goal_promotion` (or any patch carrying goals): "New primary goal: …".
+    private var goalSwap: String? {
+        let goals = proposal.plan_patch?.goals ?? []
+        guard let primary = goals.first(where: { $0.goalRole == .primary }) ?? goals.first else { return nil }
+        let name = RPV2Format.goalTitle(primary)
+        if let next = goals.first(where: { $0.goalRole == .secondary }) {
+            return String(localized: "New primary goal: \(name). Secondary: \(RPV2Format.goalTitle(next)).")
+        }
+        return String(localized: "New primary goal: \(name). Its own phases start from the first changed day.")
+    }
+
     var body: some View {
         RPV2Card(stroke: RPV2Colors.gold.opacity(0.33), radius: 22, padding: 16) {
             if !compact { header }
-            VStack(spacing: 8) {
-                ForEach(Array(proposal.changes.enumerated()), id: \.offset) { _, c in RPV2ChangeRow(change: c) }
+            if let swap = goalSwap {
+                RPV2Notice(icon: "arrow.triangle.swap", text: swap, tint: .white.opacity(0.8), fill: RPV2Colors.gold.opacity(0.10))
+                    .padding(.top, compact ? 0 : 12)
             }
-            .padding(.top, compact ? 0 : 12)
+            VStack(spacing: 8) {
+                ForEach(Array(shownChanges.enumerated()), id: \.offset) { _, c in RPV2ChangeRow(change: c) }
+                if hiddenChanges > 0 {
+                    Text(hiddenChanges == 1 ? String(localized: "and 1 more day")
+                                            : String(localized: "and \(hiddenChanges) more days"))
+                        .madFont(size: 12, weight: .bold, design: .rounded)
+                        .foregroundStyle(.white.opacity(0.5))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            .padding(.top, compact && goalSwap == nil ? 0 : 12)
             if let reason = proposal.reason, !reason.isEmpty {
                 Text(reason)
                     .madFont(size: 14, design: .rounded)
