@@ -217,6 +217,10 @@ Details: docs/conventions/ios.md § Run Plans v2
 - PCC (`PrivateCloudComputeLanguageModel`) stays behind `AppleCoach.privateCloudComputeEntitled` + `compiler(>=6.4)`: without the managed entitlement the first prompt is a fatal error.
 - Heart rate / resting HR / HRV / DOB are asked only from setup (`RunFitnessAnalyzer.requestAccess`), never added to `healthKitReadTypes`; raw samples never leave the phone, only `RunPlanV2FitnessProfile`.
 - Embed `RunPlanPreRunView(onStart:)` / `RunPlanPostRunView(workoutId:)`; coach mode is `RunPlanCoachMode.isOn`; pushes route via `NotificationDestination.runPlanProposal` + `RUN_PLAN_PROPOSAL` (`APPLY`/`KEEP`), declared as `ClientFeatures.runPlansV2`.
+- Goals are one `primary` + optional `secondary` (`RunPlanSetupModel.GoalDraft`, each with `role` + `target_date`, plan `target_date` = the primary's); estimates are the server's (`RunPlanV2GoalEstimate` from `/preview` or `plan.goals`), never phone math; persist plans via `RunPlanV2GoalCache.encoder()`.
+- Effort (`difficulty`) scales volume only: hard sessions come from runs per week (`RunPlanEffortMapping.hardSessions`, the server's count first); no copy may say effort adds hard days.
+- Shoes only for `RunPlanV2ShoeRunType.runTypes` (never assign or send `walk`); show a day's shoe via `RunPlanV2Day.runShoe`, never `shoe`.
+- Effort guess: `RunEffortEstimator` (features + raw 1–10, from `RunFitnessComputation.timeline(for:)`) rides the grade upload's `effort`, else `RunPlanEffortModel` posts `/effort`; show the SERVED `guess` (raw + calibration); rate via `RunPlanV2Store.rateEffort`.
 
 ## Auth / Session
 Details: docs/conventions/ios.md § Auth / Session

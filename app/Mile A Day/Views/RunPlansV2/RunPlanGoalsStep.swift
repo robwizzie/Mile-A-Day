@@ -383,7 +383,9 @@ struct RunPlanGoalEstimateLine: View {
                         RPV2Chip(icon: c.icon, label: c.label, color: c.tint)
                     }
                 }
-                if let cp = RPV2Format.checkpointsLine(e) {
+                // The server's `text` already names the checkpoints and how the
+                // date fits; spell them out only without it.
+                if !hasText(e), let cp = RPV2Format.checkpointsLine(e) {
                     Text(cp)
                         .madFont(size: 11, weight: .heavy, design: .rounded)
                         .foregroundStyle(.white.opacity(0.5))
@@ -400,6 +402,8 @@ struct RunPlanGoalEstimateLine: View {
         }
     }
 
+    private func hasText(_ e: RunPlanV2GoalEstimate) -> Bool { !(e.text ?? "").isEmpty }
+
     private func chips(_ e: RunPlanV2GoalEstimate) -> [(icon: String, label: String, tint: Color)] {
         var out: [(icon: String, label: String, tint: Color)] = []
         if let c = RPV2Format.estimateChip(e) {
@@ -408,7 +412,7 @@ struct RunPlanGoalEstimateLine: View {
         if !e.isAchieved, let l = e.limiterKind {
             out.append((l == .speed ? "bolt.fill" : "figure.run", RPV2Format.limiterLabel(l), .white.opacity(0.75)))
         }
-        if let f = e.feasibilityKind, f != .achieved {
+        if !hasText(e), let f = e.feasibilityKind, f != .achieved {
             let tint: Color = f == .onTrack ? RPV2Colors.green : (f == .stretch ? RPV2Colors.gold : RPV2Colors.orange)
             out.append(("flag.fill", RPV2Format.feasibilityLabel(f), tint))
         }

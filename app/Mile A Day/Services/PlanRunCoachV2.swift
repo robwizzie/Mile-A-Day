@@ -389,10 +389,10 @@ final class PlanRunCoachV2 {
         let attempts = pending.attempts
         let date = pending.date
         Task { @MainActor [weak self] in
-            var body = body
-            body.effort = await PlanRunCoachV2.effortGuess(workoutId: workoutId, date: date)
+            var upload = body
+            upload.effort = await PlanRunCoachV2.effortGuess(workoutId: workoutId, date: date)
             do {
-                let result = try await RunPlanV2Store.shared.uploadGrade(body)
+                let result = try await RunPlanV2Store.shared.uploadGrade(upload)
                 self?.gradeUploaded(result.grade)
                 // The plan's after-run pass (refetch + Apple's coach).
                 RunPlanV2Store.shared.workoutDidSync()
