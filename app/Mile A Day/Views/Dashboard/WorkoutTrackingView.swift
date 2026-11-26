@@ -3321,7 +3321,7 @@ struct WorkoutTrackingView: View {
 
         // Run Plans v2: freeze the plan's segment stats for the grade upload
         // (before `stopTracking()` resets the distance it was measured on).
-        PlanRunCoachV2.shared.end(distance: finalDistance, clock: elapsedTime)
+        PlanRunCoachV2.shared.end(distance: finalDistance, clock: elapsedTime, sessionKey: pendingSessionId)
         // The Watch ends and DISCARDS its heart-rate session: this phone's
         // workout is the one saved.
         WatchWorkoutLink.shared.runEnded()
@@ -3396,7 +3396,8 @@ struct WorkoutTrackingView: View {
                             self.recapWorkoutId = workout.uuid.uuidString
                             // Plan run: pre-load the plan's shoe and queue the
                             // grade upload for once this syncs. No-op otherwise.
-                            PlanRunCoachV2.shared.workoutSaved(workoutId: workout.uuid.uuidString)
+                            PlanRunCoachV2.shared.workoutSaved(workoutId: workout.uuid.uuidString,
+                                                               sessionKey: pendingSessionId)
                         }
                     }
                     let finalize = {

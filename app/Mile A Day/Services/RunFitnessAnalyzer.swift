@@ -30,6 +30,8 @@ final class RunFitnessAnalyzer: ObservableObject {
     /// Recompute at most this often unless a new run invalidates it.
     private let maxAge: TimeInterval = 12 * 3600
     private var invalidated = false
+    /// One profile upload at a time (refreshes can overlap).
+    private var uploading = false
 
     private init() {
         if let cached = loadCache() { profile = cached }
@@ -65,11 +67,15 @@ final class RunFitnessAnalyzer: ObservableObject {
     func invalidate() { invalidated = true }
 
     /// Background-safe: recompute if the cache is old or a run invalidated it,
-    /// then upload when the plan exists. Never prompts.
+    /// then upload when the plan exists. Never prompts. A fresh profile whose
+    /// upload failed is retried (`uploadIfNeeded` dedupes on `computed_at`).
     func refreshIfStale() {
         guard TokenStore.hasTokens else { return }
-        if !invalidated, let at = RunPlanV2Date.parseTimestamp(profile?.computed_at),
-           Date().timeIntervalSince(at) < maxAge { return }
+        if !invalidated, let fresh = profile, let at = RunPlanV2Date.parseTimestamp(fresh.computed_at),
+           Date().timeIntervalSince(at) < maxAge {
+            Task { await uploadIfNeeded(fresh) }
+            return
+        }
         Task { _ = await analyze(upload: true) }
     }
 
@@ -77,6 +83,7 @@ final class RunFitnessAnalyzer: ObservableObject {
     @discardableResult
     func analyze(upload: Bool) async -> RunPlanV2FitnessProfile? {
         if let task { return await task.value }
+        let owner = SessionIdentity.cachedUserId
         isAnalyzing = true
         failed = false
         let includeHR = hasAskedForAccess
@@ -100,6 +107,8 @@ final class RunFitnessAnalyzer: ObservableObject {
             failed = true
             return profile
         }
+        // Signed out / switched account mid-analysis: these runs aren't theirs.
+        guard owner != nil, SessionIdentity.cachedUserId == owner else { return nil }
         invalidated = false
         profile = result
         saveCache(result)
@@ -114,8 +123,12 @@ final class RunFitnessAnalyzer: ObservableObject {
         guard let userId = SessionIdentity.cachedUserId else { return }
         let key = uploadedPrefix + userId
         if !force, UserDefaults.standard.string(forKey: key) == profile.computed_at { return }
+        guard !uploading else { return }
+        uploading = true
+        defer { uploading = false }
         do {
             let result = try await RunPlanV2Service.uploadFitnessProfile(profile)
+            guard SessionIdentity.cachedUserId == userId else { return }
             UserDefaults.standard.set(profile.computed_at, forKey: key)
             result.proposals.forEach { RunPlanV2Store.shared.absorb($0) }
         } catch {

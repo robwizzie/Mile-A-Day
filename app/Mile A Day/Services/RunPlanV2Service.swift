@@ -399,6 +399,20 @@ final class RunPlanV2Store: ObservableObject {
     private var uploadObserver: NSObjectProtocol?
     private let cachePrefix = "runPlanV2Current|"
     private let openDayPrefix = "runPlanV2OpenDay|"
+    /// Bumped by `reset()` (sign-out / account switch). A response started
+    /// under an older generation, or for another user, is dropped.
+    private var generation = 0
+
+    /// Who a request was started for.
+    private struct Session: Equatable {
+        let generation: Int
+        let userId: String?
+    }
+
+    private var session: Session { Session(generation: generation, userId: userId) }
+
+    /// The request's account is still the signed-in one.
+    private func isCurrent(_ s: Session) -> Bool { s == session && s.userId != nil }
 
     private init() {
         if let cached = loadCache() {
@@ -461,11 +475,13 @@ final class RunPlanV2Store: ObservableObject {
 
     func refresh() async {
         guard TokenStore.hasTokens, userId != nil, !isRefreshing else { return }
+        let started = session
         isRefreshing = true
-        defer { isRefreshing = false }
+        defer { if started.generation == generation { isRefreshing = false } }
         let today = RunPlanV2Date.todayKey()
         do {
             let s = try await RunPlanV2Service.status(today: today)
+            guard isCurrent(started) else { return }
             status = s
             plusRequired = !s.isPlus
             guard s.isPlus else {
@@ -481,17 +497,21 @@ final class RunPlanV2Store: ObservableObject {
                 return
             }
             await runFirstOpenIfNeeded(today: today)
+            guard isCurrent(started) else { return }
             let fresh = try await RunPlanV2Service.current(today: today)
+            guard isCurrent(started) else { return }
             adoptCurrent(fresh)
             loaded = true
             lastRefresh = Date()
             lastRefreshDay = today
             RunFitnessAnalyzer.shared.refreshIfStale()
         } catch RunPlanV2Error.plusRequired {
+            guard isCurrent(started) else { return }
             plusRequired = true
             clearPlanState()
             loaded = true
         } catch RunPlanV2Error.noPlan {
+            guard isCurrent(started) else { return }
             clearPlanState()
             loaded = true
         } catch {
@@ -503,10 +523,12 @@ final class RunPlanV2Store: ObservableObject {
     /// phone's own model when Apple's coach is on. Idempotent per day.
     private func runFirstOpenIfNeeded(today: String) async {
         guard let userId else { return }
+        let started = session
         let key = openDayPrefix + userId
         guard UserDefaults.standard.string(forKey: key) != today else { return }
         do {
             let result = try await RunPlanV2Service.open(today: today)
+            guard isCurrent(started) else { return }
             UserDefaults.standard.set(today, forKey: key)
             if let ai = result.ai { status?.ai = ai }
             if coachTier.isAI {
@@ -537,12 +559,16 @@ final class RunPlanV2Store: ObservableObject {
     /// Refetch `/current` without the status / open pass.
     func refreshQuietly() async {
         guard TokenStore.hasTokens, hasPlan else { return }
-        if let fresh = try? await RunPlanV2Service.current() { adoptCurrent(fresh) }
+        let started = session
+        if let fresh = try? await RunPlanV2Service.current(), isCurrent(started) { adoptCurrent(fresh) }
     }
 
     func loadScheduled() async {
         guard hasPlan else { return }
-        if let list = try? await RunPlanV2Service.proposals(status: "scheduled") { scheduledProposals = list }
+        let started = session
+        if let list = try? await RunPlanV2Service.proposals(status: "scheduled"), isCurrent(started) {
+            scheduledProposals = list
+        }
     }
 
     /// Fetches a proposal not in hand (a push tap).
@@ -568,18 +594,24 @@ final class RunPlanV2Store: ObservableObject {
     }
 
     func update(_ patch: RunPlanV2PlanPatch) async throws {
+        let started = session
         let fresh = try await call { try await RunPlanV2Service.updatePlan(patch) }
+        guard isCurrent(started) else { return }
         adoptCurrent(fresh)
     }
 
     func endPlan() async throws {
+        let started = session
         try await call { try await RunPlanV2Service.endPlan() }
+        guard isCurrent(started) else { return }
         clearPlanState()
         status?.has_plan = false
     }
 
     func apply(_ proposal: RunPlanV2Proposal) async throws {
+        let started = session
         let result = try await call { try await RunPlanV2Service.apply(proposalId: proposal.id) }
+        guard isCurrent(started) else { return }
         lastApplied = result.proposal ?? proposal
         await afterDecision()
     }
@@ -591,14 +623,18 @@ final class RunPlanV2Store: ObservableObject {
     }
 
     func decline(_ proposal: RunPlanV2Proposal) async throws {
+        let started = session
         _ = try await call { try await RunPlanV2Service.decline(proposalId: proposal.id) }
+        guard isCurrent(started) else { return }
         pendingProposals.removeAll { $0.id == proposal.id }
         suggestions.removeAll { $0.id == proposal.id }
         await afterDecision()
     }
 
     func undo(_ proposal: RunPlanV2Proposal) async throws {
+        let started = session
         _ = try await call { try await RunPlanV2Service.undo(proposalId: proposal.id) }
+        guard isCurrent(started) else { return }
         if lastApplied?.id == proposal.id { lastApplied = nil }
         await afterDecision()
     }
@@ -608,15 +644,17 @@ final class RunPlanV2Store: ObservableObject {
     /// Check-in before the run. Returns the formula's proposal; AI tiers then
     /// build their own (which supersedes it) — see `RunPlanPreRunModel`.
     func checkIn(_ request: RunPlanV2CheckinRequest) async throws -> RunPlanV2CheckinResult {
+        let started = session
         let result = try await call { try await RunPlanV2Service.checkIn(request) }
-        if let p = result.proposal { absorb(p) }
+        if let p = result.proposal, isCurrent(started) { absorb(p) }
         return result
     }
 
     /// The phone's grade inputs after a run (live coach calls this).
     func uploadGrade(_ upload: RunPlanV2GradeUpload) async throws -> RunPlanV2GradeResult {
+        let started = session
         let result = try await call { try await RunPlanV2Service.uploadGrade(upload) }
-        result.proposals.forEach(absorb)
+        if isCurrent(started) { result.proposals.forEach(absorb) }
         await refreshQuietly()
         return result
     }
@@ -629,20 +667,23 @@ final class RunPlanV2Store: ObservableObject {
     /// The user's 1–10 answer. The server may answer with an
     /// `effort_fatigue` / `effort_progression` proposal; the plan is refetched.
     func rateEffort(workoutId: String, rating: Int?) async throws -> RunPlanV2RatingResult {
+        let started = session
         let result = try await call { try await RunPlanV2Service.rateEffort(workoutId: workoutId, rating: rating) }
-        result.proposals.forEach(absorb)
+        if isCurrent(started) { result.proposals.forEach(absorb) }
         await refreshQuietly()
         return result
     }
 
     func setCoachOptOut(_ optOut: Bool) async throws {
+        let started = session
         let ai = try await call { try await RunPlanV2Service.setCoachOptOut(optOut) }
-        setAI(ai)
+        if isCurrent(started) { setAI(ai) }
     }
 
     func setAnthropicConsent(_ accepted: Bool) async throws {
+        let started = session
         let ai = try await call { try await RunPlanV2Service.setAnthropicConsent(accepted) }
-        setAI(ai)
+        if isCurrent(started) { setAI(ai) }
     }
 
     /// A proposal the phone's coach (or the server's Anthropic coach) made.
@@ -668,6 +709,11 @@ final class RunPlanV2Store: ObservableObject {
 
     /// Sign-out: the cached plan belongs to the account we're leaving.
     func reset() {
+        // In-flight requests of the account we're leaving must not land.
+        generation += 1
+        syncTask?.cancel()
+        syncTask = nil
+        isRefreshing = false
         PlanRunWatchSync.clearForSignOut()
         clearPlanState(clearCache: false)
         status = nil
@@ -695,9 +741,12 @@ final class RunPlanV2Store: ObservableObject {
     }
 
     private func call<T>(_ work: () async throws -> T) async throws -> T {
+        let started = session
         do {
             return try await work()
         } catch let e as RunPlanV2Error {
+            // Another account's failure says nothing about this one.
+            guard isCurrent(started) else { throw e }
             if e == .plusRequired { plusRequired = true }
             if e == .noPlan { clearPlanState() }
             // The plan moved under this proposal (or its days passed): show

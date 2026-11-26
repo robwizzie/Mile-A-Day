@@ -91,6 +91,9 @@ final class PlanRunCoachV2 {
 
     private struct PendingGrade: Codable {
         let date: String
+        /// The tracker session the stats were measured in (its save id).
+        /// Only a workout saved from this session may adopt them.
+        var sessionKey: String?
         var workoutId: String?
         let upload: Stats
         var attempts: Int
@@ -185,7 +188,9 @@ final class PlanRunCoachV2 {
 
     /// The run ended (Stop). Freezes the plan's stats for the grade upload;
     /// the card goes away with the tracker.
-    func end(distance: Double, clock: TimeInterval) {
+    /// `sessionKey`: the tracker's save session id (`PendingWorkoutSave.sessionId`),
+    /// passed again to `workoutSaved` with the saved workout.
+    func end(distance: Double, clock: TimeInterval, sessionKey: String) {
         guard var engine, let day else { return }
         engine.close(clock: clock, miles: distance)
         let stats = PendingGrade.Stats(
@@ -193,7 +198,8 @@ final class PlanRunCoachV2 {
             segments: engine.stats,
             repPaces: engine.repPaces,
             avgHR: engine.averageHeartRate)
-        pendingGrade = PendingGrade(date: day.date, workoutId: nil, upload: stats, attempts: 0, endedAt: Date())
+        pendingGrade = PendingGrade(date: day.date, sessionKey: sessionKey, workoutId: nil, upload: stats,
+                                    attempts: 0, endedAt: Date())
         savePendingGrade()
         finishedRun = FinishedRun(date: day.date, title: day.title, workoutId: nil, state: .waiting)
         let shoe = day.shoeId
@@ -209,11 +215,20 @@ final class PlanRunCoachV2 {
 
     /// HealthKit saved the plan run (`recapWorkoutId`). Pre-loads the plan's
     /// shoe on it and queues the grade upload for once it syncs.
-    func workoutSaved(workoutId: String) {
-        // Only the run that just ended: a pending grade whose save never
-        // landed must not adopt a later, unrelated workout.
-        guard var pending = pendingGrade, pending.workoutId == nil,
-              Date().timeIntervalSince(pending.endedAt) < 10 * 60 else { return }
+    func workoutSaved(workoutId: String, sessionKey: String) {
+        // Only the run that just ended, matched by its tracker session: a
+        // plan run whose save never landed must not hand its stats (or its
+        // shoe) to a later, unrelated workout.
+        guard var pending = pendingGrade, pending.workoutId == nil else { return }
+        guard pending.sessionKey == sessionKey, Date().timeIntervalSince(pending.endedAt) < 10 * 60 else {
+            // Another session's save, or too late: the plan run's own save
+            // failed. The server grades it if it ever syncs.
+            pendingGrade = nil
+            savePendingGrade()
+            pendingShoeId = nil
+            if finishedRun?.workoutId == nil { finishedRun?.state = .serverGrades }
+            return
+        }
         pending.workoutId = workoutId
         pendingGrade = pending
         savePendingGrade()

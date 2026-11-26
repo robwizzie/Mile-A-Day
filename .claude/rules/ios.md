@@ -220,6 +220,7 @@ Details: docs/conventions/ios.md § Run Plans v2
 - Goals are one `primary` + optional `secondary` (`RunPlanSetupModel.GoalDraft`, each with `role` + `target_date`, plan `target_date` = the primary's); estimates are the server's (`RunPlanV2GoalEstimate` from `/preview` or `plan.goals`), never phone math; persist plans via `RunPlanV2GoalCache.encoder()`.
 - Effort (`difficulty`) scales volume only: hard sessions come from runs per week (`RunPlanEffortMapping.hardSessions`, the server's count first); no copy may say effort adds hard days.
 - Shoes only for `RunPlanV2ShoeRunType.runTypes` (never assign or send `walk`); show a day's shoe via `RunPlanV2Day.runShoe`, never `shoe`.
+- Every `RunPlanV2Store` response is adopted only if `isCurrent(started)` (captured `session` = `generation` + userId; `reset()` bumps it); a plan run's grade matches its save by `sessionKey` (`end(…sessionKey:)` → `workoutSaved(workoutId:sessionKey:)`), never by age.
 - Effort guess: `RunEffortEstimator` (features + raw 1–10, from `RunFitnessComputation.timeline(for:)`) rides the grade upload's `effort`, else `RunPlanEffortModel` posts `/effort`; show the SERVED `guess` (raw + calibration); rate via `RunPlanV2Store.rateEffort`.
 
 ## Auth / Session
