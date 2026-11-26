@@ -161,7 +161,24 @@ type Goal = {
   target_s?: number | null;
   current_s?: number | null;
   weekly_minutes?: number;
+  role?: "primary" | "secondary" | null;
+  target_date?: string | null;
+  estimate?: { text?: string; limiter?: string | null; projected_date?: string | null; feasibility?: string | null } | null;
 };
+
+type Effort = {
+  workout_id: string;
+  local_date: string;
+  run_type: string;
+  effort_type: string;
+  raw_guess: number;
+  offset: number;
+  guess: number;
+  user_rating: number | null;
+  delta: number | null;
+  reason: string;
+};
+type Calibration = { effort_type: string; offset: number; samples: number; applied: boolean };
 
 type UserDetail = {
   user: {
@@ -191,6 +208,8 @@ type UserDetail = {
   proposals: Proposal[];
   history: { id: string; at: string; event: string; source: string | null; summary: string }[];
   calls: AiCall[];
+  efforts?: Effort[];
+  effort_calibration?: Calibration[];
 };
 
 // ─── Formatting ─────────────────────────────────────────────────────
@@ -660,9 +679,17 @@ function CoachUserPanel({
                 <div className="space-y-2 text-sm">
                   <div className="flex flex-wrap gap-1.5">
                     {d.plan.goals.map((g, i) => (
-                      <Chip key={i} text={goalText(g)} tone="info" />
+                      <Chip key={i} text={`${g.role ? `${g.role}: ` : ""}${goalText(g)}`} tone={g.role === "secondary" ? "muted" : "info"} />
                     ))}
                   </div>
+                  {d.plan.goals.map((g, i) =>
+                    g.estimate?.text ? (
+                      <p key={`e${i}`} className="text-white/55">
+                        {g.role === "secondary" ? "Secondary" : "Primary"}: {g.estimate.text}
+                        {g.estimate.projected_date ? ` (about ${fmtDate(g.estimate.projected_date)})` : ""}
+                      </p>
+                    ) : null,
+                  )}
                   <p className="text-white/70">
                     {d.plan.runs_per_week} runs a week · {DIFFICULTY[d.plan.difficulty] ?? d.plan.difficulty} ·
                     walk days {d.plan.walk_mode.replace(/_/g, " ")} · week {d.plan.week_index + 1} ({d.plan.phase}) ·
@@ -685,6 +712,37 @@ function CoachUserPanel({
                 <DayList title="Recent" days={recent} />
               </div>
             )}
+
+            <div>
+              <Heading>Effort ratings ({d.efforts?.length ?? 0})</Heading>
+              {d.effort_calibration && d.effort_calibration.some((c) => c.samples > 0) && (
+                <p className="mb-2 text-xs text-white/45">
+                  Calibration:{" "}
+                  {d.effort_calibration
+                    .map((c) => `${c.effort_type} ${c.offset > 0 ? "+" : ""}${c.offset} (${c.samples} rated${c.applied ? "" : ", not applied yet"})`)
+                    .join(" · ")}
+                </p>
+              )}
+              {!d.efforts?.length ? (
+                <p className="text-sm text-white/40">No effort guesses yet.</p>
+              ) : (
+                <ul className="divide-y divide-white/5 text-sm">
+                  {d.efforts.slice(0, 30).map((e) => (
+                    <li key={e.workout_id} className="flex flex-wrap items-baseline gap-x-3 py-1.5">
+                      <span className="w-16 shrink-0 text-xs text-white/40">{e.local_date.slice(5)}</span>
+                      <span className="w-20 shrink-0 text-white/60">{e.run_type}</span>
+                      <span className="tabular-nums text-white/80">
+                        guess {e.guess}/10 · rated {e.user_rating == null ? "—" : `${e.user_rating}/10`}
+                      </span>
+                      {e.delta != null && Math.abs(e.delta) >= 2 && (
+                        <Chip text={e.delta > 0 ? "harder than guessed" : "easier than guessed"} tone={e.delta > 0 ? "bad" : "ok"} />
+                      )}
+                      <span className="min-w-0 flex-1 basis-48 text-xs text-white/40">{e.reason}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
 
             <div>
               <Heading>Proposals ({d.proposals.length})</Heading>
