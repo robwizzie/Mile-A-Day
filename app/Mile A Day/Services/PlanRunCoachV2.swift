@@ -387,7 +387,10 @@ final class PlanRunCoachV2 {
             easy_hr_drift_pct: nil,
             avg_hr: pending.upload.avgHR.map { Int($0.rounded()) })
         let attempts = pending.attempts
+        let date = pending.date
         Task { @MainActor [weak self] in
+            var body = body
+            body.effort = await PlanRunCoachV2.effortGuess(workoutId: workoutId, date: date)
             do {
                 let result = try await RunPlanV2Store.shared.uploadGrade(body)
                 self?.gradeUploaded(result.grade)
@@ -412,6 +415,20 @@ final class PlanRunCoachV2 {
         pendingGrade = nil
         savePendingGrade()
         finishedRun?.state = .serverGrades
+    }
+
+    /// The phone's effort guess (`RunEffortEstimator`), sent inside the grade
+    /// upload. Nil when HealthKit can't read the run: the post-run screen
+    /// tries again on its own.
+    @MainActor
+    private static func effortGuess(workoutId: String, date: String) async -> RunPlanV2GradeEffort? {
+        let store = RunPlanV2Store.shared
+        let day = ([store.today].compactMap { $0 } + store.week).first { $0.dateKey == date }
+        guard day?.isWalk != true else { return nil }
+        let profile = RunFitnessAnalyzer.shared.profile
+        guard let e = await RunEffortEstimator.estimate(workoutId: workoutId, day: day, profile: profile) else { return nil }
+        return RunPlanV2GradeEffort(run_type: day == nil ? nil : e.runType.rawValue,
+                                    raw_guess: e.rawGuess, features: e.features)
     }
 
     private static func wire(_ stat: PlanRunSegmentStats) -> RunPlanV2SegmentStat {
@@ -504,8 +521,8 @@ extension RunPlanV2Day {
             title: title ?? dayKind.rawValue.capitalized,
             subtitle: subtitle,
             estDurationSeconds: est_duration_s.map(Double.init),
-            shoeId: shoe?.shoe_id,
-            shoeName: shoe?.name,
+            shoeId: runShoe?.shoe_id,
+            shoeName: runShoe?.name,
             segments: livePlanSegments)
     }
 

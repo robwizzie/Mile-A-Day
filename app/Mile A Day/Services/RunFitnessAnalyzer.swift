@@ -328,7 +328,8 @@ struct RunFitnessComputation: Sendable {
         }
     }
 
-    private func timeline(for workout: HKWorkout) async throws -> RunFitnessTimeline {
+    /// Also used by `RunEffortEstimator` for one just-finished run.
+    func timeline(for workout: HKWorkout) async throws -> RunFitnessTimeline {
         let start = workout.startDate
         let end = workout.endDate
         let span = max(end.timeIntervalSince(start), 1)
@@ -626,7 +627,7 @@ struct RunFitnessComputation: Sendable {
 
     /// Highest HR held over two adjacent 10-s buckets (a spike in one bucket
     /// is usually a strap artefact).
-    private static func cleanMaxHR(_ r: RunFitnessTimeline) -> Double? {
+    static func cleanMaxHR(_ r: RunFitnessTimeline) -> Double? {
         var best: Double?
         for i in 1..<max(r.hr.count, 1) {
             guard let a = r.hr[i - 1], let b = r.hr[i], abs(a - b) <= 6 else { continue }
@@ -636,7 +637,7 @@ struct RunFitnessComputation: Sendable {
         return best
     }
 
-    private struct StretchResult {
+    struct StretchResult {
         var segments: [RunFitnessSegment] = []
         var walkBreaks = 0
         var runStretches: [Double] = []
@@ -646,7 +647,7 @@ struct RunFitnessComputation: Sendable {
     /// Splits a run into running and walking stretches (30-s smoothed speed),
     /// then keeps running stretches ≥ 3 min after the first 5 min (rule 16) as
     /// steady segments, trimmed where pace wanders off the stretch's median.
-    private static func analyzeStretches(_ r: RunFitnessTimeline) -> StretchResult {
+    static func analyzeStretches(_ r: RunFitnessTimeline) -> StretchResult {
         let b = RunFitnessTimeline.bucket
         let n = r.meters.count
         guard n >= 6 else { return StretchResult() }

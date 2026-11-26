@@ -584,7 +584,7 @@ struct RPV2TodayCard: View {
 
     @ViewBuilder
     private var chips: some View {
-        let shoe = day.shoe?.name
+        let shoe = day.runShoe?.name
         let mph = day.workSegments.first?.speed_mph ?? day.segments.first(where: { $0.speed_mph != nil })?.speed_mph
         if shoe != nil || (treadmill && !day.isWalk) {
             ViewThatFits(in: .horizontal) {

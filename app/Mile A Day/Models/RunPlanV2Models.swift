@@ -247,15 +247,16 @@ enum RunPlanV2DayKind: String, Codable, CaseIterable, Sendable {
     init(raw: String?) { self = raw.flatMap(RunPlanV2DayKind.init(rawValue:)) ?? .easy }
 
     var isRun: Bool { self != .walk }
-    /// The shoe slot this kind draws from (`shoe_assignments` key).
-    var shoeRunType: RunPlanV2ShoeRunType {
+    /// The shoe slot this kind draws from (`shoe_assignments` key). Walk
+    /// days have none (contract, Nov 25 evening: walk days never get a shoe).
+    var shoeRunType: RunPlanV2ShoeRunType? {
         switch self {
         case .easy, .calibration: return .easy
         case .long: return .long
         case .tempo: return .tempo
         case .intervals: return .intervals
         case .race: return .race
-        case .walk: return .walk
+        case .walk: return nil
         }
     }
 }
@@ -306,6 +307,13 @@ enum RunPlanV2ProposalKind: String, Codable, CaseIterable, Sendable {
     case postRun = "post_run"
     case weeklyReview = "weekly_review"
     case planBuild = "plan_build"
+    /// The primary goal was reached: make the secondary the primary
+    /// (`plan_patch.goals`).
+    case goalPromotion = "goal_promotion"
+    /// A run rated much harder than guessed: a lighter next hard day.
+    case effortFatigue = "effort_fatigue"
+    /// Runs keep feeling easier than guessed: paces 3% faster.
+    case effortProgression = "effort_progression"
 
     /// Contract: unknown proposal kinds are treated as `adjust`.
     init(raw: String?) { self = raw.flatMap(RunPlanV2ProposalKind.init(rawValue:)) ?? .adjust }
@@ -338,7 +346,41 @@ enum RunPlanV2AICallTrigger: String, Codable, CaseIterable, Sendable {
 }
 
 enum RunPlanV2ShoeRunType: String, Codable, CaseIterable, Sendable {
+    /// `walk` is kept only so old cached plans decode: the server ignores a
+    /// sent `walk` key and always serves it as null. Never assign or send it.
     case easy, long, tempo, intervals, race, walk
+
+    /// The run types a shoe can be assigned to (everything but `walk`).
+    static let runTypes: [RunPlanV2ShoeRunType] = [.easy, .long, .tempo, .intervals, .race]
+}
+
+/// `goal.role`.
+enum RunPlanV2GoalRole: String, Codable, CaseIterable, Sendable {
+    case primary, secondary
+}
+
+/// `estimate.limiter`: what stands between now and the goal.
+enum RunPlanV2Limiter: String, Codable, CaseIterable, Sendable {
+    case speed, endurance
+}
+
+/// `estimate.feasibility` (dated goals only).
+enum RunPlanV2Feasibility: String, Codable, CaseIterable, Sendable {
+    case onTrack = "on_track"
+    case stretch, unlikely, achieved
+}
+
+/// `effort_type`: the calibration bucket of a run type.
+enum RunPlanV2EffortType: String, Codable, CaseIterable, Sendable {
+    case easy, long, quality
+
+    init(kind: RunPlanV2DayKind) {
+        switch kind {
+        case .long: self = .long
+        case .tempo, .intervals, .race, .calibration: self = .quality
+        case .easy, .walk: self = .easy
+        }
+    }
 }
 
 enum RunPlanV2ScoreBy: String, Codable, CaseIterable, Sendable {
@@ -553,19 +595,29 @@ struct RunPlanV2Goal: Codable, Equatable, Hashable, Sendable {
     @RunPlanV2Int var current_s: Int? = nil
     /// burn_calories only.
     @RunPlanV2Int var weekly_minutes: Int? = nil
+    /// primary | secondary (nil on legacy extra goals: ignored).
+    var role: String? = nil
+    /// This goal's date; nil = as soon as possible.
+    var target_date: String? = nil
+    /// The server's estimate (response only, never sent).
+    var estimate: RunPlanV2GoalEstimate? = nil
 
     init(type: RunPlanV2GoalType, distance: RunPlanV2GoalDistance? = nil, distanceMi: Double? = nil,
-         targetSeconds: Int? = nil, weeklyMinutes: Int? = nil) {
+         targetSeconds: Int? = nil, weeklyMinutes: Int? = nil, role: RunPlanV2GoalRole? = nil,
+         targetDate: String? = nil) {
         self.type = type.rawValue
         self.distance = distance?.rawValue
         self.distance_mi = distanceMi
         self.target_s = targetSeconds
         self.current_s = nil
         self.weekly_minutes = weeklyMinutes
+        self.role = role?.rawValue
+        self.target_date = targetDate
+        self.estimate = nil
     }
 
     enum CodingKeys: String, CodingKey {
-        case type, distance, distance_mi, target_s, current_s, weekly_minutes
+        case type, distance, distance_mi, target_s, current_s, weekly_minutes, role, target_date, estimate
     }
 
     init(from decoder: Decoder) throws {
@@ -576,9 +628,15 @@ struct RunPlanV2Goal: Codable, Equatable, Hashable, Sendable {
         _target_s = try c.decode(RunPlanV2Int.self, forKey: .target_s)
         _current_s = try c.decode(RunPlanV2Int.self, forKey: .current_s)
         _weekly_minutes = try c.decode(RunPlanV2Int.self, forKey: .weekly_minutes)
+        role = try? c.decodeIfPresent(String.self, forKey: .role)
+        target_date = try? c.decodeIfPresent(String.self, forKey: .target_date)
+        estimate = try? c.decodeIfPresent(RunPlanV2GoalEstimate.self, forKey: .estimate)
     }
 
     /// Request bodies send only what the goal uses (no nulls for unused keys).
+    /// A goal with a role always sends `target_date` (null = as soon as
+    /// possible). The estimate is the server's and is never sent; the
+    /// offline cache keeps it via `RunPlanV2GoalCache`.
     func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(type, forKey: .type)
@@ -587,11 +645,99 @@ struct RunPlanV2Goal: Codable, Equatable, Hashable, Sendable {
         try c.encodeIfPresent(target_s, forKey: .target_s)
         try c.encodeIfPresent(current_s, forKey: .current_s)
         try c.encodeIfPresent(weekly_minutes, forKey: .weekly_minutes)
+        if let role {
+            try c.encode(role, forKey: .role)
+            try c.encode(target_date, forKey: .target_date)
+        }
+        if encoder.userInfo[RunPlanV2GoalCache.key] as? Bool == true {
+            try c.encodeIfPresent(estimate, forKey: .estimate)
+        }
     }
 
     var goalType: RunPlanV2GoalType { RunPlanV2GoalType(rawValue: type) ?? .justImprove }
     var goalDistance: RunPlanV2GoalDistance? { distance.flatMap(RunPlanV2GoalDistance.init(rawValue:)) }
     var miles: Double? { distance_mi ?? goalDistance?.miles }
+    var goalRole: RunPlanV2GoalRole? { role.flatMap(RunPlanV2GoalRole.init(rawValue:)) }
+}
+
+/// Encoder flag: the plan cache keeps the server's goal estimates (request
+/// bodies never carry them).
+enum RunPlanV2GoalCache {
+    static let key = CodingUserInfoKey(rawValue: "runPlanV2KeepEstimates")!
+
+    static func encoder() -> JSONEncoder {
+        let e = JSONEncoder()
+        e.userInfo[key] = true
+        return e
+    }
+}
+
+/// One checkpoint inside a goal's estimate.
+struct RunPlanV2EstimateCheckpoint: Codable, Equatable, Hashable, Sendable {
+    var label: String?
+    @RunPlanV2Int var target_s: Int? = nil
+    @RunPlanV2Int var eta_week: Int? = nil
+    var eta_date: String?
+}
+
+/// `estimate.achieved_by`.
+struct RunPlanV2AchievedBy: Codable, Equatable, Hashable, Sendable {
+    var workout_id: String?
+    var local_date: String?
+    @RunPlanV2Int var seconds: Int? = nil
+}
+
+/// The server's estimate on every served goal (§3 Estimate object). Computed
+/// by code from the fitness profile, never by a model.
+struct RunPlanV2GoalEstimate: Codable, Equatable, Hashable, Sendable {
+    @RunPlanV2Int var goal_index: Int? = nil
+    var role: String?
+    @RunPlanV2Int var now_s: Int? = nil
+    /// e.g. "5K 26:00 ≈ half 2:00:30".
+    var now_label: String?
+    @RunPlanV2Int var target_s: Int? = nil
+    /// speed | endurance | null
+    var limiter: String?
+    @RunPlanV2List var speed_weeks: [Int] = []
+    @RunPlanV2List var endurance_weeks: [Int] = []
+    /// [low, high] of the limiter.
+    @RunPlanV2List var weeks: [Int] = []
+    var projected_date: String?
+    @RunPlanV2List var projected_date_range: [String] = []
+    /// on_track | stretch | unlikely | achieved | null (ASAP)
+    var feasibility: String?
+    @RunPlanV2Int var weeks_available: Int? = nil
+    @RunPlanV2Number var vdot_now: Double? = nil
+    @RunPlanV2Number var vdot_needed: Double? = nil
+    @RunPlanV2Number var longest_run_mi: Double? = nil
+    @RunPlanV2Number var long_run_needed_mi: Double? = nil
+    @RunPlanV2List var checkpoints: [RunPlanV2EstimateCheckpoint] = []
+    @RunPlanV2Bool var achieved: Bool? = nil
+    var achieved_at: String?
+    var achieved_by: RunPlanV2AchievedBy?
+    /// The server's one-paragraph explanation.
+    var text: String?
+
+    var limiterKind: RunPlanV2Limiter? { limiter.flatMap(RunPlanV2Limiter.init(rawValue:)) }
+    var feasibilityKind: RunPlanV2Feasibility? { feasibility.flatMap(RunPlanV2Feasibility.init(rawValue:)) }
+    var isAchieved: Bool { (achieved ?? false) || feasibilityKind == .achieved }
+    /// The first checkpoint still ahead (the list is in order).
+    var nextCheckpoint: RunPlanV2EstimateCheckpoint? { checkpoints.first }
+}
+
+/// `plan.volume` (read-only): what the current difficulty means for this
+/// plan right now. Difficulty scales volume only, never hard days.
+struct RunPlanV2Volume: Codable, Equatable, Hashable, Sendable {
+    @RunPlanV2Int var difficulty: Int? = nil
+    var label: String?
+    @RunPlanV2Number var weekly_growth_pct: Double? = nil
+    @RunPlanV2Number var long_run_target_mi: Double? = nil
+    /// [min, max] this week.
+    @RunPlanV2List var easy_day_mi: [Double] = []
+    @RunPlanV2Int var interval_reps: Int? = nil
+    @RunPlanV2Number var tempo_work_mi: Double? = nil
+    /// The server's one-line description (miles in the text).
+    var text: String?
 }
 
 struct RunPlanV2Checkpoint: Codable, Equatable, Hashable, Sendable {
@@ -616,6 +762,8 @@ struct RunPlanV2Plan: Codable, Equatable, Hashable, Sendable, Identifiable {
     var coach_notes: String?
     var shoe_assignments: RunPlanV2ShoeAssignments?
     @RunPlanV2Int var hard_sessions_per_week: Int? = nil
+    /// What the difficulty means right now (Nov 25 evening).
+    var volume: RunPlanV2Volume? = nil
     var start_date: String?
     @RunPlanV2Int var week_index: Int? = nil
     var phase: String?
@@ -628,6 +776,7 @@ struct RunPlanV2Plan: Codable, Equatable, Hashable, Sendable, Identifiable {
         case plan_id, status, goals, target_date, runs_per_week, difficulty, walk_mode, fixed_walk_days,
              coach_notes, shoe_assignments, hard_sessions_per_week, start_date, week_index, phase,
              weekly_target_mi, checkpoints, created_at, updated_at
+        case volume
         case id
     }
 
@@ -645,6 +794,7 @@ struct RunPlanV2Plan: Codable, Equatable, Hashable, Sendable, Identifiable {
         coach_notes = try? c.decodeIfPresent(String.self, forKey: .coach_notes)
         shoe_assignments = try? c.decodeIfPresent(RunPlanV2ShoeAssignments.self, forKey: .shoe_assignments)
         _hard_sessions_per_week = try c.decode(RunPlanV2Int.self, forKey: .hard_sessions_per_week)
+        volume = try? c.decodeIfPresent(RunPlanV2Volume.self, forKey: .volume)
         start_date = try? c.decodeIfPresent(String.self, forKey: .start_date)
         _week_index = try c.decode(RunPlanV2Int.self, forKey: .week_index)
         phase = try? c.decodeIfPresent(String.self, forKey: .phase)
@@ -667,6 +817,7 @@ struct RunPlanV2Plan: Codable, Equatable, Hashable, Sendable, Identifiable {
         try c.encodeIfPresent(coach_notes, forKey: .coach_notes)
         try c.encodeIfPresent(shoe_assignments, forKey: .shoe_assignments)
         try c.encodeIfPresent(hard_sessions_per_week, forKey: .hard_sessions_per_week)
+        try c.encodeIfPresent(volume, forKey: .volume)
         try c.encodeIfPresent(start_date, forKey: .start_date)
         try c.encodeIfPresent(week_index, forKey: .week_index)
         try c.encodeIfPresent(phase, forKey: .phase)
@@ -683,7 +834,21 @@ struct RunPlanV2Plan: Codable, Equatable, Hashable, Sendable, Identifiable {
     }
     var phaseKind: RunPlanV2Phase? { phase.flatMap(RunPlanV2Phase.init(rawValue:)) }
     func shoeId(for type: RunPlanV2ShoeRunType) -> String? {
-        shoe_assignments?[type.rawValue] ?? nil
+        guard type != .walk else { return nil }
+        return shoe_assignments?[type.rawValue] ?? nil
+    }
+
+    /// The goal that shapes the plan: `role: "primary"`, else the first goal
+    /// (a cache from before roles).
+    var primaryGoal: RunPlanV2Goal? {
+        goals.first { $0.goalRole == .primary } ?? goals.first { $0.role == nil }
+    }
+
+    /// The optional second goal (one speed session a week).
+    var secondaryGoal: RunPlanV2Goal? {
+        if let s = goals.first(where: { $0.goalRole == .secondary }) { return s }
+        guard !goals.contains(where: { $0.role != nil }), goals.count > 1 else { return nil }
+        return goals[1]
     }
 }
 
@@ -793,6 +958,10 @@ struct RunPlanV2Day: Codable, Equatable, Hashable, Sendable, Identifiable {
     var hasPendingProposal: Bool { !pending_proposal_ids.isEmpty }
     /// Note written by a model (Flamey's own words) rather than a template.
     var noteIsAI: Bool { ["apple", "anthropic", "overseer", "user_claude"].contains(note_source ?? "") }
+    /// The day's shoe, never on a walk day (people walk in other shoes).
+    var runShoe: RunPlanV2DayShoe? { isWalk ? nil : shoe }
+    /// primary | secondary | nil: which goal this session is for.
+    var forGoal: RunPlanV2GoalRole? { spec?.for_goal.flatMap(RunPlanV2GoalRole.init(rawValue:)) }
 }
 
 // MARK: - DaySpec (§5: what the model / user sends; the server computes the rest)
@@ -807,11 +976,13 @@ struct RunPlanV2DaySpec: Codable, Equatable, Hashable, Sendable {
     var recover_s: Int?
     /// 0.85–1.15 scales computed paces (>1 slower). nil = 1.0.
     var pace_factor: Double?
+    /// primary | secondary | nil (informational: marks the secondary's session).
+    var for_goal: String?
     var note: String?
 
     init(kind: RunPlanV2DayKind, distanceMi: Double? = nil, workMi: Double? = nil, reps: Int? = nil,
          repMi: Double? = nil, repSeconds: Int? = nil, recoverSeconds: Int? = nil,
-         paceFactor: Double? = nil, note: String? = nil) {
+         paceFactor: Double? = nil, forGoal: String? = nil, note: String? = nil) {
         self.kind = kind.rawValue
         self.distance_mi = distanceMi
         self.work_mi = workMi
@@ -820,11 +991,12 @@ struct RunPlanV2DaySpec: Codable, Equatable, Hashable, Sendable {
         self.rep_s = repSeconds
         self.recover_s = recoverSeconds
         self.pace_factor = paceFactor
+        self.for_goal = forGoal
         self.note = note
     }
 
     enum CodingKeys: String, CodingKey {
-        case kind, distance_mi, work_mi, reps, rep_mi, rep_s, recover_s, pace_factor, note
+        case kind, distance_mi, work_mi, reps, rep_mi, rep_s, recover_s, pace_factor, for_goal, note
     }
 
     init(from decoder: Decoder) throws {
@@ -837,6 +1009,7 @@ struct RunPlanV2DaySpec: Codable, Equatable, Hashable, Sendable {
         rep_s = (try c.decode(RunPlanV2Int.self, forKey: .rep_s)).wrappedValue
         recover_s = (try c.decode(RunPlanV2Int.self, forKey: .recover_s)).wrappedValue
         pace_factor = (try c.decode(RunPlanV2Number.self, forKey: .pace_factor)).wrappedValue
+        for_goal = try? c.decodeIfPresent(String.self, forKey: .for_goal)
         note = try? c.decodeIfPresent(String.self, forKey: .note)
     }
 
@@ -851,6 +1024,7 @@ struct RunPlanV2DaySpec: Codable, Equatable, Hashable, Sendable {
         try c.encode(rep_s, forKey: .rep_s)
         try c.encode(recover_s, forKey: .recover_s)
         try c.encode(pace_factor, forKey: .pace_factor)
+        try c.encode(for_goal, forKey: .for_goal)
         try c.encode(note, forKey: .note)
     }
 
@@ -867,6 +1041,7 @@ struct RunPlanV2DaySpec: Codable, Equatable, Hashable, Sendable {
         self.kind = kind.rawValue
         self.note = nil
         self.pace_factor = nil
+        self.for_goal = nil
         switch kind {
         case .walk:
             distance_mi = nil; work_mi = nil; reps = nil; rep_mi = nil; rep_s = nil; recover_s = nil
@@ -988,6 +1163,9 @@ struct RunPlanV2Proposal: Codable, Equatable, Hashable, Sendable, Identifiable {
 struct RunPlanV2ProposalPlanPatch: Codable, Equatable, Hashable, Sendable {
     @RunPlanV2Number var pace_factor: Double? = nil
     @RunPlanV2Number var vdot: Double? = nil
+    /// `goal_promotion`: the new goal list (the secondary now primary).
+    @RunPlanV2List var goals: [RunPlanV2Goal] = []
+    var target_date: String? = nil
 }
 
 struct RunPlanV2ProposalRequest: Codable, Equatable, Sendable {
@@ -1170,11 +1348,168 @@ struct RunPlanV2GradeUpload: Codable, Equatable, Sendable {
     var rep_paces_s: [Int] = []
     var easy_hr_drift_pct: Double?
     var avg_hr: Int?
+    /// The phone's effort guess for this run (= `POST /run-plans/effort`).
+    var effort: RunPlanV2GradeEffort? = nil
 }
 
 struct RunPlanV2GradeResult: Codable, Equatable, Sendable {
     var grade: RunPlanV2Grade?
     @RunPlanV2List var proposals: [RunPlanV2Proposal] = []
+    var effort: RunPlanV2Effort? = nil
+}
+
+// MARK: - Effort guess (RPE) (§7b)
+
+/// What the phone measured in one run (HR samples never leave the phone).
+/// Every field nullable; no Watch = `has_hr: false`, HR fields null.
+struct RunPlanV2EffortFeatures: Codable, Equatable, Hashable, Sendable {
+    @RunPlanV2Bool var has_hr: Bool? = nil
+    @RunPlanV2Int var avg_hr: Int? = nil
+    @RunPlanV2Int var peak_hr: Int? = nil
+    /// Time-weighted mean zone, fractional (3.4 = 40% into zone 3's band).
+    @RunPlanV2Number var avg_hr_zone: Double? = nil
+    @RunPlanV2Int var peak_hr_zone: Int? = nil
+    /// Seconds in zones 1–5, or nil.
+    var time_in_zones_s: [Int]? = nil
+    @RunPlanV2Int var avg_pace_s: Int? = nil
+    @RunPlanV2Int var predicted_pace_s: Int? = nil
+    /// (actual / predicted − 1) × 100; negative = faster.
+    @RunPlanV2Number var pace_vs_predicted_pct: Double? = nil
+    @RunPlanV2Number var hr_drift_pct: Double? = nil
+    @RunPlanV2Int var duration_s: Int? = nil
+    /// 0–1.
+    @RunPlanV2Number var walk_fraction: Double? = nil
+
+    enum CodingKeys: String, CodingKey {
+        case has_hr, avg_hr, peak_hr, avg_hr_zone, peak_hr_zone, time_in_zones_s, avg_pace_s,
+             predicted_pace_s, pace_vs_predicted_pct, hr_drift_pct, duration_s, walk_fraction
+    }
+
+    init() {}
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        _has_hr = try c.decode(RunPlanV2Bool.self, forKey: .has_hr)
+        _avg_hr = try c.decode(RunPlanV2Int.self, forKey: .avg_hr)
+        _peak_hr = try c.decode(RunPlanV2Int.self, forKey: .peak_hr)
+        _avg_hr_zone = try c.decode(RunPlanV2Number.self, forKey: .avg_hr_zone)
+        _peak_hr_zone = try c.decode(RunPlanV2Int.self, forKey: .peak_hr_zone)
+        time_in_zones_s = try? c.decodeIfPresent([Int].self, forKey: .time_in_zones_s)
+        _avg_pace_s = try c.decode(RunPlanV2Int.self, forKey: .avg_pace_s)
+        _predicted_pace_s = try c.decode(RunPlanV2Int.self, forKey: .predicted_pace_s)
+        _pace_vs_predicted_pct = try c.decode(RunPlanV2Number.self, forKey: .pace_vs_predicted_pct)
+        _hr_drift_pct = try c.decode(RunPlanV2Number.self, forKey: .hr_drift_pct)
+        _duration_s = try c.decode(RunPlanV2Int.self, forKey: .duration_s)
+        _walk_fraction = try c.decode(RunPlanV2Number.self, forKey: .walk_fraction)
+    }
+
+    /// Nulls are sent explicitly.
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(_has_hr, forKey: .has_hr)
+        try c.encode(_avg_hr, forKey: .avg_hr)
+        try c.encode(_peak_hr, forKey: .peak_hr)
+        try c.encode(_avg_hr_zone, forKey: .avg_hr_zone)
+        try c.encode(_peak_hr_zone, forKey: .peak_hr_zone)
+        try c.encode(time_in_zones_s, forKey: .time_in_zones_s)
+        try c.encode(_avg_pace_s, forKey: .avg_pace_s)
+        try c.encode(_predicted_pace_s, forKey: .predicted_pace_s)
+        try c.encode(_pace_vs_predicted_pct, forKey: .pace_vs_predicted_pct)
+        try c.encode(_hr_drift_pct, forKey: .hr_drift_pct)
+        try c.encode(_duration_s, forKey: .duration_s)
+        try c.encode(_walk_fraction, forKey: .walk_fraction)
+    }
+
+    var hasHeartRate: Bool { has_hr ?? false }
+}
+
+/// `"effort"` inside `POST /run-plans/grades`.
+struct RunPlanV2GradeEffort: Codable, Equatable, Sendable {
+    /// Omitted = the plan day's kind.
+    var run_type: String?
+    var raw_guess: Double
+    var features: RunPlanV2EffortFeatures
+}
+
+/// `POST /run-plans/effort`.
+struct RunPlanV2EffortUpload: Codable, Equatable, Sendable {
+    var today: String
+    var local_date: String
+    var workout_id: String
+    var run_type: String?
+    /// 1–10, one decimal.
+    var raw_guess: Double
+    var features: RunPlanV2EffortFeatures
+}
+
+/// A stored effort: the phone's raw guess + the user's calibration = `guess`.
+struct RunPlanV2Effort: Codable, Equatable, Hashable, Sendable {
+    var workout_id: String?
+    var local_date: String?
+    var run_type: String?
+    /// easy | long | quality
+    var effort_type: String?
+    @RunPlanV2Number var raw_guess: Double? = nil
+    @RunPlanV2Number var offset: Double? = nil
+    /// round(raw + offset), 1–10.
+    @RunPlanV2Int var guess: Int? = nil
+    /// very easy | easy | moderate | hard | very hard | max
+    var guess_label: String?
+    /// Template from the features (code, not a model).
+    var reason: String?
+    @RunPlanV2Int var user_rating: Int? = nil
+    var rated_at: String?
+    /// user_rating − guess.
+    @RunPlanV2Int var delta: Int? = nil
+    var features: RunPlanV2EffortFeatures?
+    var created_at: String?
+    var updated_at: String?
+
+    var effortType: RunPlanV2EffortType? { effort_type.flatMap(RunPlanV2EffortType.init(rawValue:)) }
+    var isRated: Bool { user_rating != nil }
+}
+
+/// Per-type calibration: EWMA of rating − raw guess; applied once samples ≥ 3.
+struct RunPlanV2Calibration: Codable, Equatable, Hashable, Sendable {
+    var effort_type: String?
+    @RunPlanV2Number var offset: Double? = nil
+    @RunPlanV2Int var samples: Int? = nil
+    @RunPlanV2Bool var applied: Bool? = nil
+
+    var isApplied: Bool { applied ?? false }
+}
+
+/// `POST /effort`, `GET /effort/:workoutId`.
+struct RunPlanV2EffortResult: Codable, Equatable, Sendable {
+    var effort: RunPlanV2Effort?
+    @RunPlanV2List var calibration: [RunPlanV2Calibration] = []
+}
+
+/// `POST /effort/:workoutId/rating`.
+struct RunPlanV2RatingResult: Codable, Equatable, Sendable {
+    var effort: RunPlanV2Effort?
+    @RunPlanV2List var calibration: [RunPlanV2Calibration] = []
+    @RunPlanV2List var proposals: [RunPlanV2Proposal] = []
+}
+
+/// `GET /effort?from=&to=`.
+struct RunPlanV2EffortList: Codable, Equatable, Sendable {
+    @RunPlanV2List var efforts: [RunPlanV2Effort] = []
+    @RunPlanV2List var calibration: [RunPlanV2Calibration] = []
+}
+
+struct RunPlanV2EffortSignals: Codable, Equatable, Hashable, Sendable {
+    /// The latest rating was ≥ 2 above its guess.
+    @RunPlanV2Bool var fatigue: Bool? = nil
+    /// The effort_type with 3 of its last 4 rated ≥ 2 below the guess.
+    var progression: String?
+}
+
+/// `/coach/context` `effort`.
+struct RunPlanV2CoachEffort: Codable, Equatable, Sendable {
+    @RunPlanV2List var recent: [RunPlanV2Effort] = []
+    @RunPlanV2List var calibration: [RunPlanV2Calibration] = []
+    var signals: RunPlanV2EffortSignals?
 }
 
 // MARK: - Triggers (§6)
@@ -1247,6 +1582,10 @@ struct RunPlanV2CoachContext: Codable, Equatable, Sendable {
     /// The research rules as compact text.
     var rules: String?
     @RunPlanV2List var formula_proposals: [RunPlanV2Proposal] = []
+    /// Goals with their estimates (Nov 25 evening).
+    @RunPlanV2List var goals: [RunPlanV2Goal] = []
+    /// Recent effort guesses, ratings and calibration.
+    var effort: RunPlanV2CoachEffort?
 }
 
 enum RunPlanV2OptionIntent: String, Codable, CaseIterable, Sendable {
@@ -1463,6 +1802,7 @@ enum RunPlanV2Error: Error, Equatable {
         case "fixed_walk_days_mismatch":
             return String(localized: "Pick one walk day for every day you don't run.")
         case "invalid_shoe": return String(localized: "One of those shoes is retired. Pick another.")
+        case "invalid_effort": return String(localized: "Couldn't save how hard that run was. Try again in a moment.")
         case "past_date": return String(localized: "That day has already passed.")
         case "not_for_today": return String(localized: "This change isn't for today.")
         case "invalid_today": return String(localized: "Your phone's date looks off. Check Settings.")

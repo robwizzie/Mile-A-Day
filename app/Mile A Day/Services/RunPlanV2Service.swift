@@ -67,7 +67,7 @@ enum RunPlanV2Service {
         case "undo_conflict": return .undoConflict
         case "undo_conflicts_with_plan":
             return .undoConflictsWithPlan(localDate: parsed?.local_date, violations: parsed?.violations ?? [])
-        case "proposal_not_found", "day_not_found": return .notFound(code)
+        case "proposal_not_found", "day_not_found", "effort_not_found": return .notFound(code)
         default: return .invalid(code)
         }
         if let api = error as? APIError {
@@ -256,6 +256,45 @@ enum RunPlanV2Service {
 
     static func uploadGrade(_ upload: RunPlanV2GradeUpload) async throws -> RunPlanV2GradeResult {
         try await run("/run-plans/grades", method: .POST, body: try encode(upload), as: RunPlanV2GradeResult.self)
+    }
+
+    // MARK: §7b Effort guess (RPE)
+
+    private static func path(_ s: String) -> String {
+        s.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed.subtracting(CharacterSet(charactersIn: "/"))) ?? s
+    }
+
+    static func submitEffort(_ upload: RunPlanV2EffortUpload) async throws -> RunPlanV2EffortResult {
+        try await run("/run-plans/effort", method: .POST, body: try encode(upload), as: RunPlanV2EffortResult.self)
+    }
+
+    /// `404 effort_not_found` → `RunPlanV2Error.notFound`.
+    static func effort(workoutId: String) async throws -> RunPlanV2EffortResult {
+        try await run("/run-plans/effort/\(path(workoutId))", as: RunPlanV2EffortResult.self)
+    }
+
+    static func efforts(from: String? = nil, to: String? = nil) async throws -> RunPlanV2EffortList {
+        var endpoint = "/run-plans/effort"
+        if let from, let to { endpoint += "?from=\(q(from))&to=\(q(to))" }
+        return try await run(endpoint, as: RunPlanV2EffortList.self)
+    }
+
+    /// `rating` nil clears it (sent as an explicit null).
+    private struct RatingBody: Encodable {
+        let today: String
+        let rating: Int?
+        enum CodingKeys: String, CodingKey { case today, rating }
+        func encode(to encoder: Encoder) throws {
+            var c = encoder.container(keyedBy: CodingKeys.self)
+            try c.encode(today, forKey: .today)
+            try c.encode(rating, forKey: .rating)
+        }
+    }
+
+    static func rateEffort(workoutId: String, rating: Int?,
+                           today: String = RunPlanV2Date.todayKey()) async throws -> RunPlanV2RatingResult {
+        try await run("/run-plans/effort/\(path(workoutId))/rating", method: .POST,
+                      body: try encode(RatingBody(today: today, rating: rating)), as: RunPlanV2RatingResult.self)
     }
 
     // MARK: §9 Anthropic (server-side coach)
@@ -582,6 +621,20 @@ final class RunPlanV2Store: ObservableObject {
         return result
     }
 
+    /// The phone's effort guess for a run (`POST /effort`).
+    func submitEffort(_ upload: RunPlanV2EffortUpload) async throws -> RunPlanV2EffortResult {
+        try await call { try await RunPlanV2Service.submitEffort(upload) }
+    }
+
+    /// The user's 1–10 answer. The server may answer with an
+    /// `effort_fatigue` / `effort_progression` proposal; the plan is refetched.
+    func rateEffort(workoutId: String, rating: Int?) async throws -> RunPlanV2RatingResult {
+        let result = try await call { try await RunPlanV2Service.rateEffort(workoutId: workoutId, rating: rating) }
+        result.proposals.forEach(absorb)
+        await refreshQuietly()
+        return result
+    }
+
     func setCoachOptOut(_ optOut: Bool) async throws {
         let ai = try await call { try await RunPlanV2Service.setCoachOptOut(optOut) }
         setAI(ai)
@@ -675,7 +728,8 @@ final class RunPlanV2Store: ObservableObject {
     }
 
     private func saveCache() {
-        guard let userId, let current, let data = try? JSONEncoder().encode(current) else { return }
+        // Keeps the goals' server estimates (request bodies never carry them).
+        guard let userId, let current, let data = try? RunPlanV2GoalCache.encoder().encode(current) else { return }
         UserDefaults.standard.set(data, forKey: cachePrefix + userId)
     }
 

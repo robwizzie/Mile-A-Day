@@ -83,7 +83,7 @@ struct RunPlanPreRunView: View {
                 VStack(alignment: .leading, spacing: 2) { bigTitle(day); paceLine(day) }
             }
             .padding(.top, 4)
-            if let shoe = day.shoe?.name {
+            if let shoe = day.runShoe?.name {
                 RPV2Chip(icon: ShoeSymbol.filled, label: shoe, color: RPV2Colors.orange).padding(.top, 8)
             }
             if let note = day.note, !note.isEmpty {

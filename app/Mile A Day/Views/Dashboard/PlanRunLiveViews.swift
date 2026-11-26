@@ -115,7 +115,7 @@ struct PlanRunModeOption: View {
 
     private func subtitle(_ day: RunPlanV2Day) -> String {
         let title = day.title ?? "Today's run"
-        if let shoe = day.shoe?.name, !shoe.isEmpty { return "\(title) · \(shoe)" }
+        if let shoe = day.runShoe?.name, !shoe.isEmpty { return "\(title) · \(shoe)" }
         return title
     }
 }
