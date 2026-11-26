@@ -179,6 +179,19 @@ final class AppleCoach {
         return nil
     }
 
+    /// Flamey's one-line "why" for the effort guess, phrased from the
+    /// computed features (the numbers stay the code's). Nil = use the
+    /// server's template reason.
+    func phraseEffortReason(_ effort: RunPlanV2Effort, day: RunPlanV2Day?) async -> String? {
+        guard Self.isAvailable, !dailyLimitHitToday, effort.features != nil else { return nil }
+        #if canImport(FoundationModels)
+        if #available(iOS 26.0, *) {
+            return await AppleCoachEngine().effortReason(effort, day: day)
+        }
+        #endif
+        return nil
+    }
+
     // MARK: Quota
 
     func noteDailyLimitHit() {
@@ -252,6 +265,13 @@ enum AppleCoachPrompt {
     - Conventions you may break only with a one-sentence deviation_reason: weekly miles up at most 10% or \
     2 mi, a cutback week every 4th week, about 80% of running easy.
     - Missed easy run: drop it. Missed key session: move it only with an easy day on each side, else drop it.
+    - Runs per week sets how many hard sessions a week; the effort level (difficulty) only scales volume \
+    (weekly growth, long-run length, easy-day length, reps), never the number of hard days.
+    - The primary goal shapes the plan (volume, long run, phases). The secondary goal gets at most one \
+    session a week, inside the hard-session count (for_goal "secondary"). Goal estimates are the app's; \
+    quote them, never compute your own.
+    - Effort ratings: the runner rates each run 1-10 after the guess. Rated much harder than guessed = \
+    fatigue (consider a lighter next hard day); repeatedly easier = progression. Ratings never change a grade.
     - Never give medical, injury, illness, medication or diet advice. Pain and illness are the runner's call.
     - Write like a coach texting a friend: short, plain, warm, one sentence of reason. No emoji, no hashtags.
     """
@@ -296,21 +316,11 @@ enum AppleCoachPrompt {
         var out: [String] = []
         out.append("Today: \(c.today ?? RunPlanV2Date.todayKey())")
         if let p = c.plan {
-            var goals: [String] = []
-            for g in p.goals {
-                switch g.goalType {
-                case .distanceTime:
-                    var s = "\(g.distance ?? "race")"
-                    if let t = g.target_s { s += " target \(clock(t))" }
-                    if let n = g.current_s { s += " (now ~\(clock(n)))" }
-                    goals.append(s)
-                case .justImprove: goals.append("just improve")
-                case .burnCalories: goals.append("burn calories (\(g.weekly_minutes ?? 150) min/week)")
-                }
-            }
-            out.append("Goals: \(goals.joined(separator: "; "))")
+            let served = c.goals.isEmpty ? p.goals : c.goals
+            let goals = RPV2Format.orderedGoals(served).map { goalLine($0, wide: wide) }
+            out.append("Goals:\n" + goals.joined(separator: "\n"))
             var line = "Plan: week \(p.week_index ?? 1), phase \(p.phase ?? "?"), \(p.runs_per_week ?? 0) runs/week, "
-            line += "difficulty \(p.difficulty ?? 2)/4, walk days \(p.walk_mode ?? "built_in"), "
+            line += "difficulty \(p.difficulty ?? 2)/4 (volume only), walk days \(p.walk_mode ?? "built_in"), "
             line += "week target \(String(format: "%.1f", p.weekly_target_mi ?? 0)) mi, "
             line += "hard sessions/week \(p.hard_sessions_per_week ?? 0)"
             if let td = p.target_date { line += ", race date \(td)" }
@@ -377,12 +387,67 @@ enum AppleCoachPrompt {
             out.append("Already proposed (waiting for the runner; don't repeat):\n"
                        + pending.prefix(5).map { "\($0.title ?? $0.kind ?? "change"): \($0.reason ?? "")" }.joined(separator: "\n"))
         }
+        if let e = c.effort, let text = effortLines(e, wide: wide) { out.append(text) }
         let declined = c.recent_decisions.filter { $0.status == "declined" }
         if !declined.isEmpty {
             out.append("Recently declined by the runner: " + declined.prefix(5).compactMap(\.kind).joined(separator: ", "))
         }
         if wide, let rules = c.rules, !rules.isEmpty { out.append("Training rules:\n\(rules.prefix(6000))") }
         return out.joined(separator: "\n")
+    }
+
+    /// "- primary: half target 2:37:19 (now ~2:00:30), as soon as possible;
+    /// estimate ~2027-01-06 (5-7 weeks), limiter endurance, checkpoints …".
+    static func goalLine(_ g: RunPlanV2Goal, wide: Bool) -> String {
+        var s = "- \(g.role ?? "goal"): "
+        switch g.goalType {
+        case .distanceTime:
+            s += g.distance == "custom" ? String(format: "%.2f mi", g.distance_mi ?? 0) : (g.distance ?? "race")
+            if let t = g.target_s { s += " target \(clock(t))" }
+            if let n = g.current_s { s += " (now ~\(clock(n)))" }
+        case .justImprove: s += "just improve"
+        case .burnCalories: s += "burn calories (\(g.weekly_minutes ?? 150) min/week)"
+        }
+        s += g.target_date.map { ", by \($0)" } ?? ", as soon as possible"
+        guard let e = g.estimate else { return s }
+        if e.isAchieved { return s + "; ACHIEVED" + (e.achieved_by?.local_date.map { " on \($0)" } ?? "") }
+        if let d = e.projected_date {
+            s += "; estimate ~\(d)"
+            if e.weeks.count == 2 { s += " (\(e.weeks[0])-\(e.weeks[1]) weeks)" }
+        }
+        if let l = e.limiter { s += ", limiter \(l)" }
+        if let f = e.feasibility { s += ", \(f)" }
+        let cps = e.checkpoints.compactMap(\.label)
+        if !cps.isEmpty { s += ", checkpoints " + cps.joined(separator: " > ") }
+        if wide, let t = e.text, !t.isEmpty { s += ". \(t.prefix(300))" }
+        return s
+    }
+
+    /// Recent effort guesses vs the runner's ratings, calibration, signals.
+    static func effortLines(_ e: RunPlanV2CoachEffort, wide: Bool) -> String? {
+        var out: [String] = []
+        let recent = e.recent.prefix(wide ? 10 : 4).map { r -> String in
+            var s = "\(r.local_date ?? "?") \(r.run_type ?? "?"): guessed \(r.guess.map(String.init) ?? "-")/10"
+            s += ", rated " + (r.user_rating.map { "\($0)/10" } ?? "not yet")
+            if let f = r.features, wide {
+                if let z = f.avg_hr_zone { s += ", avg zone \(z)" }
+                if let p = f.pace_vs_predicted_pct { s += ", pace \(p)% vs predicted" }
+                if let d = f.hr_drift_pct { s += ", drift \(d)%" }
+            }
+            return s
+        }
+        if !recent.isEmpty { out.append("Effort (newest first):\n" + recent.joined(separator: "\n")) }
+        let cal = e.calibration.compactMap { c -> String? in
+            guard let t = c.effort_type else { return nil }
+            let off = String(format: "%+.1f", c.offset ?? 0)
+            return "\(t) \(off) (\(c.samples ?? 0) ratings\(c.isApplied ? ", applied" : ""))"
+        }
+        if !cal.isEmpty { out.append("Effort calibration (rating minus guess): " + cal.joined(separator: "; ")) }
+        if let sig = e.signals {
+            if sig.fatigue == true { out.append("Effort signal: FATIGUE (last run rated 2+ harder than guessed)") }
+            if let p = sig.progression { out.append("Effort signal: PROGRESSION on \(p) runs (rated 2+ easier, 3 of last 4)") }
+        }
+        return out.isEmpty ? nil : out.joined(separator: "\n")
     }
 
     static func clock(_ s: Int) -> String {
@@ -981,6 +1046,43 @@ struct AppleCoachEngine {
         let items = notes.filter { $0.local_date >= today }
         guard !items.isEmpty else { return }
         _ = try? await RunPlanV2Service.putNotes(RunPlanV2NotesRequest(today: today, source: "apple", notes: items, grade_summaries: []))
+    }
+
+    // MARK: Effort reason
+
+    func effortReason(_ effort: RunPlanV2Effort, day: RunPlanV2Day?) async -> String? {
+        guard let f = effort.features, let g = effort.guess else { return nil }
+        let recorder = AppleCoachCallRecorder()
+        guard let m = session(.small, tools: [], instructions: AppleCoachPrompt.instructions) else { return nil }
+        var facts: [String] = []
+        if f.hasHeartRate {
+            if let z = f.avg_hr_zone { facts.append("average heart-rate zone \(z)") }
+            if let p = f.peak_hr_zone { facts.append("peak zone \(p)") }
+            if let d = f.hr_drift_pct { facts.append("heart-rate drift \(d)%") }
+        } else {
+            facts.append("no heart rate (judge from pace and time)")
+        }
+        if let p = f.pace_vs_predicted_pct { facts.append("pace \(abs(p))% \(p < 0 ? "faster" : "slower") than fitness predicts") }
+        if let d = f.duration_s { facts.append("\(d / 60) minutes") }
+        if let w = f.walk_fraction, w > 0.02 { facts.append("\(Int((w * 100).rounded()))% walking") }
+        let prompt = """
+        The runner just finished: \(day.map(AppleCoachPrompt.line) ?? effort.run_type ?? "a run").
+        The app guessed it felt like \(g)/10 (\(effort.guess_label ?? "")) from: \(facts.joined(separator: ", ")).
+        The app's reason: \(effort.reason ?? "none").
+        Write ONE short sentence (under 20 words) saying why it likely felt that way. Use only the facts above. \
+        No numbers that aren't above, no advice, no emoji.
+        """
+        do {
+            let response = try await m.session.respond(to: prompt)
+            let text = response.content.trimmingCharacters(in: .whitespacesAndNewlines)
+            await recorder.upload(kind: .postRun, trigger: .afterRun, model: m.name, input: prompt, output: text,
+                                  error: nil, dailyLimitHit: false, proposalIds: [])
+            guard !text.isEmpty, text.count <= 180, !text.contains("\n") else { return nil }
+            return text
+        } catch {
+            await handleFailure(error, recorder: recorder, kind: .postRun, trigger: .afterRun, model: m.name, input: prompt)
+            return nil
+        }
     }
 
     // MARK: Post-run summary

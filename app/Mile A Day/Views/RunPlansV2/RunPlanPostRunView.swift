@@ -1,8 +1,8 @@
 import SwiftUI
 
 /// After the run (mockup screen 10): the 0–100 grade ring with completion /
-/// on target / consistency bars, distance · time · reps, Flamey's summary,
-/// and proposals for the coming days.
+/// on target / consistency bars, distance · time · reps, How hard was it?
+/// (`RunPlanEffortCard`), Flamey's summary, and proposals for the coming days.
 ///
 /// Embeddable by the live run coach's finish screen: pass the HealthKit
 /// workout UUID string the run synced as. The grade arrives a few seconds
@@ -18,12 +18,20 @@ struct RunPlanPostRunView: View {
     @State private var polling = true
     @State private var busyId: String?
     @State private var error: String?
+    @State private var effortModel: RunPlanEffortModel
+
+    init(workoutId: String, onDone: (() -> Void)? = nil) {
+        self.workoutId = workoutId
+        self.onDone = onDone
+        _effortModel = State(initialValue: RunPlanEffortModel(workoutId: workoutId))
+    }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 if let day {
                     gradeCard(day)
+                    RunPlanEffortCard(model: effortModel)
                     if let summary = aiSummary ?? day.grade?.summary, !summary.isEmpty {
                         FlameyNote(text: summary, tag: aiSummary != nil ? FlameyNote.tag(for: "apple")
                                                                         : FlameyNote.tag(for: day.grade?.summary_source))
@@ -231,6 +239,7 @@ struct RunPlanPostRunView: View {
                 }
             }
         }
+        if let day { await effortModel.load(day: day) }
         await writeSummaryIfNeeded()
     }
 
