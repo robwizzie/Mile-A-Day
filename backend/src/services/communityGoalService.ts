@@ -66,24 +66,132 @@ export const COMMUNITY_GOALS: readonly GoalSeed[] = [
   {
     goalId: "coast-to-coast-2026",
     title: "Coast to Coast",
-    description: "Every mile we walk in December carries us across the country, together.",
+    description:
+      "Every mile we walk in December carries us across the country, together.",
     // About 80% of what the community walked in the 30 days to Nov 6, 2026
     // (3,318 eligible miles), scaled to 31 days. Also the rough width of the US.
     targetMiles: 2800,
     startsOn: "2026-12-01",
     endsOn: "2026-12-31",
     checkpoints: [
-      { percent: 20, name: "Mojave Desert", fact: "Home of Death Valley, the lowest point in North America." },
-      { percent: 40, name: "Rocky Mountains", fact: "The Rockies run about 3,000 miles through North America." },
-      { percent: 60, name: "Mississippi River", fact: "The Mississippi runs about 2,300 miles to the Gulf of Mexico." },
-      { percent: 80, name: "Appalachian Mountains", fact: "The Appalachians are among the oldest mountains on Earth." },
-      { percent: 100, name: "Atlantic Ocean", fact: "Coast to coast, one walk at a time." },
+      {
+        percent: 20,
+        name: "Mojave Desert",
+        fact: "Home of Death Valley, the lowest point in North America.",
+      },
+      {
+        percent: 40,
+        name: "Rocky Mountains",
+        fact: "The Rockies run about 3,000 miles through North America.",
+      },
+      {
+        percent: 60,
+        name: "Mississippi River",
+        fact: "The Mississippi runs about 2,300 miles to the Gulf of Mexico.",
+      },
+      {
+        percent: 80,
+        name: "Appalachian Mountains",
+        fact: "The Appalachians are among the oldest mountains on Earth.",
+      },
+      {
+        percent: 100,
+        name: "Atlantic Ocean",
+        fact: "Coast to coast, one walk at a time.",
+      },
     ],
     rewardTiers: [
-      { days: 5, badge_id: "community_coast_to_coast_walker", item_id: "coast_compass", name: "Compass Pendant", rarity: "rare" },
-      { days: 15, badge_id: "community_coast_to_coast_2026", item_id: "trail_cap", name: "Explorer Hat", rarity: "epic" },
-      { days: 25, badge_id: "community_coast_to_coast_trailblazer", item_id: "trailblazer", name: "Trailblazer Flamey", rarity: "legendary" },
-      { days: 31, badge_id: "community_coast_to_coast_perfect", item_id: "horizon_wings", name: "Horizon Wings", rarity: "mythic" },
+      {
+        days: 5,
+        badge_id: "community_coast_to_coast_walker",
+        item_id: "coast_compass",
+        name: "Compass Pendant",
+        rarity: "rare",
+      },
+      {
+        days: 15,
+        badge_id: "community_coast_to_coast_2026",
+        item_id: "trail_cap",
+        name: "Explorer Hat",
+        rarity: "epic",
+      },
+      {
+        days: 25,
+        badge_id: "community_coast_to_coast_trailblazer",
+        item_id: "trailblazer",
+        name: "Trailblazer Flamey",
+        rarity: "legendary",
+      },
+      {
+        days: 31,
+        badge_id: "community_coast_to_coast_perfect",
+        item_id: "horizon_wings",
+        name: "Horizon Wings",
+        rarity: "mythic",
+      },
+    ],
+  },
+  {
+    // The New Year push: a resolution everyone walks together. Lower than
+    // December's target on purpose, so a January wave of new streakers can
+    // finish it and everyone who walked gets the Streak Assist. Medals only
+    // (no Flamey item yet); tiers can still change until Jan 1.
+    goalId: "route-66-2027",
+    title: "Route 66",
+    description:
+      "Every mile we walk in January takes us down Route 66, from Chicago to Santa Monica, together.",
+    targetMiles: 2448,
+    startsOn: "2027-01-01",
+    endsOn: "2027-01-31",
+    checkpoints: [
+      {
+        percent: 20,
+        name: "Oklahoma",
+        fact: "Oklahoma has more miles of Route 66 than any other state.",
+      },
+      {
+        percent: 40,
+        name: "Texas Panhandle",
+        fact: "Route 66 was established in 1926.",
+      },
+      {
+        percent: 60,
+        name: "New Mexico",
+        fact: "Near the Continental Divide, Route 66 climbs above 7,000 feet.",
+      },
+      {
+        percent: 80,
+        name: "Arizona",
+        fact: "Route 66 runs through Petrified Forest National Park.",
+      },
+      {
+        percent: 100,
+        name: "Santa Monica Pier",
+        fact: "Route 66 ran about 2,448 miles, one walk at a time.",
+      },
+    ],
+    rewardTiers: [
+      {
+        days: 7,
+        badge_id: "community_route_66_starter",
+        item_id: null,
+        name: "Fresh Start",
+        rarity: "rare",
+      },
+      {
+        days: 15,
+        badge_id: "community_route_66_2027",
+        item_id: null,
+        name: "Route 66",
+        rarity: "epic",
+      },
+      {
+        days: 31,
+        badge_id: "community_route_66_perfect",
+        item_id: null,
+        name: "Resolution Kept",
+        rarity: "legendary",
+      },
     ],
   },
 ];
@@ -142,7 +250,9 @@ const TODAY_CACHE_MS = 60_000;
 const todayCache = new Map<string, { until: number; count: number }>();
 
 function addDays(day: string, n: number): string {
-  return new Date(Date.parse(`${day}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
+  return new Date(Date.parse(`${day}T00:00:00Z`) + n * 86_400_000)
+    .toISOString()
+    .slice(0, 10);
 }
 
 /**
@@ -151,7 +261,9 @@ function addDays(day: string, n: number): string {
  * UTC today can be anyone's today, so the read stays on a three-day slice of
  * the index. A count, never names, and computed live, so it resets daily.
  */
-export async function walkersToday(goal: Pick<GoalRow, "goal_id" | "starts_on" | "ends_on">): Promise<number> {
+export async function walkersToday(
+  goal: Pick<GoalRow, "goal_id" | "starts_on" | "ends_on">,
+): Promise<number> {
   const hit = todayCache.get(goal.goal_id);
   if (hit && hit.until > Date.now()) return hit.count;
   const utc = new Date().toISOString().slice(0, 10);
@@ -247,7 +359,8 @@ export async function getCommunityGoalForUser(userId: string) {
 
   const target = Number(goal.target_miles);
   const total = Number(goal.total_miles ?? 0);
-  const percent = target > 0 ? Math.min(100, Math.floor((total / target) * 100)) : 0;
+  const percent =
+    target > 0 ? Math.min(100, Math.floor((total / target) * 100)) : 0;
   const state = goalState(goal, today);
   const daysLeft = Math.max(0, daysBetween(today, goal.ends_on) + 1);
   const held = new Set(earned.map((r) => r.badge_id));
@@ -266,9 +379,18 @@ export async function getCommunityGoalForUser(userId: string) {
       /** Null outside an active goal. Additive: older apps ignore it. */
       walkers_today: walkingToday,
       percent,
-      checkpoints: goal.checkpoints.map((c) => ({ ...c, reached: percent >= c.percent })),
-      rewards: goal.reward_tiers.map((t) => ({ ...t, earned: held.has(t.badge_id) })),
-      pace: state === "active" ? goalPace(goal, total, today, goal.walkers ?? 0) : null,
+      checkpoints: goal.checkpoints.map((c) => ({
+        ...c,
+        reached: percent >= c.percent,
+      })),
+      rewards: goal.reward_tiers.map((t) => ({
+        ...t,
+        earned: held.has(t.badge_id),
+      })),
+      pace:
+        state === "active"
+          ? goalPace(goal, total, today, goal.walkers ?? 0)
+          : null,
     },
     my_miles: Number(mine[0]?.miles ?? 0),
     my_days: mine[0]?.days ?? 0,
@@ -288,15 +410,30 @@ export function goalPace(
 ) {
   const target = Number(goal.target_miles);
   const length = daysBetween(goal.starts_on, goal.ends_on) + 1;
-  const elapsed = Math.min(length, Math.max(1, daysBetween(goal.starts_on, today) + 1));
+  const elapsed = Math.min(
+    length,
+    Math.max(1, daysBetween(goal.starts_on, today) + 1),
+  );
   const daysLeft = Math.max(1, daysBetween(today, goal.ends_on) + 1);
   const expected = (target * elapsed) / length;
   const behind = total < expected * BEHIND_RATIO;
   return {
-    status: behind ? ("behind" as const) : total >= expected ? ("ahead" as const) : ("on_track" as const),
+    status: behind
+      ? ("behind" as const)
+      : total >= expected
+        ? ("ahead" as const)
+        : ("on_track" as const),
     miles_per_day_needed: Math.max(0, Math.ceil((target - total) / daysLeft)),
     needs_more_walkers: behind && daysLeft <= INVITE_NUDGE_DAYS,
-    ...goalProjection({ target, total, length, elapsed, daysLeft, walkers, startsOn: goal.starts_on }),
+    ...goalProjection({
+      target,
+      total,
+      length,
+      elapsed,
+      daysLeft,
+      walkers,
+      startsOn: goal.starts_on,
+    }),
   };
 }
 
@@ -314,27 +451,42 @@ function goalProjection(g: {
   walkers: number;
   startsOn: string;
 }) {
-  const none = { projected_miles: null, projected_finish: null, walkers_needed: null };
+  const none = {
+    projected_miles: null,
+    projected_finish: null,
+    walkers_needed: null,
+  };
   if (g.elapsed < PROJECTION_MIN_DAYS || g.total <= 0) return none;
   const perDay = g.total / g.elapsed;
   const projected = Math.round(perDay * g.length);
   if (projected >= g.target) {
-    const finish = new Date(Date.parse(g.startsOn) + (Math.ceil(g.target / perDay) - 1) * 86_400_000);
-    return { ...none, projected_miles: projected, projected_finish: finish.toISOString().slice(0, 10) };
+    const finish = new Date(
+      Date.parse(g.startsOn) + (Math.ceil(g.target / perDay) - 1) * 86_400_000,
+    );
+    return {
+      ...none,
+      projected_miles: projected,
+      projected_finish: finish.toISOString().slice(0, 10),
+    };
   }
   const shortPerDay = (g.target - g.total) / g.daysLeft - perDay;
   const perWalker = g.walkers > 0 ? perDay / g.walkers : 0;
   return {
     ...none,
     projected_miles: projected,
-    walkers_needed: perWalker > 0 ? Math.max(1, Math.ceil(shortPerDay / perWalker)) : null,
+    walkers_needed:
+      perWalker > 0 ? Math.max(1, Math.ceil(shortPerDay / perWalker)) : null,
   };
 }
 
 /** The running goal on a day, for anything that mentions it in passing. */
-export async function activeGoalForDay(day: string): Promise<{ goal_id: string; title: string } | null> {
+export async function activeGoalForDay(
+  day: string,
+): Promise<{ goal_id: string; title: string } | null> {
   const goal = await goalForDay(day);
-  return goal && goalState(goal, day) === "active" ? { goal_id: goal.goal_id, title: goal.title } : null;
+  return goal && goalState(goal, day) === "active"
+    ? { goal_id: goal.goal_id, title: goal.title }
+    : null;
 }
 
 /**
@@ -347,7 +499,8 @@ export async function getPublicCommunityGoal() {
   if (!goal) return { goal: null };
   const target = Number(goal.target_miles);
   const total = Number(goal.total_miles ?? 0);
-  const percent = target > 0 ? Math.min(100, Math.floor((total / target) * 100)) : 0;
+  const percent =
+    target > 0 ? Math.min(100, Math.floor((total / target) * 100)) : 0;
   const state = goalState(goal, today);
   const walkingToday = state === "active" ? await walkersToday(goal) : null;
   return {
@@ -364,9 +517,21 @@ export async function getPublicCommunityGoal() {
       walkers: goal.walkers ?? 0,
       walkers_today: walkingToday,
       percent,
-      checkpoints: goal.checkpoints.map((c) => ({ percent: c.percent, name: c.name, reached: percent >= c.percent })),
-      rewards: goal.reward_tiers.map((t) => ({ days: t.days, name: t.name, item_id: t.item_id, rarity: t.rarity })),
-      pace: goalState(goal, today) === "active" ? goalPace(goal, total, today, goal.walkers ?? 0) : null,
+      checkpoints: goal.checkpoints.map((c) => ({
+        percent: c.percent,
+        name: c.name,
+        reached: percent >= c.percent,
+      })),
+      rewards: goal.reward_tiers.map((t) => ({
+        days: t.days,
+        name: t.name,
+        item_id: t.item_id,
+        rarity: t.rarity,
+      })),
+      pace:
+        goalState(goal, today) === "active"
+          ? goalPace(goal, total, today, goal.walkers ?? 0)
+          : null,
     },
   };
 }
@@ -381,7 +546,9 @@ export async function goalsToRefresh(): Promise<GoalRow[]> {
 }
 
 /** Recomputes a goal's total. The stored number only ever rises. */
-export async function refreshTotals(goal: Pick<GoalRow, "goal_id" | "starts_on" | "ends_on">): Promise<void> {
+export async function refreshTotals(
+  goal: Pick<GoalRow, "goal_id" | "starts_on" | "ends_on">,
+): Promise<void> {
   await db.query(
     `WITH days AS (${goalDaysSql()}),
           sums AS (
@@ -413,8 +580,14 @@ export async function goalsDueForRewards(): Promise<GoalRow[]> {
  * also gets a Streak Assist. Returns who took part and what they earned.
  */
 export async function grantRewards(
-  goal: Pick<GoalRow, "goal_id" | "starts_on" | "ends_on" | "reward_tiers" | "target_miles">,
-): Promise<{ walkers: Array<{ user_id: string; days: number }>; reached: boolean }> {
+  goal: Pick<
+    GoalRow,
+    "goal_id" | "starts_on" | "ends_on" | "reward_tiers" | "target_miles"
+  >,
+): Promise<{
+  walkers: Array<{ user_id: string; days: number }>;
+  reached: boolean;
+}> {
   const claimed = await db.query(
     `UPDATE community_goals SET rewards_granted_at = NOW()
       WHERE goal_id = $1 AND rewards_granted_at IS NULL RETURNING goal_id`,
@@ -439,7 +612,8 @@ export async function grantRewards(
       `SELECT total_miles FROM community_goal_totals WHERE goal_id = $1`,
       [goal.goal_id],
     );
-    const reached = Number(totals[0]?.total_miles ?? 0) >= Number(goal.target_miles);
+    const reached =
+      Number(totals[0]?.total_miles ?? 0) >= Number(goal.target_miles);
     const walkers = await db.query<{ user_id: string; days: number }>(
       `SELECT d.user_id, COUNT(*) FILTER (WHERE d.miles >= ${STREAK_QUALIFYING_MILES})::int AS days
          FROM (${goalDaysSql()}) d
@@ -450,13 +624,20 @@ export async function grantRewards(
     return { walkers, reached };
   } catch (error) {
     // Release the claim so the next tick tries again.
-    await db.query(`UPDATE community_goals SET rewards_granted_at = NULL WHERE goal_id = $1`, [goal.goal_id]);
+    await db.query(
+      `UPDATE community_goals SET rewards_granted_at = NULL WHERE goal_id = $1`,
+      [goal.goal_id],
+    );
     throw error;
   }
 }
 
 /** Sends once per person per kind. False when it already went out. */
-export async function claimPush(goalId: string, userId: string, kind: string): Promise<boolean> {
+export async function claimPush(
+  goalId: string,
+  userId: string,
+  kind: string,
+): Promise<boolean> {
   const rows = await db.query(
     `INSERT INTO community_goal_push_log (goal_id, user_id, kind) VALUES ($1, $2, $3)
      ON CONFLICT (goal_id, user_id, kind) DO NOTHING RETURNING user_id`,
