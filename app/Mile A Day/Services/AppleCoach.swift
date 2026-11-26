@@ -32,7 +32,7 @@ final class AppleCoach {
     /// still says `.available` and the first prompt is a FATAL ERROR, so it
     /// stays off until the entitlement is on the App ID and in
     /// `Mile A Day.entitlements`. Off = the on-device model does every job.
-    static let privateCloudComputeEntitled = false
+    static let privateCloudComputeEntitled = true
 
     private var running = false
     private var lastPass: [String: Date] = [:]
